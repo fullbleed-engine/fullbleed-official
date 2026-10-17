@@ -6,6 +6,12 @@ geometry; table cells share that behavior. Zero-blur shadows stay vector, clear
 edges avoid faint clipping fringes, and native previews preserve off-page blur
 support before applying the destination clip.
 
+Explicit font choices now replace an earlier variable-based font declaration.
+This fixes Bootstrap cards ignoring a document's `Theme` font and also covers
+class rules, root/part overrides, inline declarations and font shorthands.
+Installed-wheel checks inspect the embedded font program and both static HTML
+export modes. Documents that previously received the wrong font can reflow.
+
 The experimental component API keeps its owned styles, literal `class_name`
 selectors, named parts and `to_html(include_styles=True/False)` exports. Bootstrap
 components remain static in PDFs and HTML. See the

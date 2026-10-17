@@ -16807,6 +16807,9 @@ fn apply_delta(
         computed.pending_background_color_var = Some(var.clone());
     }
     if let Some(font_name) = &delta.font_name {
+        // A winning concrete declaration must discard a lower-priority var()
+        // expression before pending substitutions run after the cascade.
+        computed.pending_font_name_var = None;
         match font_name {
             FontSpec::Value(stack) => {
                 if !stack.is_empty() {
@@ -44267,6 +44270,75 @@ mod tests {
         assert_eq!(child.font_name.as_ref(), "Liberation Serif");
         assert_eq!(fallback.font_name.as_ref(), "Liberation Serif");
         assert_eq!(initial.font_name.as_ref(), "Helvetica");
+    }
+
+    #[test]
+    fn font_family_cascade_concrete_replaces_pending_variable() {
+        for (css, inline) in [
+            (
+                ".x { --face: Courier; font-family: var(--face); } .x { font-family: Inter; }",
+                None,
+            ),
+            (
+                ".x { font-family: Inter; } div { --face: Courier; font-family: var(--face); }",
+                None,
+            ),
+            (
+                ".x { font-family: Inter !important; } .x { --face: Courier; font-family: var(--face); }",
+                None,
+            ),
+            (
+                ".x { --face: Courier; font-family: var(--face); }",
+                Some("font-family: Inter"),
+            ),
+            (
+                ".x { --face: Courier; font-family: var(--face); } .x { font: 12px Inter; }",
+                None,
+            ),
+        ] {
+            let resolver = StyleResolver::new(css);
+            let root = resolver.default_style();
+            let style = resolver.compute_style(&element("div", None, &["x"]), &root, inline, &[]);
+            assert_eq!(
+                style.font_name.as_ref(),
+                "Inter",
+                "{css}; inline={inline:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn font_family_cascade_keywords_replace_pending_variable() {
+        for (keyword, expected) in [
+            ("inherit", "Liberation Serif"),
+            ("unset", "Liberation Serif"),
+            ("initial", "Helvetica"),
+        ] {
+            let css = format!(
+                ".parent {{ font-family: serif; }} .child {{ --face: Courier; font-family: var(--face); }} .child {{ font-family: {keyword}; }}"
+            );
+            let resolver = StyleResolver::new(&css);
+            let root = resolver.default_style();
+            let parent_info = element("div", None, &["parent"]);
+            let parent = resolver.compute_style(&parent_info, &root, None, &[]);
+            let child = resolver.compute_style(
+                &element("span", None, &["child"]),
+                &parent,
+                None,
+                &[parent_info],
+            );
+            assert_eq!(child.font_name.as_ref(), expected, "{keyword}");
+        }
+    }
+
+    #[test]
+    fn font_family_cascade_later_variable_still_wins() {
+        let resolver = StyleResolver::new(
+            ".x { font-family: Inter; } .x { --face: Courier; font-family: var(--face); }",
+        );
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+        assert_eq!(style.font_name.as_ref(), "Courier");
     }
 
     #[test]

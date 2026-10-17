@@ -128,6 +128,30 @@ This returns a new component value; the reusable defaults are unchanged.
 HTML export. `include_styles=False` omits them while keeping the content,
 structure and authored classes for the host page to style.
 
+Set inherited document typography with `Theme(text=style(...))`. For PDF output,
+register the corresponding font file with `Renderer`; a CSS family name alone
+does not load a font. For example, using Fullbleed's bundled Inter font:
+
+```python
+from importlib.resources import files
+from fullbleed.ui.experimental import Renderer, Theme
+
+document = Document(
+    receipt,
+    theme=Theme(text=style(font_family="Inter", font_size="11pt")),
+)
+renderer = Renderer(font_files=[
+    str(files("fullbleed_assets").joinpath("fonts/Inter-Variable.ttf")),
+])
+pdf = document.render_pdf(renderer)
+```
+
+The alpha 3 candidate fixes an earlier cascade bug that could make Bootstrap's
+variable-based default font override this theme. Styled HTML carries the CSS
+family declaration; it does not embed the renderer's font files. A browser host
+must provide that family itself, for example through its own `@font-face` rule.
+Unstyled HTML leaves both typography and other styling to the host.
+
 ## Layout and data tables
 
 ```python
