@@ -189,9 +189,23 @@ pub(crate) fn rasterize_filtered_form(
         let numerator = i128::from(coordinate.to_milli_i64()) * i128::from(dpi);
         (-(-numerator).div_euclid(72_000)) as i64
     };
-    let minimum_surface_pixel = -surface_guard_px;
-    let maximum_surface_x = full_width_px + surface_guard_px;
-    let maximum_surface_y = full_height_px + surface_guard_px;
+    // A shadow's off-page source can still contribute to its visible blur.
+    // Retain one kernel-support margin outside the page rather than allocating
+    // an arbitrarily large source whose distant pixels cannot contribute.
+    let page_guard_px = if css_shadow {
+        let sx = width.to_f32() / form_width.to_f32().max(0.001);
+        let sy = height.to_f32() / form_height.to_f32().max(0.001);
+        let sigma =
+            filter.blur_radius.to_f32().max(0.0) * (sx.abs() + sy.abs()) * 0.5 * dpi as f32 / 72.0;
+        ((sigma * 3.0).ceil() as i64)
+            .saturating_add(2)
+            .max(surface_guard_px)
+    } else {
+        surface_guard_px
+    };
+    let minimum_surface_pixel = -page_guard_px;
+    let maximum_surface_x = full_width_px.saturating_add(page_guard_px);
+    let maximum_surface_y = full_height_px.saturating_add(page_guard_px);
     let left_px = (coordinate_to_floor_pixel(x) - surface_guard_px)
         .clamp(minimum_surface_pixel, maximum_surface_x);
     let top_px = (coordinate_to_floor_pixel(y) - surface_guard_px)
@@ -203,8 +217,17 @@ pub(crate) fn rasterize_filtered_form(
     if left_px >= right_px || top_px >= bottom_px {
         return Ok(None);
     }
-    let width_px = (right_px - left_px) as u32;
-    let height_px = (bottom_px - top_px) as u32;
+    let dimension = |start: i64, end: i64| {
+        end.checked_sub(start)
+            .and_then(|size| u32::try_from(size).ok())
+            .ok_or_else(|| {
+                FullBleedError::InvalidConfiguration(
+                    "filtered-form surface exceeds raster dimensions".to_string(),
+                )
+            })
+    };
+    let width_px = dimension(left_px, right_px)?;
+    let height_px = dimension(top_px, bottom_px)?;
     let pixel_to_pt = |pixel: i64| -> Pt {
         let numerator = i128::from(pixel) * 72_000;
         let adjustment = if numerator >= 0 {
@@ -1400,9 +1423,6 @@ fn render_commands(
                 let Some(form) = forms.get(resource_id).cloned() else {
                     continue;
                 };
-                let Some(mut offscreen) = Pixmap::new(pixmap.width(), pixmap.height()) else {
-                    continue;
-                };
                 let draw_y = page_height_pt - y.to_f32() - height.to_f32();
                 let sx = if form.width.to_f32() > 0.0 {
                     width.to_f32() / form.width.to_f32()
@@ -1419,6 +1439,46 @@ fn render_commands(
                 form_state.blend_mode = MixBlendMode::Normal;
                 form_state.transform = form_state.transform.post_concat(form_ts);
                 let filter_transform = base_transform.pre_concat(form_state.transform);
+                // CSS shadows are clipped after filtering. Inheriting the
+                // destination mask here removes caster pixels before the blur
+                // and applies antialiased clip coverage twice. A device-space
+                // guard also retains source pixels just outside the page.
+                let shadow_padding = if *css_shadow
+                    && filter.operations.is_empty()
+                    && filter.drop_shadows.is_empty()
+                {
+                    ((backdrop_blur_sigma_px(filter.blur_radius, filter_transform) * 3.0).ceil()
+                        as u32)
+                        .saturating_add(2)
+                } else {
+                    0
+                };
+                if shadow_padding > i32::MAX as u32 {
+                    return Err(FullBleedError::InvalidConfiguration(
+                        "CSS shadow exceeds raster dimensions".to_string(),
+                    ));
+                }
+                let Some(offscreen_width) =
+                    pixmap.width().checked_add(shadow_padding.saturating_mul(2))
+                else {
+                    continue;
+                };
+                let Some(offscreen_height) = pixmap
+                    .height()
+                    .checked_add(shadow_padding.saturating_mul(2))
+                else {
+                    continue;
+                };
+                let Some(mut offscreen) = Pixmap::new(offscreen_width, offscreen_height) else {
+                    continue;
+                };
+                let source_transform = base_transform.post_concat(Transform::from_translate(
+                    shadow_padding as f32,
+                    shadow_padding as f32,
+                ));
+                if *css_shadow {
+                    form_state.clip_mask = None;
+                }
                 let mut form_stack: Vec<RasterState> = Vec::new();
                 let mut form_path = PathBuilder::new();
                 let mut form_has_path = false;
@@ -1427,7 +1487,7 @@ fn render_commands(
                     form.height.to_f32(),
                     form.width.to_f32(),
                     &form.commands,
-                    base_transform,
+                    source_transform,
                     &mut form_state,
                     &mut form_stack,
                     &mut form_path,
@@ -1444,6 +1504,7 @@ fn render_commands(
                     filter,
                     filter_transform,
                     *css_shadow,
+                    shadow_padding,
                 );
                 if output_bounds.is_some() {
                     state.filtered_output_bounds = output_bounds;
@@ -1980,6 +2041,7 @@ fn apply_foreground_filter_group(
     filter: &PaintFilterSpec,
     device_transform: Transform,
     css_shadow: bool,
+    source_padding: u32,
 ) -> Option<PixelBounds> {
     let width = offscreen.width();
     let height = offscreen.height();
@@ -2047,8 +2109,8 @@ fn apply_foreground_filter_group(
     paint.blend_mode = sk_blend_mode(state.blend_mode);
     draw_pixmap_blended(
         pixmap,
-        0,
-        0,
+        -(source_padding as i32),
+        -(source_padding as i32),
         filtered_pixmap.as_ref(),
         &paint,
         Transform::identity(),
@@ -4883,6 +4945,48 @@ mod tests {
             let [r, g, b, _a] = p.0;
             !(r == 255 && g == 255 && b == 255)
         })
+    }
+
+    #[test]
+    fn css_shadow_preserves_off_page_source_and_clips_after_blurring() {
+        use crate::canvas::Canvas;
+        use crate::types::Size;
+
+        let extent = Pt::from_f32(104.0);
+        let mut source = Canvas::new(Size {
+            width: extent,
+            height: extent,
+        });
+        source.set_fill_color(Color::rgb(1.0, 0.0, 0.0));
+        source.draw_rect(Pt::ZERO, Pt::ZERO, extent, extent);
+        let commands = source.finish().pages[0].commands.clone();
+        let page = Pt::from_f32(64.0);
+        let mut canvas = Canvas::new(Size {
+            width: page,
+            height: page,
+        });
+        canvas.define_form("shadow".to_string(), extent, extent, commands);
+        canvas.clip_rect(Pt::ZERO, Pt::ZERO, Pt::from_f32(32.0), page);
+        let mut filter = PaintFilterSpec::identity();
+        filter.blur_radius = Pt::from_f32(6.0);
+        canvas.draw_css_shadow_filtered_form(
+            Pt::from_f32(-20.0),
+            Pt::from_f32(-20.0),
+            extent,
+            extent,
+            "shadow".to_string(),
+            filter,
+        );
+        let pngs = document_to_png_pages(&canvas.finish(), 72, None, false).unwrap();
+        let image = crate::image_native::load_from_memory(&pngs[0])
+            .unwrap()
+            .into_rgba8();
+        // The source extends over three sigma beyond every visible point.
+        // Neither the page edge nor the output clip may fade this solid field.
+        for (x, y) in [(1, 1), (1, 62), (30, 32)] {
+            assert_eq!(image.get_pixel(x, y).0, [255, 0, 0, 255], "{x},{y}");
+        }
+        assert_eq!(image.get_pixel(33, 32).0, [255, 255, 255, 255]);
     }
 
     #[test]
