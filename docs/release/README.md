@@ -4,6 +4,19 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## Latest patch releases
+
+- `docs/release/2.5.28-runbook.md`: signed inset shadows, unshadowed edges and retained comparison differences.
+- `docs/release/2.5.27-runbook.md`: inline SVG document styling and group compositing.
+- `docs/release/2.5.26-runbook.md`: embedded stylesheets in complete HTML documents.
+- `docs/release/2.5.25-runbook.md`: Python component authoring and installed-output checks.
+
+## Experimental Python component releases
+
+- `docs/release/2.6.0a3-runbook.md`: integrate stable inset-shadow fixes and authored-card export checks.
+- `docs/release/2.6.0a2-runbook.md`: integrate stable SVG styling and named-part checks.
+- `docs/release/2.6.0a1-runbook.md`: initial opt-in alpha, release policy and required gates.
+
 ## 2.5.10 Documents
 
 - `docs/release/2.5.10-runbook.md`: inline intrinsic-width correction and retained checks.
@@ -97,8 +110,8 @@ engine internals.
 
 - `docs/release/2.2.3-runbook.md`: historical Cargo, PyPI, wheel-matrix, and GitHub
   release procedure. `v2.2.4` supersedes it with compiled content reflow.
-- `docs/css-coverage.md`: current 1,642-pass, zero-failure IronPress parity evidence and
-  remaining reference disputes.
+- `docs/css-coverage.md`: current corpus results, retained historical closeouts and
+  remaining comparison differences.
 - `docs/performance-architecture.md`: compiled variable-data coordinate-state support and the
   remaining form-XObject/vector-compiler boundary.
 

@@ -155,6 +155,7 @@ jobs:
           python -I tools/smoke_component_recipes.py --out target/release-components/recipes
           python -I tools/smoke_component_parts.py --out target/release-components/parts
           python -I tools/smoke_component_svg.py --out target/release-components/svg
+          python -I tools/smoke_component_inset_shadows.py --out target/release-components/inset-shadows
           python -I tools/smoke_component_bootstrap.py --out target/release-components/bootstrap
           python -I tools/smoke_component_typing.py --out target/release-components/typing.json
           npm install --ignore-scripts --no-package-lock --no-save --no-audit --no-fund --prefix target/component-editor-tools pyright@1.1.414
@@ -198,6 +199,17 @@ jobs:
 
       - name: Verify inline SVG cascade and group opacity in release output
         run: python -I tools/smoke_svg_styles.py --out target/svg-styles
+
+      - name: Verify inset shadow geometry and unshadowed edges in release output
+        run: python -I tools/smoke_inset_shadows.py --pdfium --out target/inset-shadows
+
+      - name: Retain inset shadow PDFs and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-inset-shadows
+          path: target/inset-shadows/
+          if-no-files-found: error
 
       - name: Retain SVG cascade release PDFs and independent previews
         if: always()

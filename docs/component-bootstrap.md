@@ -5,13 +5,14 @@ The experimental Python kit covers the 23 component families in **Bootstrap
 utility stylesheet. It uses the repository's existing, unmodified MIT-licensed
 stylesheet. Components carry that dependency; a document includes it once.
 
-This is the experimental `2.6.0a2` Python surface, under
-`fullbleed.ui.experimental.bootstrap`. Use an explicit alpha install in a virtual
-environment: `python -m pip install --pre "fullbleed==2.6.0a2"`. For an unpublished
+This branch prepares the experimental `2.6.0a3` Python surface, under
+`fullbleed.ui.experimental.bootstrap`, including the stable 2.5.28 inset-shadow
+corrections. Once publication is verified, use an explicit alpha install in a
+virtual environment: `python -m pip install --pre "fullbleed==2.6.0a3"`. For an unpublished
 checkout, build with `python build_backend/fullbleed_build_backend.py wheel --out
 dist` and install the printed wheel path. The
-[alpha runbook](release/2.6.0a2-runbook.md) records the gates and publication scope.
-This kit is absent from the stable PyPI 2.5.27 wheel and the older
+[alpha runbook](release/2.6.0a3-runbook.md) records the gates and publication scope.
+This kit is absent from the stable PyPI 2.5.28 wheel and the older
 `component-preview-f88cced` download. The established `fullbleed.ui` API remains
 available.
 
@@ -107,6 +108,25 @@ selector rules. Explicit root styles are inline declarations. Normal CSS
 specificity still applies: Bootstrap utility declarations using `!important`
 can override a normal inline declaration. Avoid giving the same property
 conflicting utility and inline values.
+
+Use `styled(...)` for reusable defaults and `.with_parts(...)` for a component's
+public sections. `style(...)` checks a documented vocabulary of common
+properties; it is not the engine's complete CSS vocabulary. For additional
+declarations, compose the explicit `css(...)` helper:
+
+```python
+from fullbleed.ui.experimental import css, styled
+
+ReceiptCard = styled(bs.Card, border_color="#d2e0da", border_radius="8px")
+receipt = ReceiptCard("Payment received.", title="Receipt").with_style(
+    css("box-shadow: inset 4px 0 0 0 #205b47;")
+).with_parts(body=style(padding="1.5rem"))
+```
+
+This returns a new component value; the reusable defaults are unchanged.
+`include_styles=True` collects these declarations and Bootstrap CSS into the
+HTML export. `include_styles=False` omits them while keeping the content,
+structure and authored classes for the host page to style.
 
 ## Layout and data tables
 

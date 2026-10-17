@@ -49,6 +49,13 @@ compile to the same HTML/CSS print engine. Follow the
 [designed component invoice](examples/components) with explicit fonts, reusable
 rows, paid/unpaid states and PNG previews.
 
+The [opt-in Python component alpha](https://docs.fullbleed.dev/guides/bootstrap-components-preview/)
+adds components that carry their styles, named customization parts, column-based
+tables, and static Bootstrap 5.0.0 components. Export HTML with styles included or
+removed, or render the same document as a PDF. The guide explains `class_name`
+and includes a runnable kit. This API is experimental; follow its explicit
+prerelease installation instructions.
+
 For JavaScript, [compose documents with functions or JSX/TSX](https://docs.fullbleed.dev/guides/javascript-components/).
 The [React starter](https://docs.fullbleed.dev/guides/react-pdf/) connects typed
 document components to editable data, live PDF previews and downloads. It
@@ -56,13 +63,14 @@ includes the complete component and style source for customization.
 
 ## Try the Python component alpha
 
-The **2.6.0a2 prerelease** adds components that carry their appearance, a static
+This branch prepares the **2.6.0a3 prerelease**, including the released 2.5.28
+inset-shadow corrections. It offers components that carry their appearance, a static
 Bootstrap 5.0.0 kit, and HTML export with or without styles. This API lives under
 `fullbleed.ui.experimental`; names and behavior may change. Install the alpha
-explicitly in a virtual environment:
+explicitly in a virtual environment after its release gates and publication finish:
 
 ```console
-python -m pip install --pre "fullbleed==2.6.0a2"
+python -m pip install --pre "fullbleed==2.6.0a3"
 ```
 
 Save this as `order.py` and run `python order.py`:
@@ -96,7 +104,7 @@ HTML export; no Bootstrap JavaScript is included.
 Continue with the [Bootstrap and styling guide](docs/component-bootstrap.md),
 the [reusable component guide](examples/component_recipes/README.md), or the
 [report and catalog](examples/component_bootstrap). The
-[alpha runbook](docs/release/2.6.0a2-runbook.md) records the release gates and
+[alpha runbook](docs/release/2.6.0a3-runbook.md) records the release gates and
 limits. For an unpublished checkout, build a wheel using
 `python build_backend/fullbleed_build_backend.py wheel --out dist` and install
 the returned path. Ordinary `pip install fullbleed` selects the stable channel.
@@ -111,10 +119,11 @@ the returned path. Ordinary `pip install fullbleed` selects the stable channel.
 | Browser JavaScript | `npm install --save-exact fullbleed@0.7.0` | [PDF components and JSX](https://docs.fullbleed.dev/guides/javascript-components/) · [React starter](https://docs.fullbleed.dev/guides/react-pdf/) · [HTML/CSS starter](https://docs.fullbleed.dev/guides/browser-pdf/) |
 | C# / .NET | `dotnet add package FullBleed.DotNet --version 0.2.0` | [C# components and styles](https://docs.fullbleed.dev/guides/csharp-components/) · [NuGet quickstart](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
-JavaScript package 0.7.0 adds [static HTML export with or without styles](https://docs.fullbleed.dev/guides/javascript-components/#export-html-with-or-without-styles).
-The downloadable component project and React starter remain pinned to 0.6.0;
-the HTML/CSS Node.js quickstart and JavaScript, Vue and Next.js starters use
-0.5.1. All three package versions wrap engine 2.5.24 and generate ordinary PDFs and previews. Import
+The current JavaScript package is 0.7.0, including
+[styled and unstyled component HTML export](https://docs.fullbleed.dev/guides/javascript-components/#export-html-with-or-without-styles).
+The downloadable component invoice and React starter retain their tested 0.6.0
+pin; the HTML/CSS Node.js quickstart and JavaScript, Vue and Next.js starters use
+0.5.1. These package versions wrap engine 2.5.24 and generate ordinary PDFs and previews. Import
 `fullbleed` in Node or `fullbleed/browser` in a web app. Node applications can use
 a [bounded render queue](https://docs.fullbleed.dev/guides/node-render-queue/)
 and optional process isolation.
@@ -397,7 +406,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.6.0a2-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.6.0a3-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:
@@ -1046,6 +1055,14 @@ Bootstrap notes:
 ## Validated CSS Coverage
 
 For the full, maintained coverage statement, see `docs/css-coverage.md`.
+
+The latest retained full-corpus result for the source carried into 2.5.28 is
+**1,620 PASS, 24 FAIL and 18 REFERENCE-DISPUTED** across 1,662 cases.
+The [independent run](https://github.com/fullbleed-engine/fullbleed-official/actions/runs/38992175451)
+keeps its failed conclusion. The [release runbook](docs/release/2.5.28-runbook.md)
+records the reviewed inset-shadow changes and remaining comparison differences.
+This is scoped source verification, not complete CSS parity or proof of a
+published package. Earlier dated results below are historical, not the current gate.
 
 Summary as of May 19, 2026:
 

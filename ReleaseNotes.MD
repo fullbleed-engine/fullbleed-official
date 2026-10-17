@@ -1,3 +1,24 @@
+# Fullbleed Release Notes - 2.6.0a3
+
+This Python component alpha integrates the released 2.5.28 inset-shadow fixes.
+Signed spread, large offsets and translated rounded holes now use the corrected
+geometry; table cells share that behavior. Zero-blur shadows stay vector, clear
+edges avoid faint clipping fringes, and native previews preserve off-page blur
+support before applying the destination clip.
+
+The experimental component API keeps its owned styles, literal `class_name`
+selectors, named parts and `to_html(include_styles=True/False)` exports. Bootstrap
+components remain static in PDFs and HTML. See the
+[alpha 3 runbook](docs/release/2.6.0a3-runbook.md) for qualification of the component
+and engine behavior together. Python uses `2.6.0a3`; Cargo source uses
+`2.6.0-alpha.3`. This is a candidate until the publication gates finish.
+
+The stable source retains 1,620 PASS, 24 FAIL and 18 REFERENCE-DISPUTED cases.
+The alpha's own full-corpus result must be retained separately; neither component
+coverage nor focused output checks establish complete CSS or accessibility parity.
+
+---
+
 # Fullbleed Release Notes - 2.6.0a2
 
 This opt-in Python alpha brings the qualified 2.5.27 inline SVG cascade and
@@ -46,6 +67,32 @@ The release gate checks that both spellings, the lockfile, wheel metadata and
 installed contracts agree. This alpha distribution targets Python; the Rust
 registry's stable release is managed separately. See the
 [alpha runbook](docs/release/2.6.0a1-runbook.md) for verification and publication.
+
+---
+
+# Fullbleed Release Notes - 2.5.28
+
+Inset box shadows now preserve negative spread, large offsets and translated
+rounded corners. Table cells share the corrected geometry. Zero-blur shadows
+remain vector, and unshadowed edges no longer acquire faint clipping fringes.
+Blurred shadows retain contributing pixels outside the page and clip their
+filtered result in native previews. Runtime dependencies are unchanged.
+
+The qualified feature checks cover 27 block, table and page-edge scenarios,
+including 16 complete clear-region comparisons at 300 DPI. Direct and compiled
+PDFs, native previews and independent PDFium pixels match across the retained
+Windows and Linux builds. The release pipeline runs the same installed-output
+checks and retains their artifacts.
+
+The unchanged 1,662-case CSS comparator reports 1,620 PASS, 24 FAIL and 18
+REFERENCE-DISPUTED results. Its conclusion remains failure: a clipping case is
+classified FAIL despite improved pixels, and rounded blur differs from Chrome
+print output. These reviewed differences remain visible in the evidence; the
+patch does not claim complete CSS or PDF standards conformance.
+
+See the [2.5.28 runbook](docs/release/2.5.28-runbook.md) for the retained evidence
+and publication checks. The experimental Bootstrap component alpha and the
+Node/.NET engine versions are unchanged by this release.
 
 ---
 
