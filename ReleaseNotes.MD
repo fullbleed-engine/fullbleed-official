@@ -1,3 +1,24 @@
+# Fullbleed Release Notes - 2.5.29
+
+Native previews of finalized PDFs now composite isolated transparency groups
+before applying their opacity. Overlapping SVG shapes and reused symbols no
+longer become darker in PNG previews than in the generated PDF. Member opacity,
+stroke opacity and nested group opacity remain distinct. Runtime dependencies
+and the document authoring APIs are unchanged.
+
+The SVG output checks now inspect both layout previews and previews read from
+the saved PDF, across direct, compiled, fixed-binding and reflow output. The
+previous public wheel fails 16 finalized-preview checks while its PDFium-rendered
+PDFs remain correct. The candidate must pass all 810 checks across 54 inputs and
+preserve the retained PDF bytes and layout-preview pixels before release.
+
+See the [2.5.29 runbook](docs/release/2.5.29-runbook.md) for evidence and publication
+gates. This is a scoped correction for isolated groups emitted by Fullbleed;
+it does not establish general external-PDF renderer or CSS conformance. The
+separate static Bootstrap component alpha remains an explicit opt-in release.
+
+---
+
 # Fullbleed Release Notes - 2.5.28
 
 Inset box shadows now preserve negative spread, large offsets and translated
