@@ -19,7 +19,8 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--channel", help="Optional Playwright browser channel, e.g. chrome")
     args = parser.parse_args()
-    args.python = args.python.resolve()
+    # Make the command independent of cwd without following a venv's interpreter symlink.
+    args.python = args.python.absolute()
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=False)
     project = out / "project"
