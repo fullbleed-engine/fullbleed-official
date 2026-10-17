@@ -136,3 +136,46 @@ accented = reach.with_parts(value=style(color="#b74624", font_size=pt(44)))
 
 The experimental API may change before stabilization. Keep the exact prerelease
 pin while reproducing these examples.
+
+## Edit with a live PDF preview
+
+After installing `requirements-components.txt`, start the local preview:
+
+```sh
+python examples/design_showcase/preview.py
+```
+
+Open the loopback URL printed in the terminal. Save `invoice_components.py`,
+`component_primitives.py`, `invoice.css`, or `data.json` in your editor. The helper
+reruns Python in a fresh process and refreshes images rendered from the finalized
+PDF. Download the PDF, styled HTML, or unstyled HTML from the preview.
+
+Choose Common Ground or the HTML/CSS authoring path with CLI options:
+
+```sh
+python examples/design_showcase/preview.py --document report
+python examples/design_showcase/preview.py --document invoice --authoring html
+```
+
+The HTML path watches the same data and CSS, plus the original HTML template.
+Its downloads contain the PDF and separate HTML/CSS sources. The preview uses
+the same installed engine and fonts as the comparison command above.
+
+Syntax errors, missing files and failed renders appear in the viewer. The last
+successful preview remains visible and its downloads are explicitly labeled as
+the previous version. Saving a correction retries automatically. Edits made
+during a render schedule another rebuild before the result is shown. When a
+document becomes shorter, the old page images disappear from the current view.
+
+The helper watches this example directory, skipping `output`, `target`, virtual
+environments and common caches. Use repeatable `--watch-path path` options for
+imports or assets outside it. `--port 0` (the default) selects an available port;
+`--dpi` defaults to 120, and `--timeout` allows 60 seconds per rebuild. Ctrl-C
+stops the server and its render process. Download anything you need to keep:
+preview artifacts live only for this session.
+
+This is an optional local development example that executes your Python source,
+binds to `127.0.0.1`, and uses only Fullbleed plus the standard library. It is not
+a hosted rendering service or a replacement for the comparison/verification
+command. These compositions retain their fixed page budgets; review layout
+after adding content.

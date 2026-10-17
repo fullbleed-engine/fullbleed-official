@@ -212,6 +212,9 @@ jobs:
           npm install --ignore-scripts --no-package-lock --no-save --no-audit --no-fund --prefix target/component-editor-tools pyright@1.1.414
           python -I tools/smoke_component_editor.py --pyright-root target/component-editor-tools/node_modules/pyright --out target/component-recipes/editor.json
 
+      - name: Verify local component and HTML preview editing
+        run: python -I tools/check_showcase_preview.py --out target/component-recipes/showcase-preview
+
       - name: Retain experimental component evidence
         uses: actions/upload-artifact@v7
         if: always()
