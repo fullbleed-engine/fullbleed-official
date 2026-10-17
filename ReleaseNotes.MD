@@ -1,3 +1,29 @@
+# Fullbleed Release Notes - 2.5.28
+
+Inset box shadows now preserve negative spread, large offsets and translated
+rounded corners. Table cells share the corrected geometry. Zero-blur shadows
+remain vector, and unshadowed edges no longer acquire faint clipping fringes.
+Blurred shadows retain contributing pixels outside the page and clip their
+filtered result in native previews. Runtime dependencies are unchanged.
+
+The qualified feature checks cover 27 block, table and page-edge scenarios,
+including 16 complete clear-region comparisons at 300 DPI. Direct and compiled
+PDFs, native previews and independent PDFium pixels match across the retained
+Windows and Linux builds. The release pipeline runs the same installed-output
+checks and retains their artifacts.
+
+The unchanged 1,662-case CSS comparator reports 1,620 PASS, 24 FAIL and 18
+REFERENCE-DISPUTED results. Its conclusion remains failure: a clipping case is
+classified FAIL despite improved pixels, and rounded blur differs from Chrome
+print output. These reviewed differences remain visible in the evidence; the
+patch does not claim complete CSS or PDF standards conformance.
+
+See the [2.5.28 runbook](docs/release/2.5.28-runbook.md) for the retained evidence
+and publication checks. The experimental Bootstrap component alpha and the
+Node/.NET engine versions are unchanged by this release.
+
+---
+
 # Fullbleed Release Notes - 2.5.27
 
 Document CSS now reaches inline SVG shapes and text through the native cascade,
