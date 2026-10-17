@@ -145,9 +145,20 @@ def check(out: Path):
                 pages=1 if mode in ('direct','compiled') else 2
                 labels=['1042'] if pages==1 else ['1042','1043']
                 text=[' '.join((page.extract_text() or '').split()) for page in PdfReader(BytesIO(pdf)).pages]
+                finalized=list(engine.render_finalized_pdf_image_pages(str(folder/'output.pdf'),96))
+                finalized_repeat=list(engine.render_finalized_pdf_image_pages(str(folder/'output.pdf'),96))
+                finalized_samples=[]
+                for index,png in enumerate(finalized,1):
+                    (folder/f'finalized-preview-{index}.png').write_bytes(png)
+                    with Image.open(BytesIO(png)) as picture:
+                        finalized_samples.append(sample(picture,expected))
                 record={'case':case,'variant':variant,'mode':mode,'pages':len(samples),'deterministic':pdf==repeat,
-                        'sha256':sha256(pdf).hexdigest(),'samples':samples,'text':text}
-                record['ok']=len(samples)==pages and pdf==repeat and text==labels and all(item['ok'] for item in samples)
+                        'sha256':sha256(pdf).hexdigest(),'samples':samples,'text':text,
+                        'finalized_preview_samples':finalized_samples,
+                        'finalized_previews_deterministic':finalized==finalized_repeat,
+                        'finalized_previews_sha256':[sha256(png).hexdigest() for png in finalized]}
+                record['ok']=(len(samples)==pages and pdf==repeat and text==labels and all(item['ok'] for item in samples)
+                    and len(finalized)==pages and finalized==finalized_repeat and all(item['ok'] for item in finalized_samples))
                 records.append(record)
                 if not record['ok']: failures.append(record)
             previews=list(engine.render_image_pages(html.replace('{{number}}','1042'),css,96))
