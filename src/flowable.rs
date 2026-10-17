@@ -2173,6 +2173,49 @@ pub fn draw_page_footnotes(
     canvas.restore_state();
 }
 
+/// Placement information for fragmentation decisions that cannot be made from
+/// the remaining height alone. Existing callers may continue to use `split`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SplitContext {
+    at_fragment_start: bool,
+}
+
+impl SplitContext {
+    pub const fn at_fragment_start() -> Self {
+        Self {
+            at_fragment_start: true,
+        }
+    }
+
+    pub const fn is_at_fragment_start(self) -> bool {
+        self.at_fragment_start
+    }
+
+    fn after_content(self, has_content: bool) -> Self {
+        Self {
+            at_fragment_start: self.at_fragment_start && !has_content,
+        }
+    }
+}
+
+/// A rejected fragmentation attempt. Sources describe the constraint that
+/// actually prevented this attempt, when the splitter can identify it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SplitFailure {
+    pub reason: &'static str,
+    pub source_ids: Vec<String>,
+}
+
+impl SplitFailure {
+    fn new(reason: &'static str, source_ids: Vec<String>) -> Self {
+        Self { reason, source_ids }
+    }
+
+    fn unknown() -> Self {
+        Self::new("unsplittable", Vec::new())
+    }
+}
+
 pub trait Flowable: FlowableClone + Send + Sync {
     fn wrap(&self, avail_width: Pt, avail_height: Pt) -> Size;
     fn split(
@@ -2181,6 +2224,29 @@ pub trait Flowable: FlowableClone + Send + Sync {
         avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)>;
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt);
+
+    /// Context-aware equivalent of `split`. Transparent and block wrappers
+    /// forward the context; unmodified flowables retain their existing behavior.
+    fn split_with_context(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        _context: SplitContext,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        self.split(avail_width, avail_height)
+    }
+
+    /// The same fragmentation operation with an optional precise rejection.
+    /// Existing flowables retain their behavior through this default method.
+    fn split_with_diagnostics(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Result<(Box<dyn Flowable>, Box<dyn Flowable>), SplitFailure> {
+        self.split_with_context(avail_width, avail_height, context)
+            .ok_or_else(|| SplitFailure::new("unsplittable", self.diagnostic_source_ids()))
+    }
 
     /// Logical text represented by an inline formatting item. The enclosing
     /// paragraph resolves bidi levels across style boundaries before placing
@@ -2777,10 +2843,29 @@ pub trait Flowable: FlowableClone + Send + Sync {
         Vec::new()
     }
 
+    /// Authored roots associated with this layout fragment. These identify the
+    /// fragment's scope, not a guessed descendant responsible for a failure.
+    /// Anonymous containers forward their in-flow roots; an explicitly authored
+    /// wrapper stops traversal at its own data-fb-id boundary.
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.diagnostic_metadata()
+            .into_iter()
+            .filter_map(|(key, value)| {
+                (key == "fb.owner.source_id" && !value.is_empty()).then_some(value)
+            })
+            .collect()
+    }
+
     /// A zero-area compiler marker records page-local generated-content state
     /// without contributing a CSS box to fragmentation.
     fn is_layout_marker(&self) -> bool {
         false
+    }
+
+    /// Authored block-flow gaps separate content boxes, not metadata carriers.
+    /// Wrappers can preserve a drawable epsilon without manufacturing a gap.
+    fn is_flow_spacing_item(&self, avail_width: Pt, avail_height: Pt) -> bool {
+        !self.is_layout_marker() && self.wrap(avail_width, avail_height).height > Pt::ZERO
     }
 }
 
@@ -10150,7 +10235,18 @@ impl Flowable for CssLineBoxFlowable {
         avail_width: Pt,
         avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
-        let (first, second) = self.child.split(avail_width, avail_height)?;
+        self.split_with_context(avail_width, avail_height, SplitContext::at_fragment_start())
+    }
+
+    fn split_with_context(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        let (first, second) = self
+            .child
+            .split_with_context(avail_width, avail_height, context)?;
         Some((
             Box::new(
                 Self::new(first)
@@ -10340,6 +10436,10 @@ impl CssPixelHeightFlowable {
 }
 
 impl Flowable for CssPixelHeightFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.child.diagnostic_source_ids()
+    }
+
     fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
         let mut resolved = self.clone();
         resolved.child = self.child.with_inline_bidi_levels(levels)?;
@@ -10409,7 +10509,18 @@ impl Flowable for CssPixelHeightFlowable {
         avail_width: Pt,
         avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
-        let (first, second) = self.child.split(avail_width, avail_height)?;
+        self.split_with_context(avail_width, avail_height, SplitContext::at_fragment_start())
+    }
+
+    fn split_with_context(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        let (first, second) = self
+            .child
+            .split_with_context(avail_width, avail_height, context)?;
         Some((
             Box::new(Self::new(first)) as Box<dyn Flowable>,
             Box::new(Self::new(second)) as Box<dyn Flowable>,
@@ -10813,6 +10924,7 @@ impl Flowable for ListItemFlowable {
 pub struct Spacer {
     height: Pt,
     pagination: Pagination,
+    metadata_only: bool,
 }
 
 impl Spacer {
@@ -10824,6 +10936,7 @@ impl Spacer {
         Self {
             height,
             pagination: Pagination::default(),
+            metadata_only: false,
         }
     }
 
@@ -10831,9 +10944,18 @@ impl Spacer {
         self.pagination = pagination;
         self
     }
+
+    pub(crate) fn with_metadata_only(mut self) -> Self {
+        self.metadata_only = true;
+        self
+    }
 }
 
 impl Flowable for Spacer {
+    fn is_flow_spacing_item(&self, _avail_width: Pt, _avail_height: Pt) -> bool {
+        !self.metadata_only && self.height > Pt::ZERO
+    }
+
     fn wrap(&self, avail_width: Pt, _avail_height: Pt) -> Size {
         Size {
             width: avail_width,
@@ -13791,137 +13913,6 @@ fn split_long_word_by_width_paragraph(cell: &TableCell, word: &str, max_width: P
     parts
 }
 
-#[derive(Clone)]
-struct CompiledFragmentSurfaceFlowable {
-    source: Box<dyn Flowable>,
-    surface_size: Size,
-    fragment_height: Pt,
-    offset_y: Pt,
-    resource_id: Arc<str>,
-    tag_role: Option<Arc<str>>,
-    pagination: Pagination,
-    compiled_commands: Arc<std::sync::OnceLock<Arc<Vec<Command>>>>,
-}
-
-impl CompiledFragmentSurfaceFlowable {
-    fn new(
-        source: Box<dyn Flowable>,
-        surface_size: Size,
-        resource_id: impl Into<Arc<str>>,
-        tag_role: Option<Arc<str>>,
-        pagination: Pagination,
-    ) -> Self {
-        Self {
-            source,
-            surface_size,
-            fragment_height: surface_size.height,
-            offset_y: Pt::ZERO,
-            resource_id: resource_id.into(),
-            tag_role,
-            pagination,
-            compiled_commands: Arc::new(std::sync::OnceLock::new()),
-        }
-    }
-
-    fn commands(&self) -> Arc<Vec<Command>> {
-        self.compiled_commands
-            .get_or_init(|| {
-                let mut temp = Canvas::new(self.surface_size);
-                self.source.draw(
-                    &mut temp,
-                    Pt::ZERO,
-                    Pt::ZERO,
-                    self.surface_size.width,
-                    self.surface_size.height,
-                );
-                Arc::new(
-                    temp.finish()
-                        .pages
-                        .first()
-                        .map(|page| page.commands.clone())
-                        .unwrap_or_default(),
-                )
-            })
-            .clone()
-    }
-}
-
-impl Flowable for CompiledFragmentSurfaceFlowable {
-    fn wrap(&self, _avail_width: Pt, _avail_height: Pt) -> Size {
-        Size {
-            width: self.surface_size.width,
-            height: self.fragment_height,
-        }
-    }
-
-    fn intrinsic_width(&self) -> Option<Pt> {
-        Some(self.surface_size.width)
-    }
-
-    fn split(
-        &self,
-        _avail_width: Pt,
-        avail_height: Pt,
-    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
-        if avail_height <= Pt::ZERO || self.fragment_height <= avail_height {
-            return None;
-        }
-        let first_height = avail_height.min(self.fragment_height);
-        let remaining_height = self.fragment_height - first_height;
-        if first_height <= Pt::ZERO || remaining_height <= Pt::ZERO {
-            return None;
-        }
-
-        let mut first = self.clone();
-        first.fragment_height = first_height;
-        first.pagination = Pagination {
-            break_before: BreakBefore::Auto,
-            break_after: BreakAfter::Auto,
-            ..self.pagination
-        };
-
-        let mut second = self.clone();
-        second.fragment_height = remaining_height;
-        second.offset_y = self.offset_y + first_height;
-        second.pagination = Pagination {
-            break_before: BreakBefore::Auto,
-            ..self.pagination
-        };
-
-        Some((Box::new(first), Box::new(second)))
-    }
-
-    fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, _avail_width: Pt, _avail_height: Pt) {
-        let commands = self.commands();
-        canvas.define_form(
-            self.resource_id.to_string(),
-            self.surface_size.width,
-            self.surface_size.height,
-            commands.as_ref().clone(),
-        );
-        let tagged = self.tag_role.as_ref().map(|role| {
-            canvas.begin_tag(role.as_ref(), None, None, None, None, true);
-        });
-        canvas.save_state();
-        canvas.clip_rect(x, y, self.surface_size.width, self.fragment_height);
-        canvas.draw_form(
-            x,
-            y - self.offset_y,
-            self.surface_size.width,
-            self.surface_size.height,
-            self.resource_id.to_string(),
-        );
-        canvas.restore_state();
-        if tagged.is_some() {
-            canvas.end_tag();
-        }
-    }
-
-    fn pagination(&self) -> Pagination {
-        self.pagination
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct TableFlowable {
     data: Arc<TableFlowableData>,
@@ -13967,6 +13958,7 @@ impl TableFlowable {
                 column_borders: Vec::new(),
                 column_group_borders: Vec::new(),
                 collapsed_columns: Vec::new(),
+                fragment_column_widths: None,
                 layout_cache: std::sync::OnceLock::new(),
             }),
             body_range: 0..len,
@@ -14448,6 +14440,235 @@ impl TableFlowable {
                     .map(|pagination| pagination.break_after.forces_page())
                     .unwrap_or(false)
         })
+    }
+
+    /// Continue an oversized leading row using each cell's logical content
+    /// splitter. This is called only at the start of a fresh fragmentainer;
+    /// ordinary rows get a chance to move intact before avoidance is relaxed.
+    fn split_oversized_row(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        start: usize,
+    ) -> Result<(Box<dyn Flowable>, Box<dyn Flowable>), SplitFailure> {
+        if avail_height <= Pt::ZERO {
+            return Err(SplitFailure::unknown());
+        }
+        if self.data.has_row_spans() {
+            let sources = self
+                .data
+                .header_rows
+                .iter()
+                .chain(&self.data.body_rows)
+                .flatten()
+                .filter(|cell| cell.row_span > 1)
+                .filter_map(|cell| cell.authoring_source_id.as_deref().map(str::to_owned))
+                .collect();
+            return Err(SplitFailure::new("table_rowspan", sources));
+        }
+        let row = self
+            .data
+            .body_rows
+            .get(start)
+            .ok_or_else(SplitFailure::unknown)?;
+        if Self::row_is_collapsed(row) {
+            return Err(SplitFailure::unknown());
+        }
+        let incompatible: Vec<_> = row
+            .iter()
+            .filter(|cell| {
+                !matches!(cell.valign, VerticalAlign::Top)
+                    && (!cell.text.is_empty() || cell.content.is_some())
+            })
+            .collect();
+        if !incompatible.is_empty() {
+            return Err(SplitFailure::new(
+                "table_cell_alignment",
+                incompatible
+                    .iter()
+                    .filter_map(|cell| cell.authoring_source_id.as_deref().map(str::to_owned))
+                    .collect(),
+            ));
+        }
+        let columns = self.max_columns();
+        let (col_gap, _) = self.resolve_spacing(avail_width);
+        let available_columns = (avail_width
+            - Self::column_spacing_total(self.visible_column_count(columns), col_gap))
+        .max(Pt::ZERO);
+        let layout_width = self.column_layout_width(available_columns, columns);
+        let widths = self.data.compute_column_widths(
+            layout_width,
+            columns,
+            self.table_layout,
+            self.border_collapse,
+        );
+
+        let mut first = self.clone();
+        first.body_range = self.body_range.start..start + 1;
+        first.include_footer = self.include_footer && self.repeat_footer;
+        first.last_fragment = false;
+        first.minimum_height = Pt::ZERO;
+        first.pagination.break_before = BreakBefore::Auto;
+        first.pagination.break_after = BreakAfter::Auto;
+        let mut second = self.clone();
+        second.body_range.start = start;
+        second.include_header = self.repeat_header;
+        second.first_fragment = false;
+        second.pagination.break_before = BreakBefore::Auto;
+        second.minimum_height = (self.minimum_height - avail_height).max(Pt::ZERO);
+
+        let mut first_data = (*self.data).clone();
+        let mut second_data = (*self.data).clone();
+        first_data.fragment_column_widths = Some((layout_width, widths.clone()));
+        second_data.fragment_column_widths = Some((layout_width, widths.clone()));
+        let mut heads = row.clone();
+        let mut tails = row.clone();
+        for (head, tail) in heads.iter_mut().zip(tails.iter_mut()) {
+            head.text.clear();
+            head.content = None;
+            head.layout_cache = Arc::new(Mutex::new(TextLayoutCache::default()));
+            head.row_min_height = Pt::ZERO;
+            head.padding = ContainerFlowable::zero_bottom(head.padding);
+            head.border.widths = ContainerFlowable::zero_bottom(head.border.widths);
+            head.row_border_widths = ContainerFlowable::zero_bottom(head.row_border_widths);
+            head.row_group_border_widths =
+                ContainerFlowable::zero_bottom(head.row_group_border_widths);
+            tail.padding = ContainerFlowable::zero_top(tail.padding);
+            tail.border.widths = ContainerFlowable::zero_top(tail.border.widths);
+            tail.row_border_widths = ContainerFlowable::zero_top(tail.row_border_widths);
+            tail.row_group_border_widths =
+                ContainerFlowable::zero_top(tail.row_group_border_widths);
+            // Cell contents continue at the fragment's top; completed short
+            // cells keep their decoration but never repeat their content.
+            head.valign = VerticalAlign::Top;
+            tail.valign = VerticalAlign::Top;
+        }
+        first_data.body_rows[start] = heads.clone();
+        first.data = Arc::new(first_data);
+        let draw_index = (if first.include_header {
+            first.data.header_rows.len()
+        } else {
+            0
+        }) + start
+            - self.body_range.start;
+        let empty_row_height = first.row_height_for_draw_index(draw_index, &heads, &widths);
+        let fixed_height = first.wrap(avail_width, huge_pt()).height - empty_row_height;
+        let row_height = avail_height - fixed_height;
+        if row_height <= Pt::ZERO {
+            return Err(SplitFailure::new("table_fixed_height", Vec::new()));
+        }
+        if self.row_height_for_draw_index(draw_index, row, &widths) <= row_height {
+            // A keep-group may have moved the candidate boundary backwards.
+            // Never manufacture an empty continuation of a row that already fits.
+            return Err(SplitFailure::new("table_keep_group", Vec::new()));
+        }
+        let mut consumed = false;
+        let mut blocked_sources = Vec::new();
+        let mut column = 0usize;
+        for ((cell, head), tail) in row.iter().zip(heads.iter_mut()).zip(tails.iter_mut()) {
+            let span = Self::cell_span_for_start(cell, column, columns);
+            let visible_span = self.visible_columns_in_span(column, span, columns);
+            let width = Self::span_width(&widths, column, span)
+                + col_gap * (visible_span.saturating_sub(1) as i32);
+            if width <= Pt::ZERO || visible_span == 0 {
+                column += span;
+                continue;
+            }
+            let padding = head.resolved_padding(width);
+            let border = if matches!(self.border_collapse, BorderCollapseMode::Collapse) {
+                let painted = first
+                    .collapsed_border_for_cell(draw_index, column, span, &widths, head)
+                    .widths;
+                first.collapsed_layout_border(draw_index, column, span, &widths, painted)
+            } else {
+                head.resolved_border(width)
+            };
+            let content_width =
+                (width - padding.left - padding.right - border.left - border.right).max(Pt::ZERO);
+            let content_height =
+                (row_height - padding.top - padding.bottom - border.top - border.bottom)
+                    .max(Pt::ZERO);
+            head.row_min_height = row_height;
+            tail.row_min_height = (cell.row_min_height - row_height).max(Pt::ZERO);
+            tail.layout_cache = Arc::new(Mutex::new(TextLayoutCache::default()));
+            if cell.row_min_height > Pt::ZERO && row_height > Pt::ZERO {
+                consumed = true;
+            }
+            if let Some(content) = &cell.content {
+                let natural = content.wrap(content_width, huge_pt()).height;
+                if natural > content_height {
+                    if let Some(source) = &cell.authoring_source_id {
+                        blocked_sources.push(source.to_string());
+                    }
+                }
+                if natural <= content_height {
+                    head.content = Some(content.clone());
+                    tail.content = None;
+                    tail.text.clear();
+                    consumed |= natural > Pt::ZERO;
+                } else if let Some((leading, trailing)) = content.split_with_context(
+                    content_width,
+                    content_height,
+                    SplitContext::at_fragment_start(),
+                ) {
+                    let leading_height = leading.wrap(content_width, content_height).height;
+                    let trailing_height = trailing.wrap(content_width, huge_pt()).height;
+                    if leading_height > Pt::ZERO
+                        && leading_height <= content_height
+                        && trailing_height < natural
+                    {
+                        head.content = Some(leading);
+                        tail.content = Some(trailing);
+                        tail.text.clear();
+                        consumed = true;
+                    }
+                }
+            } else {
+                let lines = cell.layout_lines(content_width);
+                let line_height = cell.effective_line_height();
+                let count = if line_height > Pt::ZERO {
+                    (content_height.to_milli_i64() / line_height.to_milli_i64()).max(0) as usize
+                } else {
+                    0
+                }
+                .min(lines.len());
+                if count == 0 && !cell.text.is_empty() {
+                    if let Some(source) = &cell.authoring_source_id {
+                        blocked_sources.push(source.to_string());
+                    }
+                }
+                if count > 0 && !cell.text.is_empty() {
+                    head.text = lines[..count]
+                        .iter()
+                        .map(|line| line.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    tail.text = lines[count..]
+                        .iter()
+                        .map(|line| line.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    head.no_wrap = true;
+                    tail.no_wrap = true;
+                    consumed = true;
+                }
+            }
+            column += span;
+        }
+        if !consumed {
+            return Err(SplitFailure::new("table_cell_content", blocked_sources));
+        }
+        let first_data = Arc::make_mut(&mut first.data);
+        first_data.body_rows[start] = heads;
+        first_data.layout_cache = std::sync::OnceLock::new();
+        second_data.body_rows[start] = tails;
+        second.data = Arc::new(second_data);
+        // Use the final geometry as the acceptance test, including collapsed
+        // border winners, repeated headers/footers, and cell decorations.
+        if first.wrap(avail_width, avail_height).height > avail_height {
+            return Err(SplitFailure::new("table_fragment_height", Vec::new()));
+        }
+        Ok((Box::new(first), Box::new(second)))
     }
 
     fn cell_span_for_start(cell: &TableCell, col_start: usize, total_columns: usize) -> usize {
@@ -16743,6 +16964,25 @@ impl Flowable for TableFlowable {
         avail_width: Pt,
         avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        self.split_with_context(avail_width, avail_height, SplitContext::at_fragment_start())
+    }
+
+    fn split_with_context(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        self.split_with_diagnostics(avail_width, avail_height, context)
+            .ok()
+    }
+
+    fn split_with_diagnostics(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Result<(Box<dyn Flowable>, Box<dyn Flowable>), SplitFailure> {
         let columns = self.max_columns();
         let (col_gap, row_gap) = self.resolve_spacing(avail_width);
         let visible_columns = self.visible_column_count(columns);
@@ -16762,7 +17002,7 @@ impl Flowable for TableFlowable {
         let start = self.body_range.start;
         let end = self.body_range.end;
         if start >= end {
-            return None;
+            return Err(SplitFailure::unknown());
         }
         let header_visible_count = self.visible_header_row_count();
         let footer_visible_count = self.visible_footer_row_count();
@@ -16881,43 +17121,33 @@ impl Flowable for TableFlowable {
         let first_has_fixed_rows =
             header_visible_count > 0 || (self.repeat_footer && footer_visible_count > 0);
         if split_at >= end {
-            return None;
+            return Err(SplitFailure::unknown());
+        }
+        let next_row_exceeds_fresh_page = body_row_heights
+            .get(split_at.saturating_sub(start))
+            .is_some_and(|height| *height > avail_height);
+        let mut oversized_failure = None;
+        if context.at_fragment_start && (split_at == start || next_row_exceeds_fresh_page) {
+            match self.split_oversized_row(avail_width, avail_height, split_at) {
+                Ok(fragments) => return Ok(fragments),
+                Err(failure) => oversized_failure = Some(failure),
+            }
         }
         if split_at == start && !first_has_fixed_rows {
-            let single_oversized_body_row = end == start + 1
-                && header_visible_count == 0
-                && footer_visible_count == 0
-                && forced_boundary.is_none()
-                && !self.data.has_row_spans();
-            if single_oversized_body_row {
-                let surface_height = self.wrap(avail_width, huge_pt()).height;
-                if surface_height > avail_height && avail_height > Pt::ZERO {
-                    let mut source = self.clone();
-                    let tag_role = source.tag_role.take();
-                    source.pagination = Pagination::default();
-                    let surface = CompiledFragmentSurfaceFlowable::new(
-                        Box::new(source),
-                        Size {
-                            width: avail_width,
-                            height: surface_height,
-                        },
-                        format!(
-                            "table-row-fragment:{}:{}:{}",
-                            self.table_id,
-                            avail_width.to_milli_i64(),
-                            surface_height.to_milli_i64()
-                        ),
-                        tag_role,
-                        self.pagination,
-                    );
-                    return surface.split(avail_width, avail_height);
-                }
-            }
-            return None;
+            return Err(oversized_failure.unwrap_or_else(SplitFailure::unknown));
         }
 
         let first_include_footer = self.include_footer && self.repeat_footer;
         let second_include_header = self.repeat_header && !moved_leading_keep_group;
+
+        // A fragment containing only repeated header/footer rows does not consume
+        // any body content. If the continuation retains the same header state,
+        // returning it would reproduce this split on every fresh page forever.
+        // Defer the whole table to the caller's frame/overflow policy instead.
+        // Returning None alone does not reject an oversized row.
+        if split_at == start && second_include_header == self.include_header {
+            return Err(oversized_failure.unwrap_or_else(SplitFailure::unknown));
+        }
 
         let first = TableFlowable {
             data: self.data.clone(),
@@ -16980,7 +17210,7 @@ impl Flowable for TableFlowable {
                 ..self.pagination
             },
         };
-        Some((Box::new(first), Box::new(second)))
+        Ok((Box::new(first), Box::new(second)))
     }
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, _avail_height: Pt) {
@@ -17399,6 +17629,7 @@ struct TableFlowableData {
     column_borders: Vec<Option<TableColumnBorder>>,
     column_group_borders: Vec<Option<TableColumnGroupBorder>>,
     collapsed_columns: Vec<bool>,
+    fragment_column_widths: Option<(Pt, Vec<Pt>)>,
     layout_cache: std::sync::OnceLock<TableLayoutCache>,
 }
 
@@ -17545,6 +17776,11 @@ impl TableFlowableData {
         border_collapse: BorderCollapseMode,
     ) -> Vec<Pt> {
         let columns = columns.max(1);
+        if let Some((width, resolved)) = &self.fragment_column_widths {
+            if *width == avail_width && resolved.len() == columns {
+                return resolved.clone();
+            }
+        }
         let debug_verbose = table_debug_enabled() && table_debug_verbose_enabled();
         let data_ptr = self as *const TableFlowableData as usize;
 
@@ -18119,6 +18355,7 @@ impl Clone for TableFlowableData {
             column_borders: self.column_borders.clone(),
             column_group_borders: self.column_group_borders.clone(),
             collapsed_columns: self.collapsed_columns.clone(),
+            fragment_column_widths: self.fragment_column_widths.clone(),
             layout_cache: std::sync::OnceLock::new(),
         }
     }
@@ -22598,6 +22835,7 @@ impl FlexFlowable {
         &self,
         avail_width: Pt,
         avail_height: Pt,
+        context: SplitContext,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
         let n = self.items.len();
         if n == 0 {
@@ -22630,7 +22868,11 @@ impl FlexFlowable {
                 continue;
             }
 
-            if let Some((first, second)) = item.child.split(avail_width, remaining_height) {
+            if let Some((first, second)) = item.child.split_with_context(
+                avail_width,
+                remaining_height,
+                context.after_content(!placed.is_empty()),
+            ) {
                 placed.push(FlexItem {
                     child: first,
                     // A continuation owns only its sliced block extent. Keeping
@@ -22723,12 +22965,16 @@ impl FlexFlowable {
         &self,
         avail_width: Pt,
         avail_height: Pt,
+        context: SplitContext,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
         if self.items.len() != 1 {
             return None;
         }
         let item = self.items[0].clone();
-        if let Some((first, second)) = item.child.split(avail_width, avail_height) {
+        if let Some((first, second)) =
+            item.child
+                .split_with_context(avail_width, avail_height, context)
+        {
             let first_item = FlexItem {
                 child: first,
                 ..item.clone()
@@ -22794,6 +23040,7 @@ impl FlexFlowable {
         &self,
         avail_width: Pt,
         avail_height: Pt,
+        context: SplitContext,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
         let n = self.items.len();
         if n == 0 {
@@ -22970,24 +23217,31 @@ impl FlexFlowable {
             if line.len() == 1 && remaining_height > Pt::ZERO {
                 let item_idx = line[0];
                 let item = self.items[item_idx].clone();
-                let child_split = item.child.split(avail_width, remaining_height).or_else(|| {
-                    // An authored empty auto-height grid item has no internal
-                    // split point, but its stretched background still owns the
-                    // fixed track. Cloning is safe only when it has zero natural
-                    // block extent; non-empty content must never be duplicated.
-                    let natural = item.child.wrap(avail_width, huge_pt());
-                    if split_debug {
-                        eprintln!(
-                            "flex row split unsplittable line={} natural={:?} fixed_track={}",
-                            line_idx,
-                            natural,
-                            self.fixed_row_track_height(line_idx, huge_pt()).is_some()
-                        );
-                    }
-                    (self.fixed_row_track_height(line_idx, huge_pt()).is_some()
-                        && natural.height <= Pt::from_f32(0.01))
-                    .then(|| (item.child.clone(), item.child.clone()))
-                });
+                let child_split = item
+                    .child
+                    .split_with_context(
+                        avail_width,
+                        remaining_height,
+                        context.after_content(any_line),
+                    )
+                    .or_else(|| {
+                        // An authored empty auto-height grid item has no internal
+                        // split point, but its stretched background still owns the
+                        // fixed track. Cloning is safe only when it has zero natural
+                        // block extent; non-empty content must never be duplicated.
+                        let natural = item.child.wrap(avail_width, huge_pt());
+                        if split_debug {
+                            eprintln!(
+                                "flex row split unsplittable line={} natural={:?} fixed_track={}",
+                                line_idx,
+                                natural,
+                                self.fixed_row_track_height(line_idx, huge_pt()).is_some()
+                            );
+                        }
+                        (self.fixed_row_track_height(line_idx, huge_pt()).is_some()
+                            && natural.height <= Pt::from_f32(0.01))
+                        .then(|| (item.child.clone(), item.child.clone()))
+                    });
                 if let Some((first_child, second_child)) = child_split {
                     if let Some(track_height) = self.fixed_row_track_height(line_idx, huge_pt()) {
                         return self.fragment_grid_line(
@@ -23752,6 +24006,19 @@ impl Flowable for FlexFlowable {
         _avail_width: Pt,
         _avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        self.split_with_context(
+            _avail_width,
+            _avail_height,
+            SplitContext::at_fragment_start(),
+        )
+    }
+
+    fn split_with_context(
+        &self,
+        _avail_width: Pt,
+        _avail_height: Pt,
+        context: SplitContext,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
         let avail_width = _avail_width;
         let avail_height = _avail_height;
         if avail_height <= Pt::ZERO {
@@ -23763,14 +24030,14 @@ impl Flowable for FlexFlowable {
                 if self.wrap {
                     None
                 } else {
-                    self.split_column(avail_width, avail_height)
+                    self.split_column(avail_width, avail_height, context)
                 }
             }
             FlexDirection::Row => {
                 if self.wrap {
-                    self.split_row_wrapped(avail_width, avail_height)
+                    self.split_row_wrapped(avail_width, avail_height, context)
                 } else {
-                    self.split_single_row_item(avail_width, avail_height)
+                    self.split_single_row_item(avail_width, avail_height, context)
                 }
             }
         }
@@ -25178,7 +25445,11 @@ impl MultiColumnFlowable {
             }
 
             if available > Pt::ZERO {
-                if let Some((head, tail)) = child.split(column_width, available) {
+                if let Some((head, tail)) = child.split_with_context(
+                    column_width,
+                    available,
+                    SplitContext::at_fragment_start().after_content(cursor > Pt::ZERO),
+                ) {
                     let head_height = head.wrap(column_width, available).height.max(Pt::ZERO);
                     let tail_height = tail.wrap(column_width, avail_height).height.max(Pt::ZERO);
                     // A fixed-height fragmented box can expose a smaller source
@@ -25289,7 +25560,11 @@ impl MultiColumnFlowable {
             return None;
         }
         let valid_at = |split_height: Pt| {
-            let Some((head, tail)) = child.split(column_width, split_height) else {
+            let Some((head, tail)) = child.split_with_context(
+                column_width,
+                split_height,
+                SplitContext::at_fragment_start().after_content(column_cursor > Pt::ZERO),
+            ) else {
                 return false;
             };
             let column_height = column_cursor + split_height;
@@ -26021,6 +26296,7 @@ struct ContainerLayoutCache {
     total_width: Pt,
     total_height: Pt,
     child_avail_height: Pt,
+    flow_gap: Pt,
     child_sizes: Vec<Option<Size>>,
     child_collapsed_top: Vec<Pt>,
     child_collapsed_bottom: Vec<Pt>,
@@ -26057,6 +26333,9 @@ pub struct ContainerFlowable {
 #[derive(Clone)]
 struct ContainerState {
     children: Vec<Box<dyn Flowable>>,
+    // Opt-in print-authoring flow: independent item gaps and non-collapsing
+    // child margins. Ordinary HTML block layout keeps its existing behavior.
+    flow_gap: Option<LengthSpec>,
     inline_bidi_transparent: bool,
     margin: EdgeSizes,
     border_width: EdgeSizes,
@@ -26164,6 +26443,7 @@ impl ContainerFlowable {
     pub fn new_pt(children: Vec<Box<dyn Flowable>>, font_size: Pt, root_font_size: Pt) -> Self {
         Self::from_state(ContainerState {
             children,
+            flow_gap: None,
             inline_bidi_transparent: false,
             margin: EdgeSizes::zero(),
             border_width: EdgeSizes::zero(),
@@ -26267,6 +26547,56 @@ impl ContainerFlowable {
     pub fn with_margin(mut self, margin: EdgeSizes) -> Self {
         self.state.margin = margin;
         self
+    }
+
+    pub(crate) fn with_flow_gap(mut self, gap: Option<LengthSpec>) -> Self {
+        if self.state.flow_gap.is_some() || gap.is_some() {
+            self.state.layout_cache = Arc::new(Mutex::new(None));
+        }
+        self.state.flow_gap = gap;
+        self
+    }
+
+    fn resolved_flow_gap(&self, content_height: Option<Pt>) -> Pt {
+        self.state.flow_gap.map_or(Pt::ZERO, |gap| {
+            gap.resolve_height(
+                content_height.unwrap_or(Pt::ZERO),
+                self.state.font_size,
+                self.state.root_font_size,
+            )
+            .max(Pt::ZERO)
+        })
+    }
+
+    fn authored_flow_baseline(&self, avail_width: Pt, use_last: bool) -> Option<Pt> {
+        let layout = self.cached_layout(avail_width, huge_pt());
+        let mut offset = layout.margin.top + layout.border.top + layout.padding.top;
+        let mut baseline = None;
+        let mut has_item = false;
+        for (index, child) in self.state.children.iter().enumerate() {
+            let Some(size) = layout.child_sizes[index] else {
+                continue;
+            };
+            if child.is_flow_spacing_item(layout.content_width, layout.child_avail_height) {
+                if has_item {
+                    offset += layout.flow_gap;
+                }
+                has_item = true;
+            }
+            let child_baseline = if use_last {
+                child.inline_baseline(layout.content_width)
+            } else {
+                child.first_baseline(layout.content_width)
+            };
+            if let Some(value) = child_baseline {
+                baseline = Some(offset + value);
+                if !use_last {
+                    return baseline;
+                }
+            }
+            offset += size.height;
+        }
+        baseline
     }
 
     pub fn with_inline_paint_snapping(mut self, enabled: bool) -> Self {
@@ -26920,7 +27250,7 @@ impl ContainerFlowable {
         border: ResolvedEdges,
         padding: ResolvedEdges,
     ) -> (Option<(usize, Pt)>, Option<(usize, Pt)>) {
-        if self.state.contain_floats || self.clips_any_overflow() {
+        if self.state.flow_gap.is_some() || self.state.contain_floats || self.clips_any_overflow() {
             return (None, None);
         }
 
@@ -27245,6 +27575,8 @@ impl ContainerFlowable {
         // Only provide a bounded height to children when we have an explicit height. Otherwise,
         // children should measure naturally (important for flex rows not ballooning to page height).
         let child_avail_height = fixed_content_height.unwrap_or(huge_pt());
+        let flow_gap = self.resolved_flow_gap(fixed_content_height);
+        let mut has_flow_item = false;
         let mut content_height: Pt = Pt::ZERO;
         let mut child_sizes: Vec<Option<Size>> = Vec::with_capacity(self.state.children.len());
         let mut child_collapsed_top = vec![Pt::ZERO; self.state.children.len()];
@@ -27284,7 +27616,12 @@ impl ContainerFlowable {
                 content_height = content_height.max(clearance);
                 previous_block_margin_bottom = None;
             }
-            let block_margins = child.collapsible_block_margins(content_width);
+            let block_margins = self
+                .state
+                .flow_gap
+                .is_none()
+                .then(|| child.collapsible_block_margins(content_width))
+                .flatten();
             if let (Some(previous_bottom), Some((current_top, _))) =
                 (previous_block_margin_bottom, block_margins)
             {
@@ -27293,6 +27630,14 @@ impl ContainerFlowable {
             }
             in_flow_pagination.push(child.pagination());
             let size = child.wrap(content_width, child_avail_height);
+            if self.state.flow_gap.is_some()
+                && child.is_flow_spacing_item(content_width, child_avail_height)
+            {
+                if has_flow_item {
+                    content_height += flow_gap;
+                }
+                has_flow_item = true;
+            }
             content_height = content_height + size.height
                 - child_collapsed_top[child_index]
                 - child_collapsed_bottom[child_index];
@@ -27431,6 +27776,7 @@ impl ContainerFlowable {
             total_width,
             total_height,
             child_avail_height,
+            flow_gap,
             child_sizes,
             child_collapsed_top,
             child_collapsed_bottom,
@@ -27568,6 +27914,10 @@ impl ContainerFlowable {
         };
 
         let mut first = self.clone();
+        first.state.flow_gap = self
+            .state
+            .flow_gap
+            .map(|_| LengthSpec::Absolute(original.flow_gap));
         first.state.margin = Self::zero_bottom(self.state.margin);
         first.state.border_width = Self::zero_bottom(self.state.border_width);
         first.state.border_radius = Self::zero_bottom_radii(self.state.border_radius);
@@ -27585,6 +27935,7 @@ impl ContainerFlowable {
         first.state.layout_cache = Arc::new(Mutex::new(None));
 
         let mut second = self.clone();
+        second.state.flow_gap = first.state.flow_gap;
         if carries_content {
             second.state.children.clear();
         }
@@ -33888,6 +34239,15 @@ impl ContainerFlowable {
 }
 
 impl Flowable for ContainerFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.state
+            .children
+            .iter()
+            .filter(|child| !child.out_of_flow() && !child.is_layout_marker())
+            .flat_map(|child| child.diagnostic_source_ids())
+            .collect()
+    }
+
     fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
         if !self.state.inline_bidi_transparent {
             return None;
@@ -34492,6 +34852,9 @@ impl Flowable for ContainerFlowable {
     }
 
     fn first_baseline(&self, avail_width: Pt) -> Option<Pt> {
+        if self.state.flow_gap.is_some() {
+            return self.authored_flow_baseline(avail_width, false);
+        }
         let (margin, border, padding, content_width, _) = self.resolve_box(avail_width);
         let mut offset = margin.top + border.top + padding.top;
         for child in &self.state.children {
@@ -34507,6 +34870,9 @@ impl Flowable for ContainerFlowable {
     }
 
     fn inline_baseline(&self, avail_width: Pt) -> Option<Pt> {
+        if self.state.flow_gap.is_some() {
+            return self.authored_flow_baseline(avail_width, true);
+        }
         let (margin, border, padding, content_width, _) = self.resolve_box(avail_width);
         let mut offset = margin.top + border.top + padding.top;
         let mut baseline = None;
@@ -34535,14 +34901,33 @@ impl Flowable for ContainerFlowable {
         avail_width: Pt,
         avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        self.split_with_context(avail_width, avail_height, SplitContext::at_fragment_start())
+    }
+
+    fn split_with_context(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        self.split_with_diagnostics(avail_width, avail_height, context)
+            .ok()
+    }
+
+    fn split_with_diagnostics(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Result<(Box<dyn Flowable>, Box<dyn Flowable>), SplitFailure> {
         // CSS overflow clipping establishes a monolithic box for page
         // fragmentation. Descendant forced breaks stay inside the clipped
         // formatting context instead of splitting the outer box into pages.
         if self.clips_any_overflow() {
-            return None;
+            return Err(SplitFailure::new("clipped_container", Vec::new()));
         }
         if let Some(fragments) = self.split_fixed_height(avail_width, avail_height) {
-            return Some(fragments);
+            return Ok(fragments);
         }
         let (margin, border, padding, content_width, _border_box_width) =
             self.resolve_box(avail_width);
@@ -34564,10 +34949,17 @@ impl Flowable for ContainerFlowable {
             avail_height - margin.top - border.top - padding.top
         };
         if available_content_height <= Pt::ZERO {
-            return None;
+            return Err(SplitFailure::new("container_decoration_height", Vec::new()));
         }
 
+        let mut rejected_child = None;
         let mut remaining_height = available_content_height;
+        let flow_gap = if self.state.flow_gap.is_some() {
+            self.cached_layout(avail_width, avail_height).flow_gap
+        } else {
+            Pt::ZERO
+        };
+        let mut has_placed_flow_item = false;
         let split_debug = std::env::var_os("FULLBLEED_SPLIT_DEBUG").is_some();
         if split_debug {
             eprintln!(
@@ -34628,10 +35020,18 @@ impl Flowable for ContainerFlowable {
             self.state.starts_at_sibling_fragment_boundary || has_multiple_flow_boxes;
 
         for (index, child) in flow_children.iter().cloned().enumerate() {
+            // A failed speculative split of a fitting earlier sibling is not
+            // evidence about this child's placement or keep constraints.
+            rejected_child = None;
             let original_index = flow_child_indices[index];
             let collapsed_top = collapsed_parent_top
                 .filter(|(child_index, _)| *child_index == original_index)
                 .map_or(Pt::ZERO, |(_, margin)| margin);
+            let is_flow_item = self.state.flow_gap.is_some()
+                && child.is_flow_spacing_item(content_width, remaining_height + collapsed_top);
+            if has_placed_flow_item && is_flow_item {
+                remaining_height = (remaining_height - flow_gap).max(Pt::ZERO);
+            }
             // A first child's top margin may already have collapsed through
             // this container and become the container's own top margin. Give
             // that space back while splitting the child, then subtract it from
@@ -34755,6 +35155,7 @@ impl Flowable for ContainerFlowable {
 
                 let mut kept_height = Pt::ZERO;
                 let mut previous_margin_bottom = None;
+                let mut kept_flow_item = false;
                 for member in placed[chain_start..]
                     .iter()
                     .map(|member| member.as_ref())
@@ -34762,13 +35163,25 @@ impl Flowable for ContainerFlowable {
                 {
                     if let (Some(previous_bottom), Some((current_top, _))) = (
                         previous_margin_bottom,
-                        member.collapsible_block_margins(content_width),
+                        self.state
+                            .flow_gap
+                            .is_none()
+                            .then(|| member.collapsible_block_margins(content_width))
+                            .flatten(),
                     ) {
                         kept_height = kept_height
                             - adjacent_margin_stack_adjustment(previous_bottom, current_top);
                     }
-                    kept_height =
-                        kept_height + member.wrap(content_width, available_content_height).height;
+                    let member_height = member.wrap(content_width, available_content_height).height;
+                    if self.state.flow_gap.is_some()
+                        && member.is_flow_spacing_item(content_width, available_content_height)
+                    {
+                        if kept_flow_item {
+                            kept_height += flow_gap;
+                        }
+                        kept_flow_item = true;
+                    }
+                    kept_height += member_height;
                     previous_margin_bottom = member
                         .collapsible_block_margins(content_width)
                         .map(|(_, bottom)| bottom);
@@ -34824,7 +35237,17 @@ impl Flowable for ContainerFlowable {
             {
                 None
             } else {
-                child.split(content_width, child_available_height)
+                match child.split_with_diagnostics(
+                    content_width,
+                    child_available_height,
+                    context.after_content(!placed.is_empty() && !follows_only_table_captions),
+                ) {
+                    Ok(fragments) => Some(fragments),
+                    Err(failure) => {
+                        rejected_child = Some(failure);
+                        None
+                    }
+                }
             };
             if split_debug {
                 eprintln!(
@@ -34852,6 +35275,7 @@ impl Flowable for ContainerFlowable {
 
             if combined_occupied_height <= remaining_height || paint_only_edge_overhang {
                 placed_footnotes = candidate_footnotes;
+                has_placed_flow_item |= is_flow_item;
                 placed.push(child);
                 placed_paint_only_edge_overhang |= paint_only_edge_overhang;
                 remaining_height = (remaining_height - combined_occupied_height).max(Pt::ZERO);
@@ -34891,7 +35315,11 @@ impl Flowable for ContainerFlowable {
                     remaining.len()
                 );
             }
-            return None;
+            return Err(if placed.is_empty() {
+                rejected_child.unwrap_or_else(SplitFailure::unknown)
+            } else {
+                SplitFailure::unknown()
+            });
         }
 
         // A minimum height constrains the fragmented box as a whole. Reapplying the authored
@@ -34998,6 +35426,7 @@ impl Flowable for ContainerFlowable {
 
         let mut first = Self::from_state(ContainerState {
             children: placed,
+            flow_gap: self.state.flow_gap.map(|_| LengthSpec::Absolute(flow_gap)),
             inline_bidi_transparent: self.state.inline_bidi_transparent,
             margin: if clones_decoration {
                 self.state.margin
@@ -35104,6 +35533,7 @@ impl Flowable for ContainerFlowable {
         });
         let mut second = Self::from_state(ContainerState {
             children: remaining,
+            flow_gap: self.state.flow_gap.map(|_| LengthSpec::Absolute(flow_gap)),
             inline_bidi_transparent: self.state.inline_bidi_transparent,
             margin: if clones_decoration {
                 self.state.margin
@@ -35235,7 +35665,7 @@ impl Flowable for ContainerFlowable {
             );
         }
 
-        Some((Box::new(first), Box::new(second)))
+        Ok((Box::new(first), Box::new(second)))
     }
 
     fn split_grid_row_fragment(
@@ -36768,6 +37198,7 @@ impl Flowable for ContainerFlowable {
         let mut positioned_pos: Vec<(i32, usize, Pt, Pt, Pt, Pt, &Box<dyn Flowable>)> = Vec::new();
         let mut in_flow_static_y = vec![None; self.state.children.len()];
         let mut static_cursor_y = inner_y;
+        let mut has_flow_item = false;
         let mut left_float_bottom = inner_y;
         let mut right_float_bottom = inner_y;
         let mut previous_block_margin_bottom: Option<Pt> = None;
@@ -36784,7 +37215,12 @@ impl Flowable for ContainerFlowable {
                     static_cursor_y = static_cursor_y.max(clearance);
                     previous_block_margin_bottom = None;
                 }
-                let block_margins = child.collapsible_block_margins(content_width);
+                let block_margins = self
+                    .state
+                    .flow_gap
+                    .is_none()
+                    .then(|| child.collapsible_block_margins(content_width))
+                    .flatten();
                 if let (Some(previous_bottom), Some((current_top, _))) =
                     (previous_block_margin_bottom, block_margins)
                 {
@@ -36792,6 +37228,14 @@ impl Flowable for ContainerFlowable {
                         - adjacent_margin_stack_adjustment(previous_bottom, current_top);
                 }
                 previous_block_margin_bottom = block_margins.map(|(_, bottom)| bottom);
+                if self.state.flow_gap.is_some()
+                    && child.is_flow_spacing_item(content_width, child_avail_height)
+                {
+                    if has_flow_item {
+                        static_cursor_y += cache.flow_gap;
+                    }
+                    has_flow_item = true;
+                }
             }
             let static_x = inner_x;
             let collapsed_top = cache.child_collapsed_top[idx];
@@ -37420,8 +37864,13 @@ impl Flowable for ContainerFlowable {
 
 #[cfg(test)]
 mod margin_collapse_tests {
-    use super::{Canvas, ContainerFlowable, EdgeSizes, Flowable, LengthSpec, Pt, Size};
-    use std::sync::{Arc, Mutex};
+    use super::{
+        Canvas, ContainerFlowable, EdgeSizes, Flowable, LengthSpec, MetaFlowable, Pt, Size, Spacer,
+    };
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     #[derive(Clone)]
     struct MarginProbe {
@@ -37450,6 +37899,260 @@ mod margin_collapse_tests {
 
         fn collapsible_block_margins(&self, _avail_width: Pt) -> Option<(Pt, Pt)> {
             Some((self.top, self.bottom))
+        }
+    }
+
+    #[test]
+    fn authored_flow_gap_keeps_child_margins_and_matches_painted_positions() {
+        let drawn_y = Arc::new(Mutex::new(Vec::new()));
+        let first = MarginProbe {
+            size: Size {
+                width: Pt::from_f32(100.0),
+                height: Pt::from_f32(50.0),
+            },
+            top: Pt::from_f32(12.0),
+            bottom: Pt::from_f32(10.0),
+            drawn_y: drawn_y.clone(),
+        };
+        let second = MarginProbe {
+            size: Size {
+                width: Pt::from_f32(100.0),
+                height: Pt::from_f32(60.0),
+            },
+            top: Pt::from_f32(24.0),
+            bottom: Pt::from_f32(8.0),
+            drawn_y: drawn_y.clone(),
+        };
+        let parent = ContainerFlowable::new_pt(
+            vec![Box::new(first), Box::new(second)],
+            Pt::from_f32(12.0),
+            Pt::from_f32(12.0),
+        )
+        .with_flow_gap(Some(LengthSpec::Absolute(Pt::from_f32(8.0))));
+        let available = Pt::from_f32(300.0);
+        assert_eq!(
+            parent.wrap(available, available).height,
+            Pt::from_f32(118.0)
+        );
+        assert_eq!(
+            parent.collapsible_block_margins(available),
+            Some((Pt::ZERO, Pt::ZERO))
+        );
+        let mut canvas = Canvas::new(Size {
+            width: available,
+            height: available,
+        });
+        parent.draw(&mut canvas, Pt::ZERO, Pt::ZERO, available, available);
+        assert_eq!(
+            drawn_y.lock().unwrap().as_slice(),
+            &[Pt::ZERO, Pt::from_f32(58.0)]
+        );
+    }
+
+    #[test]
+    fn authored_flow_gap_does_not_lead_or_trail_a_page_fragment() {
+        let drawn_y = Arc::new(Mutex::new(Vec::new()));
+        let children = (0..3)
+            .map(|_| {
+                Box::new(MarginProbe {
+                    size: Size {
+                        width: Pt::from_f32(100.0),
+                        height: Pt::from_f32(50.0),
+                    },
+                    top: Pt::ZERO,
+                    bottom: Pt::ZERO,
+                    drawn_y: drawn_y.clone(),
+                }) as Box<dyn Flowable>
+            })
+            .collect();
+        let parent = ContainerFlowable::new_pt(children, Pt::from_f32(12.0), Pt::from_f32(12.0))
+            .with_flow_gap(Some(LengthSpec::Absolute(Pt::from_f32(10.0))));
+        let width = Pt::from_f32(300.0);
+        let height = Pt::from_f32(115.0);
+        assert_eq!(parent.wrap(width, height).height, Pt::from_f32(170.0));
+        let (first, second) = parent
+            .split(width, height)
+            .expect("split between flow items");
+        assert!(first.wrap(width, height).height <= height);
+        assert_eq!(second.wrap(width, height).height, Pt::from_f32(50.0));
+        let mut canvas = Canvas::new(Size { width, height });
+        first.draw(&mut canvas, Pt::ZERO, Pt::ZERO, width, height);
+        second.draw(&mut canvas, Pt::ZERO, Pt::ZERO, width, height);
+        assert_eq!(
+            drawn_y.lock().unwrap().as_slice(),
+            &[Pt::ZERO, Pt::from_f32(60.0), Pt::ZERO]
+        );
+    }
+
+    #[test]
+    fn authored_flow_gap_ignores_zero_height_items() {
+        let drawn_y = Arc::new(Mutex::new(Vec::new()));
+        let children = [50.0, 0.0, 50.0]
+            .into_iter()
+            .map(|height| {
+                Box::new(MarginProbe {
+                    size: Size {
+                        width: Pt::from_f32(100.0),
+                        height: Pt::from_f32(height),
+                    },
+                    top: Pt::ZERO,
+                    bottom: Pt::ZERO,
+                    drawn_y: drawn_y.clone(),
+                }) as Box<dyn Flowable>
+            })
+            .collect();
+        let parent = ContainerFlowable::new_pt(children, Pt::from_f32(12.0), Pt::from_f32(12.0))
+            .with_flow_gap(Some(LengthSpec::Absolute(Pt::from_f32(10.0))));
+        let available = Pt::from_f32(300.0);
+        assert_eq!(
+            parent.wrap(available, available).height,
+            Pt::from_f32(110.0)
+        );
+        let mut canvas = Canvas::new(Size {
+            width: available,
+            height: available,
+        });
+        parent.draw(&mut canvas, Pt::ZERO, Pt::ZERO, available, available);
+        assert_eq!(
+            drawn_y.lock().unwrap().as_slice(),
+            &[Pt::ZERO, Pt::from_f32(50.0), Pt::from_f32(60.0)]
+        );
+    }
+
+    #[test]
+    fn authored_flow_gap_ignores_metadata_carriers_without_losing_their_extent() {
+        let drawn_y = Arc::new(Mutex::new(Vec::new()));
+        let probe = MarginProbe {
+            size: Size {
+                width: Pt::from_f32(100.0),
+                height: Pt::from_f32(50.0),
+            },
+            top: Pt::ZERO,
+            bottom: Pt::ZERO,
+            drawn_y: drawn_y.clone(),
+        };
+        let epsilon = Pt::from_f32(0.01);
+        let width = Pt::from_f32(300.0);
+        let metadata = MetaFlowable::new(
+            Box::new(ContainerFlowable::new_pt(
+                Vec::new(),
+                Pt::from_f32(12.0),
+                Pt::from_f32(12.0),
+            )),
+            vec![("fb.owner.source_id".into(), "empty".into())],
+        );
+        assert_eq!(metadata.wrap(width, width).height, epsilon);
+        assert!(!metadata.is_flow_spacing_item(width, width));
+        let parent = ContainerFlowable::new_pt(
+            vec![
+                Box::new(probe.clone()),
+                Box::new(metadata),
+                Box::new(Spacer::new_pt(epsilon).with_metadata_only()),
+                Box::new(probe),
+            ],
+            Pt::from_f32(12.0),
+            Pt::from_f32(12.0),
+        )
+        .with_flow_gap(Some(LengthSpec::Absolute(Pt::from_f32(10.0))));
+        assert_eq!(
+            parent.wrap(width, width).height,
+            Pt::from_f32(110.0) + epsilon * 2
+        );
+        let mut canvas = Canvas::new(Size {
+            width,
+            height: width,
+        });
+        parent.draw(&mut canvas, Pt::ZERO, Pt::ZERO, width, width);
+        assert_eq!(
+            drawn_y.lock().unwrap().as_slice(),
+            &[Pt::ZERO, Pt::from_f32(60.0) + epsilon * 2]
+        );
+    }
+
+    #[derive(Clone)]
+    struct FlowBaselineProbe(Arc<AtomicUsize>);
+
+    impl Flowable for FlowBaselineProbe {
+        fn wrap(&self, _width: Pt, _height: Pt) -> Size {
+            Size {
+                width: Pt::from_f32(100.0),
+                height: Pt::from_f32(12.0),
+            }
+        }
+        fn split(&self, _width: Pt, _height: Pt) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+            None
+        }
+        fn draw(&self, _canvas: &mut Canvas, _x: Pt, _y: Pt, _width: Pt, _height: Pt) {}
+        fn first_baseline(&self, _width: Pt) -> Option<Pt> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Some(Pt::from_f32(9.0))
+        }
+    }
+
+    #[test]
+    fn authored_flow_gap_is_included_in_first_and_last_baselines() {
+        let probe = FlowBaselineProbe(Arc::new(AtomicUsize::new(0)));
+        let parent = ContainerFlowable::new_pt(
+            vec![
+                Box::new(Spacer::new_pt(Pt::from_f32(18.0))),
+                Box::new(probe.clone()),
+                Box::new(probe),
+            ],
+            Pt::from_f32(12.0),
+            Pt::from_f32(12.0),
+        )
+        .with_flow_gap(Some(LengthSpec::Absolute(Pt::from_f32(9.0))));
+        let width = Pt::from_f32(300.0);
+        assert_eq!(parent.first_baseline(width), Some(Pt::from_f32(36.0)));
+        assert_eq!(parent.inline_baseline(width), Some(Pt::from_f32(57.0)));
+    }
+
+    #[test]
+    fn authored_flow_gap_baseline_lookup_does_not_repeat_nested_work() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut child: Box<dyn Flowable> = Box::new(FlowBaselineProbe(calls.clone()));
+        for _ in 0..8 {
+            child = Box::new(
+                ContainerFlowable::new_pt(vec![child], Pt::from_f32(12.0), Pt::from_f32(12.0))
+                    .with_flow_gap(Some(LengthSpec::Absolute(Pt::from_f32(9.0)))),
+            );
+        }
+        let width = Pt::from_f32(300.0);
+        assert_eq!(child.first_baseline(width), Some(Pt::from_f32(9.0)));
+        assert_eq!(calls.swap(0, Ordering::Relaxed), 1);
+        assert_eq!(child.inline_baseline(width), Some(Pt::from_f32(9.0)));
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn authored_flow_gap_preserves_resolved_percentage_across_page_fragments() {
+        let drawn_y = Arc::new(Mutex::new(Vec::new()));
+        let children = (0..5)
+            .map(|_| {
+                Box::new(MarginProbe {
+                    size: Size {
+                        width: Pt::from_f32(100.0),
+                        height: Pt::from_f32(36.0),
+                    },
+                    top: Pt::ZERO,
+                    bottom: Pt::ZERO,
+                    drawn_y: drawn_y.clone(),
+                }) as Box<dyn Flowable>
+            })
+            .collect();
+        let parent = ContainerFlowable::new_pt(children, Pt::from_f32(12.0), Pt::from_f32(12.0))
+            .with_height(LengthSpec::Absolute(Pt::from_f32(240.0)))
+            .with_flow_gap(Some(LengthSpec::Percent(0.1)));
+        let width = Pt::from_f32(300.0);
+        let height = Pt::from_f32(160.0);
+        let (first, second) = parent.split(width, height).expect("split authored flow");
+        let mut canvas = Canvas::new(Size { width, height });
+        first.draw(&mut canvas, Pt::ZERO, Pt::ZERO, width, height);
+        second.draw(&mut canvas, Pt::ZERO, Pt::ZERO, width, height);
+        let positions = drawn_y.lock().unwrap();
+        assert_eq!(positions.len(), 5);
+        for (actual, expected) in positions.iter().zip([0.0, 60.0, 120.0, 0.0, 60.0]) {
+            assert!((actual.to_f32() - expected).abs() < 0.001, "{positions:?}");
         }
     }
 
@@ -37643,6 +38346,10 @@ impl FloatFlowable {
 }
 
 impl Flowable for FloatFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.child.diagnostic_source_ids()
+    }
+
     fn wrap(&self, _avail_width: Pt, _avail_height: Pt) -> Size {
         Size {
             width: Pt::ZERO,
@@ -37708,6 +38415,10 @@ impl ClearFlowable {
 }
 
 impl Flowable for ClearFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.child.diagnostic_source_ids()
+    }
+
     fn wrap(&self, avail_width: Pt, avail_height: Pt) -> Size {
         self.child.wrap(avail_width, avail_height)
     }
@@ -37746,7 +38457,18 @@ impl Flowable for ClearFlowable {
         avail_width: Pt,
         avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
-        let (first, second) = self.child.split(avail_width, avail_height)?;
+        self.split_with_context(avail_width, avail_height, SplitContext::at_fragment_start())
+    }
+
+    fn split_with_context(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        let (first, second) = self
+            .child
+            .split_with_context(avail_width, avail_height, context)?;
         Some((
             Box::new(Self::new(first, self.clear)) as Box<dyn Flowable>,
             Box::new(Self::new(second, self.clear)) as Box<dyn Flowable>,
@@ -37984,6 +38706,10 @@ impl ExpandedWidthFlowable {
 }
 
 impl Flowable for ExpandedWidthFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.child.diagnostic_source_ids()
+    }
+
     fn with_sliced_decoration_block_extension(&self, extra: Pt) -> Box<dyn Flowable> {
         let mut extended = self.clone();
         extended.child = self
@@ -38024,9 +38750,19 @@ impl Flowable for ExpandedWidthFlowable {
         avail_width: Pt,
         avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
-        let (first, second) = self.child.split(
+        self.split_with_context(avail_width, avail_height, SplitContext::at_fragment_start())
+    }
+
+    fn split_with_context(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        let (first, second) = self.child.split_with_context(
             self.expanded_width(avail_width),
             self.expanded_height(avail_height),
+            context,
         )?;
         Some((
             Box::new(Self {
@@ -38487,6 +39223,41 @@ impl MetaFlowable {
 }
 
 impl Flowable for MetaFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        if let Some(source) = self.metadata.iter().find_map(|(key, value)| {
+            (key == "fb.owner.source_id" && !value.is_empty()).then_some(value)
+        }) {
+            vec![source.clone()]
+        } else {
+            self.child.diagnostic_source_ids()
+        }
+    }
+
+    fn split_with_diagnostics(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Result<(Box<dyn Flowable>, Box<dyn Flowable>), SplitFailure> {
+        let (first, second) = self
+            .child
+            .split_with_diagnostics(avail_width, avail_height, context)
+            .map_err(|mut failure| {
+                if failure.source_ids.is_empty() {
+                    // Only this wrapper's own boundary can identify its
+                    // rejected constraint. Descendant roots are still retained
+                    // separately as fragment scope; do not guess among them.
+                    if let Some(source) = self.metadata.iter().find_map(|(key, value)| {
+                        (key == "fb.owner.source_id" && !value.is_empty()).then_some(value)
+                    }) {
+                        failure.source_ids.push(source.clone());
+                    }
+                }
+                failure
+            })?;
+        Ok((Box::new(self.rewrap(first)), Box::new(self.rewrap(second))))
+    }
+
     fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
         let end = levels.len().checked_sub(self.bidi_suffix.len())?;
         let levels = levels.get(self.bidi_prefix.len()..end)?;
@@ -38691,7 +39462,18 @@ impl Flowable for MetaFlowable {
         avail_width: Pt,
         avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
-        let (first, second) = self.child.split(avail_width, avail_height)?;
+        self.split_with_context(avail_width, avail_height, SplitContext::at_fragment_start())
+    }
+
+    fn split_with_context(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        let (first, second) = self
+            .child
+            .split_with_context(avail_width, avail_height, context)?;
         Some((
             Box::new(self.rewrap(first)) as Box<dyn Flowable>,
             Box::new(self.rewrap(second)) as Box<dyn Flowable>,
@@ -38947,6 +39729,10 @@ impl Flowable for MetaFlowable {
         self.child.is_layout_marker()
     }
 
+    fn is_flow_spacing_item(&self, avail_width: Pt, avail_height: Pt) -> bool {
+        self.child.is_flow_spacing_item(avail_width, avail_height)
+    }
+
     fn grid_row_span(&self) -> usize {
         self.child.grid_row_span()
     }
@@ -39189,6 +39975,10 @@ impl RelativePositionedFlowable {
 }
 
 impl Flowable for AbsolutePositionedFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.child.diagnostic_source_ids()
+    }
+
     fn wrap(&self, _avail_width: Pt, _avail_height: Pt) -> Size {
         Size {
             width: Pt::ZERO,
@@ -39450,6 +40240,10 @@ impl Flowable for AbsolutePositionedFlowable {
 }
 
 impl Flowable for RelativePositionedFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.child.diagnostic_source_ids()
+    }
+
     fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
         let mut resolved = self.clone();
         resolved.child = self.child.with_inline_bidi_levels(levels)?;
@@ -39532,7 +40326,18 @@ impl Flowable for RelativePositionedFlowable {
         avail_width: Pt,
         avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
-        let (first, second) = self.child.split(avail_width, avail_height)?;
+        self.split_with_context(avail_width, avail_height, SplitContext::at_fragment_start())
+    }
+
+    fn split_with_context(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        let (first, second) = self
+            .child
+            .split_with_context(avail_width, avail_height, context)?;
         let first = Self {
             child: first,
             left: self.left,

@@ -157,6 +157,8 @@ mod sfnt;
 mod sfnt_cff;
 mod sfnt_outline;
 mod spill;
+#[cfg(test)]
+mod split_diagnostic_tests;
 mod style;
 mod svg;
 #[cfg(test)]
@@ -201,8 +203,8 @@ pub use finalize::{
 };
 pub use flowable::{
     AbsolutePositionedFlowable, BreakAfter, BreakBefore, BreakInside, ContainerFlowable, EdgeSizes,
-    Flowable, ImageFlowable, LengthSpec, Pagination, Paragraph, Spacer, SvgFlowable, TableFlowable,
-    TextStyle,
+    Flowable, ImageFlowable, LengthSpec, Pagination, Paragraph, Spacer, SplitContext, SplitFailure,
+    SvgFlowable, TableFlowable, TextStyle,
 };
 use font::FontRegistry;
 #[cfg(feature = "python")]
@@ -1139,6 +1141,27 @@ impl CompiledDocument {
             self.debug.clone(),
             self.perf.clone(),
         )?)
+    }
+
+    /// Preview the compiled template without parsing or laying out the input again.
+    ///
+    /// Uses the layout rasterizer, with the same semantics as
+    /// [`FullBleed::render_image_pages`]. These previews are not a rasterization
+    /// of the finalized PDF. Bindings rendered separately do not modify this
+    /// immutable template or its previews.
+    pub fn render_image_pages(&self, dpi: u32) -> Result<Vec<Vec<u8>>, FullBleedError> {
+        let start = std::time::Instant::now();
+        let pages = raster::document_to_png_pages(
+            &self.document,
+            dpi,
+            Some(self.font_registry.as_ref()),
+            self.pdf_options.shape_text,
+        )?;
+        if let Some(logger) = self.perf.as_deref() {
+            logger.log_span_ms("raster", Some(0), start.elapsed().as_secs_f64() * 1000.0);
+            logger.log_counts("raster", Some(0), &[("pages", pages.len() as u64)]);
+        }
+        Ok(pages)
     }
 
     /// Serialize the template to a writer and return the number of bytes written.
@@ -3639,17 +3662,6 @@ impl FullBleed {
             asset_bundle: self.asset_bundle.clone(),
             render_context_cache: Mutex::new(RenderContextCache::new()),
         }
-    }
-
-    #[cfg(feature = "python")]
-    pub(crate) fn measure_text_width_for_trace(
-        &self,
-        font_name: &str,
-        font_size: Pt,
-        text: &str,
-    ) -> Pt {
-        self.font_registry
-            .measure_text_width(font_name, font_size, text)
     }
 
     #[cfg(feature = "python")]
@@ -11686,7 +11698,7 @@ mod tests {
     }
 
     #[test]
-    fn oversized_single_table_row_reuses_one_compiled_surface_across_pages() {
+    fn oversized_empty_table_row_preserves_background_extent_across_pages() {
         let engine = FullBleed::builder().build().expect("engine");
         let document = engine
             .render_to_document(
@@ -11706,26 +11718,20 @@ mod tests {
                 page.commands
                     .iter()
                     .find_map(|command| match command {
-                        Command::DrawForm {
-                            y,
-                            width,
-                            height,
-                            resource_id,
-                            ..
-                        } if resource_id.starts_with("table-row-fragment:") => {
-                            Some((*y, *width, *height, resource_id.clone()))
-                        }
+                        Command::DrawRect {
+                            y, width, height, ..
+                        } if *width == Pt::from_f32(192.0) => Some((*y, *width, *height)),
                         _ => None,
                     })
-                    .expect("each page should draw the compiled row surface")
+                    .expect("each page should paint its portion of the cell background")
             })
             .collect();
-        assert_eq!(draws[0].0, Pt::from_f32(24.0));
-        assert_eq!(draws[1].0, Pt::from_f32(-78.0));
-        assert_eq!(draws[2].0, Pt::from_f32(-180.0));
-        assert!(draws.iter().all(|draw| {
-            draw.1 == Pt::from_f32(192.0) && draw.2 == Pt::from_f32(270.0) && draw.3 == draws[0].3
-        }));
+        assert!(draws.iter().all(|draw| draw.0 == Pt::from_f32(24.0)));
+        assert_eq!(
+            draws.iter().map(|draw| draw.2).fold(Pt::ZERO, |a, b| a + b),
+            Pt::from_f32(270.0)
+        );
+        assert!(draws.iter().all(|draw| draw.2 <= Pt::from_f32(102.0)));
     }
 
     #[test]
@@ -14251,6 +14257,151 @@ mod tests {
     }
 
     #[test]
+    fn inline_flex_children_preserve_their_box_and_font_metrics() {
+        let engine = FullBleed::builder()
+            .register_font_file(repo_font_path("Inter-Variable.ttf"))
+            .build()
+            .expect("engine with Inter");
+        for display in ["flex", "inline-flex"] {
+            for tag in ["span", "strong", "a"] {
+                let html = format!(
+                    "<div class='row'><{tag} class='brand' href='https://example.invalid/order'>Northstar Studio</{tag}><div>Orders</div></div>"
+                );
+                let css = format!(
+                    "@page {{ size:400pt 120pt; margin:20pt; }} body {{ margin:0; font:10pt Inter; }} .row {{ display:{display}; width:360pt; align-items:center; }} .brand {{ font:15pt Inter; white-space:nowrap; margin-right:12pt; }}"
+                );
+                let document = engine.render_to_document(&html, &css).expect("render");
+                let positions = document.pages[0]
+                    .commands
+                    .iter()
+                    .filter_map(|command| match command {
+                        Command::DrawString { text, x, .. }
+                            if text == "Northstar Studio" || text == "Orders" =>
+                        {
+                            Some((text.as_str(), *x))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                let brand = positions
+                    .iter()
+                    .find(|(text, _)| *text == "Northstar Studio")
+                    .expect("brand")
+                    .1;
+                let link = positions
+                    .iter()
+                    .find(|(text, _)| *text == "Orders")
+                    .expect("link")
+                    .1;
+                // The vendored font's unkerned hmtx advance is 15844/2048 em.
+                // A direct flex item retains that complete run and its margin.
+                let expected = Pt::from_f32(15.0).mul_ratio(15844, 2048) + Pt::from_f32(12.0);
+                assert!(
+                    (link - brand - expected).to_f32().abs() < 0.1,
+                    "{display} {tag}: {positions:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inline_flex_children_keep_authored_width_padding_and_margins() {
+        let engine = FullBleed::builder().build().expect("engine");
+        for display in ["flex", "inline-flex"] {
+            let html = "<div class='row'><span class='item'>First</span><div>Second</div></div>";
+            let css = format!(
+                "@page {{ size:300pt 100pt; margin:0; }} body {{ margin:0; }} .row {{ display:{display}; width:300pt; }} .item {{ box-sizing:content-box; width:80pt; padding:0 6pt; margin:0 12pt; }}"
+            );
+            let document = engine.render_to_document(html, &css).expect("render");
+            let positions = document.pages[0]
+                .commands
+                .iter()
+                .filter_map(|command| match command {
+                    Command::DrawString { text, x, .. } if text == "First" || text == "Second" => {
+                        Some((text.as_str(), *x))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                positions[0],
+                ("First", Pt::from_f32(18.0)),
+                "{display}: {positions:?}"
+            );
+            assert_eq!(positions[1].0, "Second");
+            assert!(
+                (positions[1].1.to_f32() - 116.0).abs() < 0.01,
+                "{display}: {positions:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn inline_flex_semantic_text_containers_keep_item_boxes() {
+        let engine = FullBleed::builder()
+            .register_font_file(repo_font_path("Inter-Variable.ttf"))
+            .build()
+            .expect("engine with Inter");
+        for display in ["flex", "inline-flex", "grid", "inline-grid"] {
+            for tag in [
+                "p", "h1", "h2", "h3", "h4", "h5", "h6", "a", "strong", "label",
+            ] {
+                let html = format!(
+                    "<{tag} class='row'><span class='mark'>I</span><span>Value</span></{tag}>"
+                );
+                let css = format!(
+                    "@page {{size:300pt 100pt;margin:0}} body {{margin:0}} .row {{display:{display};width:280pt;margin:0;padding:0;font:10pt Inter;grid-template-columns:18pt 1fr}} .mark {{width:12pt;margin-right:6pt}}"
+                );
+                let document = engine.render_to_document(&html, &css).expect("render");
+                let positions = document.pages[0]
+                    .commands
+                    .iter()
+                    .filter_map(|command| match command {
+                        Command::DrawString { text, x, y, .. }
+                            if text == "I" || text == "Value" =>
+                        {
+                            Some((text.as_str(), *x, *y))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(positions.len(), 2, "{tag} {display}: {positions:?}");
+                assert_eq!(positions[0].0, "I");
+                assert_eq!(positions[1].0, "Value");
+                assert!(
+                    (positions[1].1 - positions[0].1 - Pt::from_f32(18.0))
+                        .to_f32()
+                        .abs()
+                        < 0.1,
+                    "{tag} {display}: {positions:?}"
+                );
+                assert_eq!(
+                    positions[0].2, positions[1].2,
+                    "{tag} {display}: {positions:?}"
+                );
+                let semantic_role = match tag {
+                    "p" => Some("P"),
+                    "h1" => Some("H1"),
+                    "h2" => Some("H2"),
+                    "h3" => Some("H3"),
+                    "h4" => Some("H4"),
+                    "h5" => Some("H5"),
+                    "h6" => Some("H6"),
+                    _ => None,
+                };
+                if let Some(expected) = semantic_role {
+                    assert!(
+                        document.pages[0].commands.iter().any(|command| {
+                            matches!(command, Command::BeginTag { role, .. } if role == expected)
+                        }),
+                        "{tag} {display} lost its semantic role"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn definite_flex_item_width_caps_its_automatic_minimum() {
         let html =
             "<html><body><div class='row'><div class='item'>123456789</div></div></body></html>";
@@ -14639,6 +14790,150 @@ mod tests {
 
         let result = frame.add(Box::new(Spacer::new_pt(Pt::from_f32(5.0))), &mut canvas);
         assert!(matches!(result, AddResult::Overflow(_, _)));
+    }
+
+    #[test]
+    fn oversized_table_row_continues_cell_content_with_repeated_headers() {
+        let header = vec![vec![table_cell("HEADER")]];
+        let markers: Vec<_> = (0..30).map(|i| format!("SEGMENT_{i:03}")).collect();
+        let body = vec![vec![table_cell(&markers.join("\n"))]];
+        let table = TableFlowable::new(body)
+            .with_header(header)
+            .repeat_header(true);
+        let width = Pt::from_f32(300.0);
+        let height = Pt::from_f32(72.0);
+        assert!(table.wrap(width, height).height > height);
+        let rect = Rect {
+            x: Pt::ZERO,
+            y: Pt::ZERO,
+            width,
+            height,
+        };
+        let mut canvas = Canvas::new(Size { width, height });
+        let mut remainder: Option<Box<dyn Flowable>> = Some(Box::new(table));
+        for _ in 0..20 {
+            let Some(next) = remainder.take() else {
+                break;
+            };
+            let mut frame = Frame::new(rect);
+            match frame.add(next, &mut canvas) {
+                AddResult::Placed(_) => {}
+                AddResult::Split(rest, _) => {
+                    remainder = Some(rest);
+                    canvas.show_page();
+                }
+                _ => panic!("oversized text row must make progress on a fresh page"),
+            }
+        }
+        assert!(remainder.is_none(), "row continuation did not terminate");
+        let document = canvas.finish();
+        assert!(document.pages.len() > 1);
+        for page in &document.pages {
+            assert!(page_contains_text(page, "HEADER"));
+            assert!(page_contains_text(page, "SEGMENT_"), "header-only page");
+        }
+        for marker in &markers {
+            let count = document
+                .pages
+                .iter()
+                .flat_map(|page| &page.commands)
+                .filter(
+                    |command| matches!(command, Command::DrawString { text, .. } if text == marker),
+                )
+                .count();
+            assert_eq!(count, 1, "content duplicated or missing: {marker}");
+        }
+    }
+
+    #[test]
+    fn table_row_moves_intact_from_a_partly_used_frame() {
+        let table = TableFlowable::new(vec![vec![table_cell("FIRST\nSECOND\nTHIRD")]])
+            .with_header(vec![vec![table_cell("HEADER")]])
+            .repeat_header(true);
+        let width = Pt::from_f32(300.0);
+        let height = Pt::from_f32(100.0);
+        let rect = Rect {
+            x: Pt::ZERO,
+            y: Pt::ZERO,
+            width,
+            height,
+        };
+        let mut canvas = Canvas::new(Size { width, height });
+        let mut used = Frame::new(rect);
+        assert!(matches!(
+            used.add(Box::new(Spacer::new_pt(Pt::from_f32(60.0))), &mut canvas),
+            AddResult::Placed(_)
+        ));
+        let remaining = match used.add(Box::new(table), &mut canvas) {
+            AddResult::Overflow(rest, _) => rest,
+            _ => panic!("a row that fits a fresh page should move intact"),
+        };
+        canvas.show_page();
+        assert!(matches!(
+            Frame::new(rect).add(remaining, &mut canvas),
+            AddResult::Placed(_)
+        ));
+        let document = canvas.finish();
+        assert!(!page_contains_text(&document.pages[0], "FIRST"));
+        assert!(page_contains_text(&document.pages[1], "FIRST SECOND THIRD"));
+    }
+
+    #[test]
+    fn table_header_without_room_for_any_cell_content_does_not_loop() {
+        let table = TableFlowable::new(vec![vec![table_cell("BODY")]])
+            .with_header(vec![vec![table_cell("HEADER")]])
+            .repeat_header(true);
+        assert!(
+            table
+                .split(Pt::from_f32(300.0), Pt::from_f32(12.0))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn empty_companion_cell_does_not_fake_row_continuation_progress() {
+        let table = TableFlowable::new(vec![vec![
+            table_cell(""),
+            table_cell("").with_content(Box::new(Spacer::new_pt(Pt::from_f32(500.0)))),
+        ]])
+        .with_header(vec![vec![table_cell("HEADER"), table_cell("VALUE")]])
+        .repeat_header(true);
+        assert!(
+            table
+                .split(Pt::from_f32(300.0), Pt::from_f32(72.0))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn nonrepeating_column_labels_stay_with_oversized_row_content() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let content = (0..40)
+            .map(|i| format!("<p>SEGMENT_{i:03}</p>"))
+            .collect::<String>();
+        let html = format!(
+            "<table><tbody><tr style='break-after:avoid'><th scope='col'>LABEL</th></tr><tr><td>{content}</td></tr><tr><td>AFTER</td></tr></tbody></table>"
+        );
+        let document = engine.render_to_document(&html,
+            "@page {size:300pt 100pt;margin:10pt} * {margin:0;padding:0;font-family:Helvetica;font-size:10pt;line-height:12pt} table {width:100%;border-collapse:collapse} td {vertical-align:top}").expect("render");
+        assert!(document.pages.len() > 1);
+        assert!(page_contains_text(&document.pages[0], "LABEL SEGMENT_000"));
+        for page in &document.pages[1..] {
+            assert!(!page_contains_text(page, "LABEL"));
+        }
+        for i in 0..40 {
+            let marker = format!("SEGMENT_{i:03}");
+            assert_eq!(
+                document
+                    .pages
+                    .iter()
+                    .filter(|page| page_contains_text(page, &marker))
+                    .count(),
+                1,
+                "{marker}"
+            );
+        }
+        assert!(page_contains_text(document.pages.last().unwrap(), "AFTER"));
     }
 
     #[test]
@@ -15123,6 +15418,33 @@ mod tests {
             compiled.render_many_to_buffer(0),
             Err(FullBleedError::EmptyDocumentSet)
         ));
+    }
+
+    #[test]
+    fn compiled_preview_owns_the_template_after_engine_drop() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let html = "<p>Compiled {{label}}</p><p style='break-before: page'>Second page</p>";
+        let css = "@page { size: 180pt 120pt; margin: 12pt; } p { color: #345678; }";
+        let expected = engine
+            .render_image_pages(html, css, 48)
+            .expect("ordinary preview");
+        let compiled = engine.compile_document(html, css).expect("compile");
+        drop(engine);
+        assert_eq!(compiled.page_count(), 2);
+        compiled
+            .render_bindings_to_buffer(&HashMap::from([(
+                "label".to_string(),
+                vec!["changed".to_string()],
+            )]))
+            .expect("binding output");
+        assert_eq!(
+            compiled.render_image_pages(48).expect("owned preview"),
+            expected
+        );
+        assert_eq!(
+            compiled.render_image_pages(48).expect("repeated preview"),
+            expected
+        );
     }
 
     #[test]

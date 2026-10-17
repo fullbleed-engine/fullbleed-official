@@ -13,3 +13,5 @@ benchmarks/pdf_renderers/** text eol=lf
 benchmarks/pdf_renderers/fonts/*.ttf binary
 tests/fixtures/rtl/*.ttf binary
 tests/fixtures/rtl/OFL.txt -text -whitespace
+# Preserve the exact pinned Bootstrap distribution, including its LF bytes.
+python/fullbleed_assets/bootstrap.min.css -text -whitespace

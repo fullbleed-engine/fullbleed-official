@@ -34,6 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.release-version.outputs.version }}
+      cargo_version: ${{ steps.release-version.outputs.cargo_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -55,10 +56,12 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
-            version="$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
+            version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           fi
           python tools/check_release_metadata.py --expected-version "${version}" --json
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          cargo_version="$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
+          echo "cargo_version=${cargo_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Validate MIT license metadata
         run: python tools/check_license_integrity.py --json
@@ -141,6 +144,31 @@ jobs:
         with:
           name: release-border-image-slices
           path: target/border-image-slices
+          if-no-files-found: warn
+
+      - name: Verify experimental components from the release wheel
+        shell: bash
+        run: |
+          python -m pip install mypy==2.4.0
+          python tools/generate_component_stubs.py --check
+          python -I tools/smoke_component_quickstart.py --expected-version "${{ steps.release-version.outputs.version }}" --out target/release-components/quickstart
+          python -I tools/smoke_component_recipes.py --out target/release-components/recipes
+          python -I tools/smoke_component_parts.py --out target/release-components/parts
+          python -I tools/smoke_component_svg.py --out target/release-components/svg
+          python -I tools/smoke_component_inset_shadows.py --out target/release-components/inset-shadows
+          python -I tools/smoke_component_fonts.py --out target/release-components/fonts
+          python -I tools/smoke_component_flex.py --out target/release-components/flex
+          python -I tools/smoke_component_bootstrap.py --out target/release-components/bootstrap
+          python -I tools/smoke_component_typing.py --out target/release-components/typing.json
+          npm install --ignore-scripts --no-package-lock --no-save --no-audit --no-fund --prefix target/component-editor-tools pyright@1.1.414
+          python -I tools/smoke_component_editor.py --pyright-root target/component-editor-tools/node_modules/pyright --out target/release-components/editor.json
+
+      - name: Retain component release evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-components
+          path: target/release-components/
           if-no-files-found: warn
 
       - name: Verify independent font synthesis in installed release output
@@ -303,7 +331,7 @@ jobs:
           RUSTUP_TOOLCHAIN: "1.85.0"
         run: |
           python tools/smoke_crates_consumer.py \
-            --expected-version "${{ steps.release-version.outputs.version }}" \
+            --expected-version "${{ steps.release-version.outputs.cargo_version }}" \
             --json
 
       - name: Upload Cargo package evidence

@@ -179,6 +179,47 @@ pub(crate) fn parse_declaration_block(input: &str) -> Result<DeclarationBlock> {
     parse_declarations(input, 0, &mut budget)
 }
 
+/// Inspect authored page geometry without evaluating selectors, media or layout.
+/// Consumers that own paper settings can reject competing declarations while
+/// still accepting page furniture. Strings, comments and margin-box declarations
+/// must not be mistaken for declarations on the page itself.
+pub(crate) fn stylesheet_page_geometry(input: &str) -> Result<Vec<(String, String, usize)>> {
+    let sheet = parse_stylesheet(input)?;
+    let mut found = Vec::new();
+    let mut pending: Vec<_> = sheet.rules.iter().rev().collect();
+    while let Some(rule) = pending.pop() {
+        let Rule::At(rule) = rule else { continue };
+        let name = parse_identifier(&rule.name).unwrap_or_else(|| rule.name.clone());
+        if name.eq_ignore_ascii_case("page") {
+            let decoded;
+            let block = match &rule.block {
+                Some(AtRuleBlock::Declarations(block)) => Some(block),
+                Some(AtRuleBlock::Raw(text)) => {
+                    decoded = parse_declaration_block(text)?;
+                    Some(&decoded)
+                }
+                _ => None,
+            };
+            if let Some(block) = block {
+                for declaration in &block.declarations {
+                    let property = parse_identifier(&declaration.name)
+                        .unwrap_or_else(|| declaration.name.clone())
+                        .to_ascii_lowercase();
+                    if matches!(property.as_str(), "size" | "page-orientation" | "margin")
+                        || property.starts_with("margin-")
+                    {
+                        found.push((rule.prelude.clone(), property, rule.source_range.start));
+                    }
+                }
+            }
+        }
+        if let Some(AtRuleBlock::Rules(nested)) = &rule.block {
+            pending.extend(nested.iter().rev());
+        }
+    }
+    Ok(found)
+}
+
 fn ensure_input_bound(input: &str) -> Result<()> {
     if input.len() > MAX_CSS_BYTES {
         return Err(Error::new(
@@ -1302,6 +1343,32 @@ mod tests {
         assert!(parse_stylesheet("a { color: red").is_err());
         assert!(parse_stylesheet("/* never closed").is_err());
         assert!(parse_declaration_block("content: \"never closed").is_err());
+    }
+
+    #[test]
+    fn authored_page_geometry_uses_syntax_and_retains_rule_order_and_locations() {
+        let css = r#"/* @page { size:A3 } */
+            p::before { content:"@page { margin:0 }"; margin:2pt }
+            @page { @top-left { content:"Title"; margin:3pt } color:blue }
+            @media print { @page :first { margin-top:12mm; size:A5 } }
+            @layer paper { @page report { page-orientation:rotate-left } }
+            @\70 age { m\61 rgin:0 }
+        "#;
+        let found = stylesheet_page_geometry(css).unwrap();
+        assert_eq!(found.len(), 4);
+        assert_eq!(
+            found[0],
+            (
+                ":first".into(),
+                "margin-top".into(),
+                css.find("@page :first").unwrap()
+            )
+        );
+        assert_eq!(found[1].1, "size");
+        assert_eq!(found[2].0, "report");
+        assert_eq!(found[2].1, "page-orientation");
+        assert_eq!(found[3].1, "margin");
+        assert!(stylesheet_page_geometry("@media print { .notice { color:red }").is_err());
     }
 
     #[test]

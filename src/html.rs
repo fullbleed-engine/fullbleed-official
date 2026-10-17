@@ -2607,9 +2607,9 @@ fn node_to_flowables_in_scope(
             let transparent_inline = screen_reader_text.is_none()
                     && matches!(style.display, DisplayMode::Inline)
                     && !matches!(info.tag.as_str(), "img" | "svg" | "br")
-                    // Grid items are blockified even when their specified
+                    // Flex/grid items are blockified even when their specified
                     // outer display type is inline.
-                    && !matches!(parent_style.display, DisplayMode::Grid | DisplayMode::InlineGrid)
+                    && !parent_is_flex
                     // Positioned inline boxes need the normal wrapper path so the
                     // absolute/relative flowable survives into the parent's layout.
                     // Returning the children directly here silently discarded
@@ -2862,6 +2862,35 @@ fn node_to_flowables_in_scope(
                             "h6" => "H6",
                             _ => "P",
                         };
+
+                        // The element's declared formatting context takes
+                        // precedence over the single-paragraph fast path.
+                        // Blockified children must remain separate flex/grid
+                        // items rather than becoming vertically stacked runs.
+                        if matches!(
+                            style.display,
+                            DisplayMode::Flex
+                                | DisplayMode::InlineFlex
+                                | DisplayMode::Grid
+                                | DisplayMode::InlineGrid
+                        ) {
+                            return flex_container_flowables(
+                                node,
+                                resolver,
+                                &style,
+                                ancestors,
+                                counters,
+                                font_registry.clone(),
+                                asset_bundle.clone(),
+                                report.as_deref_mut(),
+                                svg_form,
+                                svg_raster_fallback,
+                                perf,
+                                doc_id,
+                                &before_items,
+                                &after_items,
+                            );
+                        }
 
                         if inline_children_only(node, resolver, &style, ancestors)
                             && !has_structured_pseudo
@@ -4023,6 +4052,9 @@ fn node_to_flowables_in_scope(
                             }
                             let container_options = ContainerCompilationOptions {
                                 suppress_single_used_column_rule: suppress_unused_multicol_rule,
+                                flow_gap: (info.attrs.get("data-fb-flow").map(String::as_str)
+                                    == Some("true"))
+                                .then_some(style.row_gap),
                                 ..ContainerCompilationOptions::default()
                             };
                             if text.is_empty() {
@@ -4156,6 +4188,12 @@ fn node_to_flowables_in_scope(
                                     ContainerCompilationOptions {
                                         suppress_single_used_column_rule:
                                             suppress_unused_multicol_rule,
+                                        flow_gap: (info
+                                            .attrs
+                                            .get("data-fb-flow")
+                                            .map(String::as_str)
+                                            == Some("true"))
+                                        .then_some(style.row_gap),
                                         ..ContainerCompilationOptions::default()
                                     },
                                 )
@@ -4166,6 +4204,12 @@ fn node_to_flowables_in_scope(
                                     ContainerCompilationOptions {
                                         suppress_single_used_column_rule:
                                             suppress_unused_multicol_rule,
+                                        flow_gap: (info
+                                            .attrs
+                                            .get("data-fb-flow")
+                                            .map(String::as_str)
+                                            == Some("true"))
+                                        .then_some(style.row_gap),
                                         ..ContainerCompilationOptions::default()
                                     },
                                 )
@@ -4175,6 +4219,29 @@ fn node_to_flowables_in_scope(
                     _ => (|| {
                         if is_table_container_display(style.display) {
                             table_container_flowables(
+                                node,
+                                resolver,
+                                &style,
+                                ancestors,
+                                counters,
+                                font_registry.clone(),
+                                asset_bundle.clone(),
+                                report.as_deref_mut(),
+                                svg_form,
+                                svg_raster_fallback,
+                                perf,
+                                doc_id,
+                                &before_items,
+                                &after_items,
+                            )
+                        } else if matches!(
+                            style.display,
+                            DisplayMode::Flex
+                                | DisplayMode::InlineFlex
+                                | DisplayMode::Grid
+                                | DisplayMode::InlineGrid
+                        ) {
+                            flex_container_flowables(
                                 node,
                                 resolver,
                                 &style,
@@ -4205,7 +4272,16 @@ fn node_to_flowables_in_scope(
                                 perf,
                                 doc_id,
                             );
-                            inject_pseudo_items(children, &before_items, &after_items)
+                            let children =
+                                inject_pseudo_items(children, &before_items, &after_items);
+                            if parent_is_flex {
+                                // Inline tags without a dedicated compiler branch
+                                // still own a box when they are flex/grid items.
+                                // Keep their margins, padding and sizing here.
+                                container_flowables(children, &style)
+                            } else {
+                                children
+                            }
                         }
                     })(),
                 }
@@ -4224,7 +4300,9 @@ fn node_to_flowables_in_scope(
             // Use a tiny spacer to ensure the flowable is drawable; zero-height carriers can
             // be skipped in layout paths and lose metadata emission.
             if flowables.is_empty() && !node_meta.is_empty() {
-                let carrier = Spacer::new_pt(Pt::from_f32(0.01)).with_pagination(style.pagination);
+                let carrier = Spacer::new_pt(Pt::from_f32(0.01))
+                    .with_pagination(style.pagination)
+                    .with_metadata_only();
                 flowables.push(LayoutItem::Block {
                     flowable: Box::new(carrier) as Box<dyn Flowable>,
                     flex_grow: style.flex_grow,
@@ -11650,6 +11728,7 @@ fn container_flowables(children: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<
 struct ContainerCompilationOptions {
     suppress_single_used_column_rule: bool,
     list_numbering: Option<&'static str>,
+    flow_gap: Option<LengthSpec>,
 }
 
 impl Default for ContainerCompilationOptions {
@@ -11657,6 +11736,7 @@ impl Default for ContainerCompilationOptions {
         Self {
             suppress_single_used_column_rule: false,
             list_numbering: None,
+            flow_gap: None,
         }
     }
 }
@@ -11929,6 +12009,7 @@ fn container_flowable_with_role_options(
             .collect();
     }
     let mut container = ContainerFlowable::new_pt(flowables, style.font_size, style.root_font_size)
+        .with_flow_gap(options.flow_gap)
         .with_inline_bidi_transparency(matches!(style.display, DisplayMode::Inline))
         .with_establishes_abs_containing_block(establishes_abs_containing_block(style))
         .with_establishes_stacking_context(establishes_stacking_context(style))
@@ -13593,6 +13674,13 @@ fn flex_container_flowables(
             .and_then(|element| match element.name.local.as_ref() {
                 "figure" => Some("Figure"),
                 "figcaption" => Some("Caption"),
+                "p" => Some("P"),
+                "h1" => Some("H1"),
+                "h2" => Some("H2"),
+                "h3" => Some("H3"),
+                "h4" => Some("H4"),
+                "h5" => Some("H5"),
+                "h6" => Some("H6"),
                 _ => None,
             }) {
         let container = container.with_tag_role(role);

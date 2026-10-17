@@ -11,6 +11,12 @@ engine internals.
 - `docs/release/2.5.26-runbook.md`: embedded stylesheets in complete HTML documents.
 - `docs/release/2.5.25-runbook.md`: Python component authoring and installed-output checks.
 
+## Experimental Python component releases
+
+- `docs/release/2.6.0a3-runbook.md`: integrate stable inset-shadow fixes and authored-card export checks.
+- `docs/release/2.6.0a2-runbook.md`: integrate stable SVG styling and named-part checks.
+- `docs/release/2.6.0a1-runbook.md`: initial opt-in alpha, release policy and required gates.
+
 ## 2.5.10 Documents
 
 - `docs/release/2.5.10-runbook.md`: inline intrinsic-width correction and retained checks.

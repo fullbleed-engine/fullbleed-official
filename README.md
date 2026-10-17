@@ -61,6 +61,54 @@ The [React starter](https://docs.fullbleed.dev/guides/react-pdf/) connects typed
 document components to editable data, live PDF previews and downloads. It
 includes the complete component and style source for customization.
 
+## Try the Python component alpha
+
+This branch prepares the **2.6.0a3 prerelease**, including the released 2.5.28
+inset-shadow corrections. It offers components that carry their appearance, a static
+Bootstrap 5.0.0 kit, and HTML export with or without styles. This API lives under
+`fullbleed.ui.experimental`; names and behavior may change. Install the alpha
+explicitly in a virtual environment after its release gates and publication finish:
+
+```console
+python -m pip install --pre "fullbleed==2.6.0a3"
+```
+
+Save this as `order.py` and run `python order.py`:
+
+```python
+from importlib.resources import files
+from pathlib import Path
+from fullbleed.ui.experimental import Document, Renderer, Theme, pt, style
+from fullbleed.ui.experimental import bootstrap as bs
+
+card = bs.Card(
+    bs.Paragraph("Your order has passed its final inspection."),
+    title="Ready to ship",
+    header="ORDER / 1048",
+    footer=bs.Badge("Approved", variant="success"),
+).with_parts(title=style(color="#205b47"))
+
+document = Document(card, title="Order summary", lang="en-US",
+                    theme=Theme(text=style(font_family="Inter", font_size=pt(11))))
+Path("order.html").write_text(document.to_html(include_styles=True), encoding="utf-8", newline="\n")
+Path("order.unstyled.html").write_text(document.to_html(include_styles=False), encoding="utf-8", newline="\n")
+renderer = Renderer(font_files=[str(files("fullbleed_assets").joinpath("fonts/Inter-Variable.ttf"))])
+Path("order.pdf").write_bytes(document.render_pdf(renderer))
+```
+
+`class_name` adds literal classes; Bootstrap components bring their default
+stylesheet. `.with_style(...)` customizes a root, and `.with_parts(...)` customizes
+advertised internal elements. All Bootstrap components are static, including
+HTML export; no Bootstrap JavaScript is included.
+
+Continue with the [Bootstrap and styling guide](docs/component-bootstrap.md),
+the [reusable component guide](examples/component_recipes/README.md), or the
+[report and catalog](examples/component_bootstrap). The
+[alpha runbook](docs/release/2.6.0a3-runbook.md) records the release gates and
+limits. For an unpublished checkout, build a wheel using
+`python build_backend/fullbleed_build_backend.py wheel --out dist` and install
+the returned path. Ordinary `pip install fullbleed` selects the stable channel.
+
 ## Choose your language
 
 | Language | Install | Start building |
@@ -358,7 +406,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.5.28-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.6.0a3-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:
