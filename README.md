@@ -17,6 +17,8 @@ Build invoices, reports, statements, and variable-data print jobs with a determi
 
 Actual Fullbleed output. Open either preview for its PDF, or [explore the designed examples with HTML/CSS, data, and font setup](https://docs.fullbleed.dev/examples/).
 
+[Compare both designs in HTML/CSS and Python components](https://docs.fullbleed.dev/guides/showcase-authoring/), with matching page output and a runnable source download (opt-in component alpha).
+
 ## Compose documents in Python
 
 Build reusable function components with props, nested children, lists and
@@ -68,14 +70,14 @@ includes the complete component and style source for customization.
 | Python | `python -m pip install fullbleed` | [Python quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) |
 | Rust | `cargo add fullbleed` | [Native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/) |
 | Node.js / TypeScript | `npm install fullbleed` | [Node quickstart](https://docs.fullbleed.dev/getting-started/node/) · [Next.js PDF download](https://docs.fullbleed.dev/guides/nextjs-pdf/) |
-| Browser JavaScript | `npm install --save-exact fullbleed@0.7.0` | [PDF components and JSX](https://docs.fullbleed.dev/guides/javascript-components/) · [React starter](https://docs.fullbleed.dev/guides/react-pdf/) · [HTML/CSS starter](https://docs.fullbleed.dev/guides/browser-pdf/) |
+| Browser JavaScript | `npm install --save-exact fullbleed@0.7.1` | [PDF components and JSX](https://docs.fullbleed.dev/guides/javascript-components/) · [React starter](https://docs.fullbleed.dev/guides/react-pdf/) · [HTML/CSS starter](https://docs.fullbleed.dev/guides/browser-pdf/) |
 | C# / .NET | `dotnet add package FullBleed.DotNet --version 0.2.0` | [C# components and styles](https://docs.fullbleed.dev/guides/csharp-components/) · [NuGet quickstart](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
-The current JavaScript package is 0.7.0, including
+The current JavaScript package is 0.7.1 and wraps engine 2.5.29, including
 [styled and unstyled component HTML export](https://docs.fullbleed.dev/guides/javascript-components/#export-html-with-or-without-styles).
 The downloadable component invoice and React starter retain their tested 0.6.0
 pin; the HTML/CSS Node.js quickstart and JavaScript, Vue and Next.js starters use
-0.5.1. These package versions wrap engine 2.5.24 and generate ordinary PDFs and previews. Import
+0.5.1. Those starter pins wrap engine 2.5.24. All generate ordinary PDFs and previews. Import
 `fullbleed` in Node or `fullbleed/browser` in a web app. Node applications can use
 a [bounded render queue](https://docs.fullbleed.dev/guides/node-render-queue/)
 and optional process isolation.
@@ -468,13 +470,23 @@ fullbleed new local accessible ./my-accessible-doc
 fullbleed new local reference ./my-reference-doc
 ```
 
-Discover remote starters from registry:
+Discover remote starters from the registry:
 
 ```bash
 fullbleed new list --json
-fullbleed new search i9 --tag vdp --json
-fullbleed new remote i9-stamped-vdp ./i9-job --json
+fullbleed new search components --json
+fullbleed new remote component-showcase ./my-documents --version 0.1.0 --json
 ```
+
+The showcase contains the Northstar invoice and Common Ground report in both
+HTML/CSS and Python components, sharing data, fonts, CSS and artwork. The
+installer copies source files; it does not install dependencies or execute the
+project. The component version requires the opt-in `fullbleed==2.6.0a4`
+prerelease. Follow the [paired authoring guide](https://docs.fullbleed.dev/guides/showcase-authoring/)
+to install it in a separate environment, compare the four pages, and edit with
+a live PDF preview. For a smaller starting point, choose the
+[`python-components` starter](https://docs.fullbleed.dev/guides/bootstrap-components-preview/)
+at template version `0.1.0`.
 
 `fullbleed new local accessible` is the verbose accessibility-first starter and
 demonstrates the `fullbleed.accessibility` runtime surface (engine verifier,
