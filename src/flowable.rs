@@ -3378,8 +3378,8 @@ fn text_baseline_for_line(
         if style.css_pixel_snap_metrics && leading < Pt::ZERO && leading_milli.rem_euclid(750) == 0
         {
             // Blink's standalone text baseline keeps the extra negative pixel
-            // on the top half (for example -25px becomes -13px/-12px). Inline
-            // baseline unions account separately for top-side pixel overflow.
+            // on the top half (for example -25px becomes -13px/-12px). This
+            // paint-baseline choice must not enlarge the logical line height.
             floor_to_css_pixel_signed(leading.mul_ratio(1, 2))
         } else {
             leading.mul_ratio(1, 2)
@@ -3587,33 +3587,6 @@ fn text_baseline_for_table_cell_line(
     baseline
 }
 
-fn text_inline_box_top_overflow(
-    style: &TextStyle,
-    font_registry: Option<&FontRegistry>,
-    line_height: Pt,
-) -> Pt {
-    if !style.css_pixel_snap_metrics || line_height != style.font_size {
-        return Pt::ZERO;
-    }
-    let metrics = font_registry.and_then(|registry| {
-        let (primary, _) = resolve_font_stack(Some(registry), style);
-        registry.vertical_metrics(&primary, style.font_size)
-    });
-    let (mut ascent, mut descent) =
-        metrics.unwrap_or_else(|| (style.font_size * 0.8, style.font_size * 0.2));
-    ascent = round_to_css_pixel(ascent);
-    descent = ceil_to_css_pixel(descent);
-    let leading_milli = (line_height - ascent - descent).to_milli_i64();
-    if leading_milli < 0
-        && leading_milli.rem_euclid(750) == 0
-        && (leading_milli / 750).abs() % 2 == 1
-    {
-        Pt::from_milli_i64(750)
-    } else {
-        Pt::ZERO
-    }
-}
-
 fn text_draw_y_for_line(
     style: &TextStyle,
     font_registry: Option<&FontRegistry>,
@@ -3642,7 +3615,7 @@ mod text_baseline_tests {
         is_cjk_outline_character, paragraph_break_allowed_between, resolve_font_stack,
         split_long_word_by_width, tabbed_text_width, text_baseline_for_line,
         text_baseline_for_table_cell_line, text_decoration_ink_skip_intervals,
-        text_draw_y_for_line, text_inline_box_top_overflow, truncate_text_with_ellipsis,
+        text_draw_y_for_line, truncate_text_with_ellipsis,
     };
     use crate::canvas::Command;
     use crate::font::FontRegistry;
@@ -4634,23 +4607,6 @@ mod text_baseline_tests {
         let baseline = text_baseline_for_table_cell_line(&style, None, style.line_height);
 
         assert_eq!(baseline.to_milli_i64().rem_euclid(750), 0);
-    }
-
-    #[test]
-    fn one_em_inline_font_box_exposes_odd_pixel_top_overflow() {
-        let mut style = TextStyle::default();
-        style.font_size = Pt::from_f32(31.5);
-        style.line_height = style.font_size;
-        style.line_height_is_auto = false;
-        style.css_pixel_snap_metrics = true;
-
-        // The snapped Base-14 metrics occupy 43 CSS px in a 42px one-em line.
-        // The alignment baseline remains unchanged, while the inline union
-        // receives the one-pixel top-side extent.
-        assert_eq!(
-            text_inline_box_top_overflow(&style, None, style.line_height),
-            Pt::from_f32(0.75)
-        );
     }
 
     #[test]
@@ -6663,6 +6619,22 @@ impl Paragraph {
 
     pub(crate) fn with_intrinsic_first_letter_indent(mut self) -> Self {
         self.intrinsic_first_letter_indent = true;
+        self
+    }
+
+    pub(crate) fn with_floating_first_letter_paint_phase(mut self) -> Self {
+        let line_height = self.effective_line_height_for_style(&self.style);
+        if self.style.css_pixel_snap_metrics && line_height == self.style.font_size {
+            let (ascent, descent) = text_font_extents(&self.style, self.font_registry.as_deref());
+            let leading = (line_height - ascent - descent).to_milli_i64();
+            if leading < 0 && leading.rem_euclid(750) == 0 && (leading / 750).abs() % 2 == 1 {
+                // Floated initials retain the lower paint phase of an odd
+                // negative-leading split. This shifts only their glyphs;
+                // their line box and the surrounding float exclusion must
+                // not inherit an extra pixel of logical height.
+                self.paint_offset_y += Pt::from_milli_i64(750);
+            }
+        }
         self
     }
 
@@ -9041,13 +9013,10 @@ impl Flowable for Paragraph {
     }
 
     fn inline_box_ascent(&self, avail_width: Pt) -> Option<Pt> {
-        let baseline = self.first_baseline(avail_width)?;
-        let style = self.style_for_line(0);
-        let line_height = self.effective_line_height_for_style(style);
-        Some(
-            baseline
-                + text_inline_box_top_overflow(style, self.font_registry.as_deref(), line_height),
-        )
+        // Inline text contributes its authored line box, not its ink overflow.
+        // Adding a pixel for snapped negative leading inflates every baseline
+        // union, so a color-only span can change row spacing and pagination.
+        self.first_baseline(avail_width)
     }
 
     fn inline_x_height(&self, _avail_width: Pt) -> Option<Pt> {
