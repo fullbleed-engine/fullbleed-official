@@ -27,6 +27,7 @@ strong { font-weight: 700; }
 .schedule caption { font-size: 9pt; color: #3c5548; padding-bottom: 10pt; }
 .schedule th { padding: 10pt 8pt; font-size: 9pt; color: #f8f5ec; background: #17382e; border-bottom: 1pt solid #17382e; }
 .schedule td { padding: 10pt 8pt; line-height: 1.5; border-bottom: .6pt solid #738577; }
+.schedule td:first-child { font-weight: 700; }
 .schedule tbody tr:nth-child(even) { background: #e9eddf; }
 .visit { gap: 24pt; margin-bottom: 18pt; }
 ul { padding-left: 13pt; }

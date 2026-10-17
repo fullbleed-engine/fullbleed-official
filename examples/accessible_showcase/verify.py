@@ -137,8 +137,10 @@ def main():
         parsed = json.loads(result.stdout)
         validated = parsed["report"]["jobs"][0]["validationResult"][0]
         assert result.returncode == 0 and validated["compliant"], validated
+        assert b"WARNING" not in result.stderr and b"SEVERE" not in result.stderr, result.stderr.decode(errors="replace")
         summary["external_validation"] = dict(profile=validated["profileName"],
                                               compliant=validated["compliant"],
+                                              stderr_bytes=len(result.stderr),
                                               details=validated["details"],
                                               build=parsed["report"]["buildInformation"])
     (out / "validation.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fullbleed.ui.experimental import (
     Box, Column, DataTable, Document, Grid, Heading, Image, Node,
-    Page, Paragraph, Section, Strong, component, mm,
+    Page, Paragraph, Section, component, mm,
 )
 
 ROOT = Path(__file__).resolve().parent
@@ -53,7 +53,7 @@ def ProgramSchedule(rows):
     return DataTable(
         rows,
         columns=(
-            Column("Program", lambda row: Strong(row["program"]), width=mm(38)),
+            Column("Program", lambda row: row["program"], width=mm(38)),
             Column("When", lambda row: row["when"], width=mm(43)),
             Column("What to expect", lambda row: row["expect"]),
         ),
