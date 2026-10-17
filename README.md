@@ -17,6 +17,8 @@ Build invoices, reports, statements, and variable-data print jobs with a determi
 
 Actual Fullbleed output. Open either preview for its PDF, or [explore the designed examples with HTML/CSS, data, and font setup](https://docs.fullbleed.dev/examples/).
 
+[Compare both designs in HTML/CSS and Python components](https://docs.fullbleed.dev/guides/showcase-authoring/), with matching page output and a runnable source download (opt-in component alpha).
+
 ## Compose documents in Python
 
 Build reusable function components with props, nested children, lists and
