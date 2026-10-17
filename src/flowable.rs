@@ -33707,6 +33707,11 @@ impl ContainerFlowable {
         if opacity <= 0.0 || width <= Pt::ZERO || height <= Pt::ZERO {
             return;
         }
+        if blur <= Pt::ZERO && spread == Pt::ZERO && offset_x == Pt::ZERO && offset_y == Pt::ZERO {
+            // The hole and clip are identical. Avoid antialiasing their shared
+            // boundary twice and creating a fringe for a shadow with no area.
+            return;
+        }
         // An inset shadow is the complement of a translated padding-box hole.
         // Signed spread changes the hole, not independent edge bands: opposite
         // edges can disappear, and an offset can cover the entire destination.

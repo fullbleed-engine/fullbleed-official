@@ -50,20 +50,23 @@ CASES = [
 
 def fixture(case, element="block"):
     name, shadow, radius, _ = case
-    content = '<div class="box"></div>' if element == "block" else '<table><tbody><tr><td class="box"></td></tr></tbody></table>'
+    content = '<table><tbody><tr><td class="box"></td></tr></tbody></table>' if element == "cell" else '<div class="box"></div>'
+    inset = 0 if element == "page-start" else 40 if element == "page-end" else 20
     html = f'<!doctype html><html><body><div class="stage">{content}</div></body></html>'
     css = f'''@page {{ size: 160px 120px; margin: 0; }}
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 html, body {{ background: white; }}
-.stage {{ padding: 20px; width: 160px; height: 120px; }}
+.stage {{ padding: {inset}px; width: 160px; height: 120px; }}
 table {{ border-collapse: separate; border-spacing: 0; }}
 .box {{ width: 120px; height: 80px; background: #90caf9; border-radius: {radius};
   box-shadow: inset {shadow} #01579b; }}
 '''
+    if element in ("page-start", "page-end"):
+        css += f'.box {{ position: absolute; left: {inset}px; top: {inset}px; }}\n'
     return html, css
 
 
-def probes_for(case):
+def probes_for(case, element="block"):
     probes = [dict(x=x, y=y, expected=COLORS[color], tolerance=3) for x, y, color in case[3]]
     probes.extend(dict(x=x, y=y, expected=COLORS["white"], tolerance=3)
                   for x, y in [(10, 60), (150, 60), (80, 10), (80, 110)])
@@ -75,7 +78,18 @@ def probes_for(case):
             expected = [round(bg * (1-coverage) + fg * coverage)
                         for bg, fg in zip(COLORS["background"], COLORS["shadow"])]
             probes.append(dict(x=x, y=60, expected=expected, tolerance=10))
-    return probes
+    shift = -20 if element == "page-start" else 20 if element == "page-end" else 0
+    return [{**p, "x": p["x"] + shift, "y": p["y"] + shift} for p in probes
+            if 0 <= p["x"] + shift < 160 and 0 <= p["y"] + shift < 120]
+
+
+def selected_cases():
+    selected = [(case, "block") for case in CASES]
+    selected += [(case, "cell") for case in CASES if case[0] in
+                 ("negative-hidden", "negative-left", "positive-offset", "large-left", "large-down", "blur-negative")]
+    selected += [(case, edge) for edge in ("page-start", "page-end") for case in CASES
+                 if case[0] in ("blur-translated-away", "blur-negative")]
+    return selected
 
 
 def check(output: Path, *, pdfium=False):
@@ -83,12 +97,9 @@ def check(output: Path, *, pdfium=False):
         import pypdfium2
     output.mkdir(parents=True, exist_ok=True)
     engine = fullbleed.PdfEngine()
-    selected = [(case, "block") for case in CASES]
-    selected += [(case, "cell") for case in CASES if case[0] in
-                 ("negative-hidden", "negative-left", "positive-offset", "large-left", "large-down", "blur-negative")]
     report = dict(schema="fullbleed.inset_shadows.v1", version=metadata.version("fullbleed"), ok=False,
                   scope="Interior shadow geometry, straight-edge blur, clipping and deterministic output; not complete CSS parity.", cases=[])
-    for case, element in selected:
+    for case, element in selected_cases():
         name = case[0] + "-" + element
         folder = output / name
         folder.mkdir(exist_ok=True)
@@ -101,7 +112,7 @@ def check(output: Path, *, pdfium=False):
         for mode, data in pdfs.items():
             (folder / f"{mode}.pdf").write_bytes(data)
         views = []
-        expected = probes_for(case)
+        expected = probes_for(case, element)
         for mode, pages in [
             ("native", list(engine.render_image_pages(html, css, 96))),
             ("finalized", list(engine.render_finalized_pdf_image_pages(str(folder / "direct.pdf"), 96))),
@@ -123,17 +134,39 @@ def check(output: Path, *, pdfium=False):
                             image = bitmap.to_pil().convert("RGB")
                             image.save(folder / f"{mode}-pdfium.png")
                             assert image.size == (160, 120), (name, mode, image.size)
-                            views.append(dict(mode=mode+"-pdfium", probes=[{**p, "actual": list(image.getpixel((p["x"],p["y"])))} for p in expected]))
+                            views.append(dict(mode=mode+"-pdfium", pixel_sha256=hashlib.sha256(image.tobytes()).hexdigest(),
+                                probes=[{**p, "actual": list(image.getpixel((p["x"],p["y"])))} for p in expected]))
                         finally:
                             bitmap.close()
                     finally:
                         page.close()
         for view in views:
             view["ok"] = all(max(abs(a-b) for a,b in zip(p["expected"],p["actual"])) <= p["tolerance"] for p in view["probes"])
+        equivalent_to_no_shadow = None
+        if case[0] == "empty-control":
+            reference_css = css.replace("box-shadow: inset 0 0 0 0 #01579b;", "box-shadow: none;")
+            assert reference_css != css
+            reference_pdf = bytes(engine.render_pdf(html, reference_css))
+            reference_path = folder / "no-shadow.pdf"
+            reference_path.write_bytes(reference_pdf)
+            equivalent_to_no_shadow = (
+                bytes(engine.render_image_pages(html, reference_css, 96)[0]) == (folder / "native.png").read_bytes()
+                and bytes(engine.render_finalized_pdf_image_pages(str(reference_path), 96)[0]) == (folder / "finalized.png").read_bytes()
+            )
+            if pdfium:
+                with pypdfium2.PdfDocument(reference_pdf) as doc:
+                    page = doc[0]
+                    bitmap = page.render(scale=96/72)
+                    try:
+                        reference_digest = hashlib.sha256(bitmap.to_pil().convert("RGB").tobytes()).hexdigest()
+                        equivalent_to_no_shadow &= all(v["pixel_sha256"] == reference_digest for v in views if "pixel_sha256" in v)
+                    finally:
+                        bitmap.close()
+                        page.close()
         deterministic = direct == bytes(engine.render_pdf(html, css)) and pdfs["compiled"] == bytes(compiled.render_pdf())
-        report["cases"].append(dict(name=name, deterministic=deterministic, views=views,
+        report["cases"].append(dict(name=name, deterministic=deterministic, views=views, equivalent_to_no_shadow=equivalent_to_no_shadow,
             pdfs={k:hashlib.sha256(v).hexdigest() for k,v in pdfs.items()},
-            ok=deterministic and all(view["ok"] for view in views)))
+            ok=deterministic and all(view["ok"] for view in views) and equivalent_to_no_shadow is not False))
     report["ok"] = all(case["ok"] for case in report["cases"])
     (output / "verification.json").write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
     return report
