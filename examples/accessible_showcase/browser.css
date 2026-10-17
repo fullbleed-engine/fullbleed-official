@@ -1,0 +1,13 @@
+/* Only the styled browser export loads this responsive presentation layer. */
+@media screen {
+  body { background: #e1e5dd; }
+  .sheet { margin: 20px auto; }
+}
+@media screen and (max-width: 800px) {
+  .sheet { width: auto; height: auto; margin: 0; padding: 24px; }
+  .cover-title { font-size: 36pt; }
+  .garden { width: 100%; height: auto; }
+  .programs, .visit { grid-template-columns: 1fr !important; }
+  .schedule { table-layout: auto; }
+  .schedule th, .schedule td { width: auto !important; padding: 8px 5px; font-size: 9pt; }
+}
