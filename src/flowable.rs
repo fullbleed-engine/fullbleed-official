@@ -6622,6 +6622,22 @@ impl Paragraph {
         self
     }
 
+    pub(crate) fn with_floating_first_letter_paint_phase(mut self) -> Self {
+        let line_height = self.effective_line_height_for_style(&self.style);
+        if self.style.css_pixel_snap_metrics && line_height == self.style.font_size {
+            let (ascent, descent) = text_font_extents(&self.style, self.font_registry.as_deref());
+            let leading = (line_height - ascent - descent).to_milli_i64();
+            if leading < 0 && leading.rem_euclid(750) == 0 && (leading / 750).abs() % 2 == 1 {
+                // Floated initials retain the lower paint phase of an odd
+                // negative-leading split. This shifts only their glyphs;
+                // their line box and the surrounding float exclusion must
+                // not inherit an extra pixel of logical height.
+                self.paint_offset_y += Pt::from_milli_i64(750);
+            }
+        }
+        self
+    }
+
     pub(crate) fn with_first_line_style(
         mut self,
         style: TextStyle,
