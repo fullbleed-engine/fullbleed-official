@@ -14257,6 +14257,151 @@ mod tests {
     }
 
     #[test]
+    fn inline_flex_children_preserve_their_box_and_font_metrics() {
+        let engine = FullBleed::builder()
+            .register_font_file(repo_font_path("Inter-Variable.ttf"))
+            .build()
+            .expect("engine with Inter");
+        for display in ["flex", "inline-flex"] {
+            for tag in ["span", "strong", "a"] {
+                let html = format!(
+                    "<div class='row'><{tag} class='brand' href='https://example.invalid/order'>Northstar Studio</{tag}><div>Orders</div></div>"
+                );
+                let css = format!(
+                    "@page {{ size:400pt 120pt; margin:20pt; }} body {{ margin:0; font:10pt Inter; }} .row {{ display:{display}; width:360pt; align-items:center; }} .brand {{ font:15pt Inter; white-space:nowrap; margin-right:12pt; }}"
+                );
+                let document = engine.render_to_document(&html, &css).expect("render");
+                let positions = document.pages[0]
+                    .commands
+                    .iter()
+                    .filter_map(|command| match command {
+                        Command::DrawString { text, x, .. }
+                            if text == "Northstar Studio" || text == "Orders" =>
+                        {
+                            Some((text.as_str(), *x))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                let brand = positions
+                    .iter()
+                    .find(|(text, _)| *text == "Northstar Studio")
+                    .expect("brand")
+                    .1;
+                let link = positions
+                    .iter()
+                    .find(|(text, _)| *text == "Orders")
+                    .expect("link")
+                    .1;
+                // The vendored font's unkerned hmtx advance is 15844/2048 em.
+                // A direct flex item retains that complete run and its margin.
+                let expected = Pt::from_f32(15.0).mul_ratio(15844, 2048) + Pt::from_f32(12.0);
+                assert!(
+                    (link - brand - expected).to_f32().abs() < 0.1,
+                    "{display} {tag}: {positions:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inline_flex_children_keep_authored_width_padding_and_margins() {
+        let engine = FullBleed::builder().build().expect("engine");
+        for display in ["flex", "inline-flex"] {
+            let html = "<div class='row'><span class='item'>First</span><div>Second</div></div>";
+            let css = format!(
+                "@page {{ size:300pt 100pt; margin:0; }} body {{ margin:0; }} .row {{ display:{display}; width:300pt; }} .item {{ box-sizing:content-box; width:80pt; padding:0 6pt; margin:0 12pt; }}"
+            );
+            let document = engine.render_to_document(html, &css).expect("render");
+            let positions = document.pages[0]
+                .commands
+                .iter()
+                .filter_map(|command| match command {
+                    Command::DrawString { text, x, .. } if text == "First" || text == "Second" => {
+                        Some((text.as_str(), *x))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                positions[0],
+                ("First", Pt::from_f32(18.0)),
+                "{display}: {positions:?}"
+            );
+            assert_eq!(positions[1].0, "Second");
+            assert!(
+                (positions[1].1.to_f32() - 116.0).abs() < 0.01,
+                "{display}: {positions:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn inline_flex_semantic_text_containers_keep_item_boxes() {
+        let engine = FullBleed::builder()
+            .register_font_file(repo_font_path("Inter-Variable.ttf"))
+            .build()
+            .expect("engine with Inter");
+        for display in ["flex", "inline-flex", "grid", "inline-grid"] {
+            for tag in [
+                "p", "h1", "h2", "h3", "h4", "h5", "h6", "a", "strong", "label",
+            ] {
+                let html = format!(
+                    "<{tag} class='row'><span class='mark'>I</span><span>Value</span></{tag}>"
+                );
+                let css = format!(
+                    "@page {{size:300pt 100pt;margin:0}} body {{margin:0}} .row {{display:{display};width:280pt;margin:0;padding:0;font:10pt Inter;grid-template-columns:18pt 1fr}} .mark {{width:12pt;margin-right:6pt}}"
+                );
+                let document = engine.render_to_document(&html, &css).expect("render");
+                let positions = document.pages[0]
+                    .commands
+                    .iter()
+                    .filter_map(|command| match command {
+                        Command::DrawString { text, x, y, .. }
+                            if text == "I" || text == "Value" =>
+                        {
+                            Some((text.as_str(), *x, *y))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(positions.len(), 2, "{tag} {display}: {positions:?}");
+                assert_eq!(positions[0].0, "I");
+                assert_eq!(positions[1].0, "Value");
+                assert!(
+                    (positions[1].1 - positions[0].1 - Pt::from_f32(18.0))
+                        .to_f32()
+                        .abs()
+                        < 0.1,
+                    "{tag} {display}: {positions:?}"
+                );
+                assert_eq!(
+                    positions[0].2, positions[1].2,
+                    "{tag} {display}: {positions:?}"
+                );
+                let semantic_role = match tag {
+                    "p" => Some("P"),
+                    "h1" => Some("H1"),
+                    "h2" => Some("H2"),
+                    "h3" => Some("H3"),
+                    "h4" => Some("H4"),
+                    "h5" => Some("H5"),
+                    "h6" => Some("H6"),
+                    _ => None,
+                };
+                if let Some(expected) = semantic_role {
+                    assert!(
+                        document.pages[0].commands.iter().any(|command| {
+                            matches!(command, Command::BeginTag { role, .. } if role == expected)
+                        }),
+                        "{tag} {display} lost its semantic role"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn definite_flex_item_width_caps_its_automatic_minimum() {
         let html =
             "<html><body><div class='row'><div class='item'>123456789</div></div></body></html>";

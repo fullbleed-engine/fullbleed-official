@@ -2607,9 +2607,9 @@ fn node_to_flowables_in_scope(
             let transparent_inline = screen_reader_text.is_none()
                     && matches!(style.display, DisplayMode::Inline)
                     && !matches!(info.tag.as_str(), "img" | "svg" | "br")
-                    // Grid items are blockified even when their specified
+                    // Flex/grid items are blockified even when their specified
                     // outer display type is inline.
-                    && !matches!(parent_style.display, DisplayMode::Grid | DisplayMode::InlineGrid)
+                    && !parent_is_flex
                     // Positioned inline boxes need the normal wrapper path so the
                     // absolute/relative flowable survives into the parent's layout.
                     // Returning the children directly here silently discarded
@@ -2862,6 +2862,35 @@ fn node_to_flowables_in_scope(
                             "h6" => "H6",
                             _ => "P",
                         };
+
+                        // The element's declared formatting context takes
+                        // precedence over the single-paragraph fast path.
+                        // Blockified children must remain separate flex/grid
+                        // items rather than becoming vertically stacked runs.
+                        if matches!(
+                            style.display,
+                            DisplayMode::Flex
+                                | DisplayMode::InlineFlex
+                                | DisplayMode::Grid
+                                | DisplayMode::InlineGrid
+                        ) {
+                            return flex_container_flowables(
+                                node,
+                                resolver,
+                                &style,
+                                ancestors,
+                                counters,
+                                font_registry.clone(),
+                                asset_bundle.clone(),
+                                report.as_deref_mut(),
+                                svg_form,
+                                svg_raster_fallback,
+                                perf,
+                                doc_id,
+                                &before_items,
+                                &after_items,
+                            );
+                        }
 
                         if inline_children_only(node, resolver, &style, ancestors)
                             && !has_structured_pseudo
@@ -4205,6 +4234,29 @@ fn node_to_flowables_in_scope(
                                 &before_items,
                                 &after_items,
                             )
+                        } else if matches!(
+                            style.display,
+                            DisplayMode::Flex
+                                | DisplayMode::InlineFlex
+                                | DisplayMode::Grid
+                                | DisplayMode::InlineGrid
+                        ) {
+                            flex_container_flowables(
+                                node,
+                                resolver,
+                                &style,
+                                ancestors,
+                                counters,
+                                font_registry.clone(),
+                                asset_bundle.clone(),
+                                report.as_deref_mut(),
+                                svg_form,
+                                svg_raster_fallback,
+                                perf,
+                                doc_id,
+                                &before_items,
+                                &after_items,
+                            )
                         } else {
                             let children = collect_children(
                                 node,
@@ -4220,7 +4272,16 @@ fn node_to_flowables_in_scope(
                                 perf,
                                 doc_id,
                             );
-                            inject_pseudo_items(children, &before_items, &after_items)
+                            let children =
+                                inject_pseudo_items(children, &before_items, &after_items);
+                            if parent_is_flex {
+                                // Inline tags without a dedicated compiler branch
+                                // still own a box when they are flex/grid items.
+                                // Keep their margins, padding and sizing here.
+                                container_flowables(children, &style)
+                            } else {
+                                children
+                            }
                         }
                     })(),
                 }
@@ -13613,6 +13674,13 @@ fn flex_container_flowables(
             .and_then(|element| match element.name.local.as_ref() {
                 "figure" => Some("Figure"),
                 "figcaption" => Some("Caption"),
+                "p" => Some("P"),
+                "h1" => Some("H1"),
+                "h2" => Some("H2"),
+                "h3" => Some("H3"),
+                "h4" => Some("H4"),
+                "h5" => Some("H5"),
+                "h6" => Some("H6"),
                 _ => None,
             }) {
         let container = container.with_tag_role(role);

@@ -157,6 +157,7 @@ jobs:
           python -I tools/smoke_component_svg.py --out target/release-components/svg
           python -I tools/smoke_component_inset_shadows.py --out target/release-components/inset-shadows
           python -I tools/smoke_component_fonts.py --out target/release-components/fonts
+          python -I tools/smoke_component_flex.py --out target/release-components/flex
           python -I tools/smoke_component_bootstrap.py --out target/release-components/bootstrap
           python -I tools/smoke_component_typing.py --out target/release-components/typing.json
           npm install --ignore-scripts --no-package-lock --no-save --no-audit --no-fund --prefix target/component-editor-tools pyright@1.1.414

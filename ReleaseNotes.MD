@@ -12,6 +12,12 @@ class rules, root/part overrides, inline declarations and font shorthands.
 Installed-wheel checks inspect the embedded font program and both static HTML
 export modes. Documents that previously received the wrong font can reflow.
 
+Direct inline children of flex containers now retain their own layout boxes.
+This preserves authored font metrics, dimensions, margins and padding, including
+the space between Bootstrap navbar labels and between toast header labels.
+Paragraphs, headings and generic text elements also honor their declared flex or
+grid layout while retaining paragraph and heading tags in the rendered document.
+
 The experimental component API keeps its owned styles, literal `class_name`
 selectors, named parts and `to_html(include_styles=True/False)` exports. Bootstrap
 components remain static in PDFs and HTML. See the

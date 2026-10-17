@@ -197,6 +197,7 @@ jobs:
           python -I tools/smoke_component_semantics.py --out target/component-recipes/semantics
           python -I tools/smoke_component_themes.py --out target/component-recipes/themes
           python -I tools/smoke_component_fonts.py --out target/component-recipes/fonts
+          python -I tools/smoke_component_flex.py --out target/component-recipes/flex
           python -I tools/smoke_component_styles.py --out target/component-recipes/styles
           python -I tools/smoke_component_svg.py --out target/component-recipes/svg
           python -I tools/smoke_component_inset_shadows.py --out target/component-recipes/inset-shadows
