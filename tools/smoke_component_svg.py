@@ -37,6 +37,7 @@ def check(out: Path):
     }
     original_source = documents["class-inherited-color"][0].compile()
     records = []
+    failures = []
     for name, (document, expected) in documents.items():
         for forms in (False, True):
             variant = "form" if forms else "vector"
@@ -63,7 +64,8 @@ def check(out: Path):
             host_css = "@page {size:300pt 200pt;margin:0} body {margin:0} svg {display:block} .brand .mark {fill:#205b47}"
             hosted = bytes(renderer.engine_for(document).render_pdf(plain_html, host_css))
             for mode, data, color in (("document", pdf, expected), ("styled-export", exported, expected), ("host-styled-export", hosted, [32, 91, 71])):
-                (folder / (mode + ".pdf")).write_bytes(data)
+                pdf_path = folder / (mode + ".pdf")
+                pdf_path.write_bytes(data)
                 reader = PdfReader(BytesIO(data))
                 assert len(reader.pages) == 1
                 assert "Brand sample" in reader.pages[0].extract_text()
@@ -73,11 +75,26 @@ def check(out: Path):
                         observed = list(picture.convert("RGB").getpixel((24, 24)))
                         picture.save(folder / (mode + ".png"))
                 assert max(abs(a - b) for a, b in zip(observed, color)) <= 2, (name, variant, mode, observed, color)
-                records.append({"case": name, "variant": variant, "mode": mode, "rgb": observed,
-                                "expected": color, "pdf_sha256": sha256(data).hexdigest(), "ok": True})
+                engine = renderer.engine_for(document)
+                finalized = list(engine.render_finalized_pdf_image_pages(str(pdf_path), 96))
+                finalized_repeat = list(engine.render_finalized_pdf_image_pages(str(pdf_path), 96))
+                assert len(finalized) == 1
+                (folder / (mode + "-finalized.png")).write_bytes(finalized[0])
+                with Image.open(BytesIO(finalized[0])) as picture:
+                    finalized_rgb = list(picture.convert("RGB").getpixel((24, 24)))
+                record = {"case": name, "variant": variant, "mode": mode, "rgb": observed,
+                          "expected": color, "pdf_sha256": sha256(data).hexdigest(),
+                          "finalized_rgb": finalized_rgb,
+                          "finalized_png_sha256": sha256(finalized[0]).hexdigest(),
+                          "finalized_previews_deterministic": finalized == finalized_repeat,
+                          "ok": finalized == finalized_repeat and max(abs(a - b) for a, b in zip(finalized_rgb, color)) <= 2}
+                records.append(record)
+                if not record["ok"]:
+                    failures.append(record)
             assert max(abs(a - b) for a, b in zip(native, expected)) <= 2
     assert documents["class-inherited-color"][0].compile() == original_source
-    report = {"ok": True, "version": version("fullbleed"), "checks": len(records), "records": records,
+    report = {"ok": not failures, "version": version("fullbleed"), "checks": len(records), "records": records,
+              "failures": failures,
               "component_api": "Python nodes, reusable defaults, class selectors and named-part overrides; no HTML strings",
               "exports": "Styled HTML reproduces document PDF bytes; unstyled HTML accepts a host's CSS without mutating the source."}
     (out / "verification.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -89,3 +106,4 @@ if __name__ == "__main__":
     parser.add_argument("--out", type=Path, required=True)
     result = check(parser.parse_args().out)
     print(json.dumps({key: value for key, value in result.items() if key != "records"}))
+    raise SystemExit(0 if result["ok"] else 1)

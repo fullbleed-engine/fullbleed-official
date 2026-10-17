@@ -942,24 +942,31 @@ fn parse_xobject(
             .ok()
             .and_then(parse_matrix_object)
             .unwrap_or_else(Matrix::identity);
-        let is_transparency_group = stream
+        let transparency_group = stream
             .dict
             .get(b"Group")
             .ok()
             .and_then(|obj| resolve_object(doc, obj).ok())
             .and_then(|obj| obj.as_dict().ok())
-            .and_then(|dict| dict.get(b"S").ok())
+            .filter(|dict| {
+                dict.get(b"S")
+                    .ok()
+                    .and_then(|obj| resolve_object(doc, obj).ok())
+                    .and_then(|obj| obj.as_name().ok())
+                    == Some(b"Transparency")
+            });
+        let is_transparency_group = transparency_group.is_some();
+        let isolated_group = transparency_group
+            .and_then(|dict| dict.get(b"I").ok())
             .and_then(|obj| resolve_object(doc, obj).ok())
-            .and_then(|obj| obj.as_name().ok())
-            .map(|name| name == b"Transparency")
-            .unwrap_or(false);
+            .is_some_and(|obj| matches!(obj, LoObject::Boolean(true)));
 
         let mut nested_state = state.clone();
         nested_state.ctm = nested_state.ctm.concat(form_matrix);
         let masked_group = is_transparency_group && state.soft_mask.is_some();
-        if masked_group {
-            // Composite the group's mask and constant alpha once, after its
-            // members have painted. The native masked-form surface starts with
+        if masked_group || isolated_group {
+            // Composite the group's constant alpha (and any mask) once, after
+            // its members paint. Both native offscreen form paths start with
             // unit alpha, matching PDF transparency-group initialization.
             nested_state.soft_mask = None;
             nested_state.active_fill_opacity = 1.0;
@@ -1047,7 +1054,7 @@ fn parse_xobject(
                 embedded_fonts,
             )?;
         } else {
-            forms::emit_form(form_commands, page_height, cache, commands);
+            forms::emit_form(form_commands, page_height, isolated_group, cache, commands);
         }
         return Ok(());
     }

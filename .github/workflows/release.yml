@@ -199,7 +199,7 @@ jobs:
       - name: Verify embedded stylesheets across installed rendering paths
         run: python -I tools/smoke_embedded_styles.py --out target/embedded-styles
 
-      - name: Verify inline SVG cascade and group opacity in release output
+      - name: Verify SVG cascade and group opacity in PDFs, layout and finalized previews
         run: python -I tools/smoke_svg_styles.py --out target/svg-styles
 
       - name: Verify inset shadow geometry and unshadowed edges in release output

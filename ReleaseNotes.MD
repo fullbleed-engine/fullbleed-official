@@ -1,3 +1,26 @@
+# Fullbleed Release Notes - 2.6.0a4
+
+This Python component alpha includes the stable 2.5.29 correction for isolated
+transparency groups in saved-PDF PNG previews. Previously the PDF could contain
+the correct overlapping SVG shapes while its saved-PDF preview appeared too dark.
+The reader now composites an isolated group before applying its opacity.
+
+The SVG gates also check repeated saved-PDF previews. Component coverage follows
+named-part opacity through direct documents, styled HTML exports and unstyled
+exports with host CSS. Existing expected colors and tolerances remain in place.
+
+The component API, Bootstrap kit and static HTML export behavior remain the same.
+Python uses `2.6.0a4`; Cargo source uses `2.6.0-alpha.4`. See the
+[alpha 4 runbook](docs/release/2.6.0a4-runbook.md) for the required source,
+installed-wheel, component, independent-reader and public-distribution checks.
+This entry describes a candidate until those publication gates finish.
+
+This change is scoped to isolated groups emitted by Fullbleed. It does not
+establish complete Bootstrap, browser, CSS, external-PDF or standards conformance.
+The dedicated PDF/VT validator remains unconfigured.
+
+---
+
 # Fullbleed Release Notes - 2.6.0a3
 
 This Python component alpha integrates the released 2.5.28 inset-shadow fixes.

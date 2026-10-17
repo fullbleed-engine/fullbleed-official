@@ -3,6 +3,9 @@ use super::*;
 use crate::canvas::CompiledMaskLayer;
 use crate::flowable::{MaskComposite, MaskMode};
 
+#[cfg(test)]
+mod tests;
+
 type Result<T> = std::result::Result<T, FullBleedError>;
 
 fn invalid(message: &str) -> FullBleedError {
@@ -12,16 +15,26 @@ fn invalid(message: &str) -> FullBleedError {
 fn define_form(
     form_commands: Vec<Command>,
     height: f32,
+    isolated: bool,
     cache: &mut PdfRasterCache,
     commands: &mut Vec<Command>,
 ) -> String {
     let resource_id = format!("pdf-preview-form-{}", cache.next_form);
     cache.next_form += 1;
-    commands.push(Command::DefineForm {
-        resource_id: resource_id.clone(),
-        width: Pt::from_f32(cache.page_width),
-        height: Pt::from_f32(height),
-        commands: form_commands,
+    commands.push(if isolated {
+        Command::DefineIsolatedForm {
+            resource_id: resource_id.clone(),
+            width: Pt::from_f32(cache.page_width),
+            height: Pt::from_f32(height),
+            commands: form_commands,
+        }
+    } else {
+        Command::DefineForm {
+            resource_id: resource_id.clone(),
+            width: Pt::from_f32(cache.page_width),
+            height: Pt::from_f32(height),
+            commands: form_commands,
+        }
     });
     resource_id
 }
@@ -29,10 +42,11 @@ fn define_form(
 pub(super) fn emit_form(
     form_commands: Vec<Command>,
     height: f32,
+    isolated: bool,
     cache: &mut PdfRasterCache,
     commands: &mut Vec<Command>,
 ) {
-    let resource_id = define_form(form_commands, height, cache, commands);
+    let resource_id = define_form(form_commands, height, isolated, cache, commands);
     commands.push(Command::DrawForm {
         x: Pt::ZERO,
         y: Pt::ZERO,
@@ -126,7 +140,7 @@ pub(super) fn emit_with_soft_mask(
 ) -> Result<()> {
     let Some((mask, ctm)) = &state.soft_mask else {
         // A form or shading invocation leaves the caller's path and color intact.
-        emit_form(source, height, cache, commands);
+        emit_form(source, height, false, cache, commands);
         return Ok(());
     };
     let dict = resolve_dict(doc, mask)?;
@@ -235,8 +249,8 @@ pub(super) fn emit_with_soft_mask(
         cache,
         embedded_fonts,
     )?;
-    let mask_id = define_form(mask_commands, height, cache, commands);
-    let source_id = define_form(source, height, cache, commands);
+    let mask_id = define_form(mask_commands, height, false, cache, commands);
+    let source_id = define_form(source, height, false, cache, commands);
     commands.push(Command::DrawMaskedForm {
         x: Pt::ZERO,
         y: Pt::ZERO,

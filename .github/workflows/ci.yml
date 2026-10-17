@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.6.0a3"
+  FULLBLEED_CI_VERSION: "2.6.0a4"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -252,7 +252,7 @@ jobs:
       - name: Verify static embedded stylesheets from the installed wheel
         run: python -I tools/smoke_embedded_styles.py --out target/embedded-stylesheets
 
-      - name: Verify inline SVG cascade and group opacity from the installed wheel
+      - name: Verify SVG cascade and group opacity in PDFs, layout and finalized previews
         run: python -I tools/smoke_svg_styles.py --out target/svg-styles
 
       - name: Retain SVG cascade PDFs and independent previews
