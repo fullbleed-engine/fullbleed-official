@@ -8,6 +8,7 @@ The original templates, data, CSS and explicit font assets are the reference.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal
 from hashlib import sha256
 from html.parser import HTMLParser
 from importlib.metadata import version
@@ -41,11 +42,15 @@ def digest(path: Path) -> str:
 
 def compare(out: Path, name: str, *, dpi: int) -> dict:
     if name == "invoice":
-        document = northstar_invoice(original.DATA["invoice"])
-        expected_pages, markers = 1, ["NS-1042", "Maple & Finch", "$1,870.00"]
+        items = original.DATA["invoice"]
+        document = northstar_invoice(items)
+        total = sum((Decimal(item["rate"]) * item["hours"] for item in items), Decimal(0))
+        expected_pages, markers = 1, ["NS-1042", "Maple & Finch", original.money(total)]
     else:
-        document = common_ground_report(original.DATA["report"])
-        expected_pages, markers = 3, ["Common Ground", "1,240", "$420,000.00", "What we count."]
+        report = original.DATA["report"]
+        document = common_ground_report(report)
+        total = sum(Decimal(item["amount"]) for item in report["allocations"])
+        expected_pages, markers = 3, ["Common Ground", f"{report['households']:,}", original.money(total), "What we count."]
     source = document.compile(target="pdf")
     html, css = original.sources(name)
     results = {}
