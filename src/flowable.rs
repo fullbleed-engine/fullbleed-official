@@ -3354,6 +3354,15 @@ fn text_baseline_for_line(
     font_registry: Option<&FontRegistry>,
     line_height: Pt,
 ) -> Pt {
+    text_baseline_with_descent_snap(style, font_registry, line_height, true)
+}
+
+fn text_baseline_with_descent_snap(
+    style: &TextStyle,
+    font_registry: Option<&FontRegistry>,
+    line_height: Pt,
+    nearest_unit_descent: bool,
+) -> Pt {
     let metrics = font_registry.and_then(|registry| {
         let (primary, _) = resolve_font_stack(Some(registry), style);
         registry.vertical_metrics(&primary, style.font_size)
@@ -3365,11 +3374,17 @@ fn text_baseline_for_line(
     let raw_descent = descent;
     let raw_baseline = (line_height - ascent - descent).mul_ratio(1, 2) + ascent;
     if style.css_pixel_snap_metrics {
-        // Blink rounds the ascent to the nearest CSS pixel but keeps descent
-        // conservative. This matters for faces such as Liberation Sans whose
-        // ascent sits just above an integer pixel boundary.
+        // A registered face at unit line-height uses the nearest-pixel font
+        // box before negative leading is split. Rounding descent outward can
+        // turn an even split into an odd one and move every glyph up a pixel.
+        // Keep the existing conservative fallback for estimated Base-14
+        // metrics and the separately handled non-unit line-height paths.
         ascent = round_to_css_pixel(ascent);
-        descent = ceil_to_css_pixel(descent);
+        descent = if nearest_unit_descent && line_height == style.font_size && metrics.is_some() {
+            round_to_css_pixel(descent)
+        } else {
+            ceil_to_css_pixel(descent)
+        };
     }
     let font_box = ascent + descent;
     let leading = line_height - font_box;
@@ -3408,7 +3423,9 @@ fn text_baseline_for_line(
         // the baseline. Smaller descent corrections leave it below.
         baseline = baseline + Pt::from_milli_i64(375);
     }
-    if style.css_pixel_snap_metrics && !(leading > Pt::ZERO && leading_milli.rem_euclid(750) != 0) {
+    let baseline = if style.css_pixel_snap_metrics
+        && !(leading > Pt::ZERO && leading_milli.rem_euclid(750) != 0)
+    {
         // A snapped font box can move a half-pixel baseline above the browser's
         // unsnapped layout baseline. CssLineBoxFlowable subsequently floors the
         // absolute baseline, so retain the unsnapped whole-pixel lower bound
@@ -3416,6 +3433,15 @@ fn text_baseline_for_line(
         // across successive line boxes; rounding it here shifts only the first
         // line down by one CSS pixel.
         baseline.max(floor_to_css_pixel_signed(raw_baseline))
+    } else {
+        baseline
+    };
+    if style.css_pixel_snap_metrics && leading > Pt::ZERO && leading_milli.rem_euclid(750) == 0 {
+        // Integral CSS line boxes distribute an odd positive-leading pixel
+        // below the baseline. Retaining a half-pixel here paints standalone
+        // text correctly after terminal snapping, but understates the logical
+        // descent when a larger inline child joins the parent's strut.
+        floor_to_css_pixel_signed(baseline)
     } else {
         baseline
     }
@@ -4296,7 +4322,7 @@ mod text_baseline_tests {
     }
 
     #[test]
-    fn css_negative_even_pixel_leading_retains_nearest_raw_baseline() {
+    fn css_unit_line_height_uses_nearest_font_box_before_splitting_leading() {
         let mut registry = FontRegistry::new();
         registry
             .register_bytes(
@@ -4306,18 +4332,96 @@ mod text_baseline_tests {
             .unwrap();
         let mut style = TextStyle::default();
         style.font_name = Arc::<str>::from("noto");
-        style.font_size = Pt::from_f32(36.0);
-        style.line_height = style.font_size;
         style.line_height_is_auto = false;
         style.css_pixel_snap_metrics = true;
 
-        // The snapped 66px font box has -18px of leading inside the 48px line.
-        // Its raw 42.624px baseline rounds to 43px; an odd split remains
-        // top-biased and is covered by the preceding regression.
-        assert_eq!(
-            text_baseline_for_line(&style, Some(&registry), style.line_height),
-            Pt::from_f32(32.25)
-        );
+        // Chrome 155, the exact bundled Noto Sans file, line-height:1. At 48px
+        // its nearest-pixel font box is 51px + 14px, with -17px of leading.
+        // The baseline is 42px. An outward 15px descent incorrectly selects
+        // the even-leading branch and moves the baseline to 43px.
+        for (size_px, baseline_px) in [
+            (12, 10),
+            (16, 14),
+            (20, 17),
+            (26, 23),
+            (40, 35),
+            (42, 37),
+            (48, 42),
+            (64, 56),
+        ] {
+            style.font_size = Pt::from_milli_i64(size_px * 750);
+            style.line_height = style.font_size;
+            assert_eq!(
+                text_baseline_for_line(&style, Some(&registry), style.line_height),
+                Pt::from_milli_i64(baseline_px * 750),
+                "Noto Sans at {size_px}px",
+            );
+        }
+    }
+
+    #[test]
+    fn css_positive_odd_leading_contributes_the_full_strut_descent() {
+        let mut registry = FontRegistry::new();
+        registry
+            .register_bytes(
+                include_bytes!("../python/fullbleed_assets/fonts/NotoSans-Regular.ttf").to_vec(),
+                Some("noto"),
+            )
+            .unwrap();
+        let mut style = TextStyle::default();
+        style.font_name = Arc::<str>::from("noto");
+        style.line_height_is_auto = false;
+        style.css_pixel_snap_metrics = true;
+        // Fresh Chrome 155 layout observations, the bundled font, line-height:1.5.
+        for (size_px, baseline_px) in [
+            (12, 13),
+            (16, 18),
+            (20, 22),
+            (26, 29),
+            (40, 45),
+            (42, 48),
+            (48, 54),
+            (64, 72),
+        ] {
+            style.font_size = Pt::from_milli_i64(size_px * 750);
+            style.line_height = style.font_size.mul_ratio(3, 2);
+            assert_eq!(
+                text_baseline_for_line(&style, Some(&registry), style.line_height),
+                Pt::from_milli_i64(baseline_px * 750),
+                "Noto Sans at {size_px}px/1.5",
+            );
+        }
+    }
+
+    #[test]
+    fn css_floated_initial_keeps_its_paint_baseline_after_font_box_rounding() {
+        let mut registry = FontRegistry::new();
+        registry
+            .register_bytes(
+                include_bytes!("../python/fullbleed_assets/fonts/NotoSans-Regular.ttf").to_vec(),
+                Some("noto"),
+            )
+            .unwrap();
+        let registry = Arc::new(registry);
+        // The retained first-letter print fixtures use 44px and 56px initials.
+        // Their glyph baselines are distinct from the surrounding line strut.
+        for (size_px, paint_baseline_px) in [(44, 39), (56, 50)] {
+            let mut style = TextStyle::default();
+            style.font_name = Arc::<str>::from("noto");
+            style.font_size = Pt::from_milli_i64(size_px * 750);
+            style.line_height = style.font_size;
+            style.line_height_is_auto = false;
+            style.css_pixel_snap_metrics = true;
+            let paragraph = Paragraph::new("D")
+                .with_style(style.clone())
+                .with_font_registry(Some(registry.clone()))
+                .with_floating_first_letter_paint_phase();
+            assert_eq!(
+                text_baseline_for_line(&style, Some(&registry), style.line_height)
+                    + paragraph.paint_offset_y,
+                Pt::from_milli_i64(paint_baseline_px * 750),
+            );
+        }
     }
 
     #[test]
@@ -6625,6 +6729,17 @@ impl Paragraph {
     pub(crate) fn with_floating_first_letter_paint_phase(mut self) -> Self {
         let line_height = self.effective_line_height_for_style(&self.style);
         if self.style.css_pixel_snap_metrics && line_height == self.style.font_size {
+            // A floated initial's terminal paint phase uses the outward font
+            // box. Resolve that target independently from the nearest-pixel
+            // baseline now used for ordinary inline layout, so correcting a
+            // line's descent neither double-shifts nor displaces the initial.
+            self.paint_offset_y +=
+                text_baseline_with_descent_snap(
+                    &self.style,
+                    self.font_registry.as_deref(),
+                    line_height,
+                    false,
+                ) - text_baseline_for_line(&self.style, self.font_registry.as_deref(), line_height);
             let (ascent, descent) = text_font_extents(&self.style, self.font_registry.as_deref());
             let leading = (line_height - ascent - descent).to_milli_i64();
             if leading < 0 && leading.rem_euclid(750) == 0 && (leading / 750).abs() % 2 == 1 {

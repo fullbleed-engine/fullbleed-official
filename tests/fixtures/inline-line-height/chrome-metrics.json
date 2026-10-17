@@ -1,0 +1,304 @@
+{
+  "schema": "fullbleed.inline_line_height.browser_metrics.v1",
+  "browser": "155.0.8059.40",
+  "captured_date": "2026-10-17",
+  "media": "print",
+  "method": "Pinned @font-face; zero margins/padding; absolute text box at top:20px with Hxy. Read a zero-size inline-block aligned to the baseline, subtracting the 20px origin. Canvas fontBoundingBoxAscent/Descent provide independent font-box measurements. Mixed-size controls use a 20px/1.5 parent and 48px/1 child with a 2px bottom border.",
+  "font_sha256": {
+    "Noto Sans": "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d",
+    "Inter": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031"
+  },
+  "sizes_px": [
+    12,
+    16,
+    20,
+    26,
+    40,
+    42,
+    48
+  ],
+  "cases": [
+    {
+      "font": "Noto Sans",
+      "size_px": 12,
+      "factor": 1,
+      "baseline_px": 10,
+      "line_height_px": 12,
+      "ascent_px": 13,
+      "descent_px": 4,
+      "pdf_sha256": "22edd8127579ac36477dedf54d1bc58d30daf73405c5b94e8d8180c0773270fe"
+    },
+    {
+      "font": "Noto Sans",
+      "size_px": 16,
+      "factor": 1,
+      "baseline_px": 14,
+      "line_height_px": 16,
+      "ascent_px": 17,
+      "descent_px": 5,
+      "pdf_sha256": "11564937733cb096273d833c31ff3fe7ad8c3ded0d5b4cd497ed8d7460c2cf2f"
+    },
+    {
+      "font": "Noto Sans",
+      "size_px": 20,
+      "factor": 1,
+      "baseline_px": 17,
+      "line_height_px": 20,
+      "ascent_px": 21,
+      "descent_px": 6,
+      "pdf_sha256": "cd496dc24df90bda99ba06fdb69574a2faac6daeb92085db78b0ac067623c382"
+    },
+    {
+      "font": "Noto Sans",
+      "size_px": 26,
+      "factor": 1,
+      "baseline_px": 23,
+      "line_height_px": 26,
+      "ascent_px": 28,
+      "descent_px": 8,
+      "pdf_sha256": "315cbc5a70cd00bf57f55eba71fad103be139bc4f1b0424a3c69dc1d798b30c0"
+    },
+    {
+      "font": "Noto Sans",
+      "size_px": 40,
+      "factor": 1,
+      "baseline_px": 35,
+      "line_height_px": 40,
+      "ascent_px": 43,
+      "descent_px": 12,
+      "pdf_sha256": "81aeef6de08a2cd64a34b298265a0cd521114d1b97ef6d467bd9468f5ed8f0ce"
+    },
+    {
+      "font": "Noto Sans",
+      "size_px": 42,
+      "factor": 1,
+      "baseline_px": 37,
+      "line_height_px": 42,
+      "ascent_px": 45,
+      "descent_px": 12,
+      "pdf_sha256": "b5d7a15c38cce29215357108f548a55707837df5b668cc7139b6df7883bdbabb"
+    },
+    {
+      "font": "Noto Sans",
+      "size_px": 48,
+      "factor": 1,
+      "baseline_px": 42,
+      "line_height_px": 48,
+      "ascent_px": 51,
+      "descent_px": 14,
+      "pdf_sha256": "bf61fd574fc221b0a09464113eedd8df766af23569f55b3bc7c1e2bb6da81f01"
+    },
+    {
+      "font": "Inter",
+      "size_px": 12,
+      "factor": 1,
+      "baseline_px": 10,
+      "line_height_px": 12,
+      "ascent_px": 12,
+      "descent_px": 3,
+      "pdf_sha256": "0516d36cb0eb5a6aa5fc7621d9ecc400053718b9be59dcf1cea661f03a274e6b"
+    },
+    {
+      "font": "Inter",
+      "size_px": 16,
+      "factor": 1,
+      "baseline_px": 14,
+      "line_height_px": 16,
+      "ascent_px": 16,
+      "descent_px": 4,
+      "pdf_sha256": "5108cc32a7b18380d9286311cb51204b84ca5c6af549d93bfe204d801644ef56"
+    },
+    {
+      "font": "Inter",
+      "size_px": 20,
+      "factor": 1,
+      "baseline_px": 17,
+      "line_height_px": 20,
+      "ascent_px": 19,
+      "descent_px": 5,
+      "pdf_sha256": "9c59c907b739eeb20b4945e18dafc55f2ec51648fc745089d46300985e617cd9"
+    },
+    {
+      "font": "Inter",
+      "size_px": 26,
+      "factor": 1,
+      "baseline_px": 22,
+      "line_height_px": 26,
+      "ascent_px": 25,
+      "descent_px": 6,
+      "pdf_sha256": "e019dc7a3f4fe6613a14c835725f9c93cf10eba758b3928aa54fc6134178a0cd"
+    },
+    {
+      "font": "Inter",
+      "size_px": 40,
+      "factor": 1,
+      "baseline_px": 34,
+      "line_height_px": 40,
+      "ascent_px": 39,
+      "descent_px": 10,
+      "pdf_sha256": "2e069b525d4fb5f50ffa929647c59f0e2898bc3c5f23f7bb846c92c3bbd0c6de"
+    },
+    {
+      "font": "Inter",
+      "size_px": 42,
+      "factor": 1,
+      "baseline_px": 36,
+      "line_height_px": 42,
+      "ascent_px": 41,
+      "descent_px": 10,
+      "pdf_sha256": "eef547eb558844faec67b7af12b5817f76fa9c2d3999887ec4ace8e511ef293f"
+    },
+    {
+      "font": "Inter",
+      "size_px": 48,
+      "factor": 1,
+      "baseline_px": 41,
+      "line_height_px": 48,
+      "ascent_px": 47,
+      "descent_px": 12,
+      "pdf_sha256": "9a8fee6726d6f02845c64da5ad1d70a4f1349d8aa2089686cdf78392b96f913a"
+    },
+    {
+      "font": "Noto Sans",
+      "size_px": 12,
+      "factor": 1.5,
+      "baseline_px": 13,
+      "line_height_px": 18,
+      "ascent_px": 13,
+      "descent_px": 4
+    },
+    {
+      "font": "Noto Sans",
+      "size_px": 16,
+      "factor": 1.5,
+      "baseline_px": 18,
+      "line_height_px": 24,
+      "ascent_px": 17,
+      "descent_px": 5
+    },
+    {
+      "font": "Noto Sans",
+      "size_px": 20,
+      "factor": 1.5,
+      "baseline_px": 22,
+      "line_height_px": 30,
+      "ascent_px": 21,
+      "descent_px": 6
+    },
+    {
+      "font": "Noto Sans",
+      "size_px": 26,
+      "factor": 1.5,
+      "baseline_px": 29,
+      "line_height_px": 39,
+      "ascent_px": 28,
+      "descent_px": 8
+    },
+    {
+      "font": "Noto Sans",
+      "size_px": 40,
+      "factor": 1.5,
+      "baseline_px": 45,
+      "line_height_px": 60,
+      "ascent_px": 43,
+      "descent_px": 12
+    },
+    {
+      "font": "Noto Sans",
+      "size_px": 42,
+      "factor": 1.5,
+      "baseline_px": 48,
+      "line_height_px": 63,
+      "ascent_px": 45,
+      "descent_px": 12
+    },
+    {
+      "font": "Noto Sans",
+      "size_px": 48,
+      "factor": 1.5,
+      "baseline_px": 54,
+      "line_height_px": 72,
+      "ascent_px": 51,
+      "descent_px": 14
+    },
+    {
+      "font": "Inter",
+      "size_px": 12,
+      "factor": 1.5,
+      "baseline_px": 13,
+      "line_height_px": 18,
+      "ascent_px": 12,
+      "descent_px": 3
+    },
+    {
+      "font": "Inter",
+      "size_px": 16,
+      "factor": 1.5,
+      "baseline_px": 18,
+      "line_height_px": 24,
+      "ascent_px": 16,
+      "descent_px": 4
+    },
+    {
+      "font": "Inter",
+      "size_px": 20,
+      "factor": 1.5,
+      "baseline_px": 22,
+      "line_height_px": 30,
+      "ascent_px": 19,
+      "descent_px": 5
+    },
+    {
+      "font": "Inter",
+      "size_px": 26,
+      "factor": 1.5,
+      "baseline_px": 29,
+      "line_height_px": 39,
+      "ascent_px": 25,
+      "descent_px": 6
+    },
+    {
+      "font": "Inter",
+      "size_px": 40,
+      "factor": 1.5,
+      "baseline_px": 44,
+      "line_height_px": 60,
+      "ascent_px": 39,
+      "descent_px": 10
+    },
+    {
+      "font": "Inter",
+      "size_px": 42,
+      "factor": 1.5,
+      "baseline_px": 47,
+      "line_height_px": 63,
+      "ascent_px": 41,
+      "descent_px": 10
+    },
+    {
+      "font": "Inter",
+      "size_px": 48,
+      "factor": 1.5,
+      "baseline_px": 53,
+      "line_height_px": 72,
+      "ascent_px": 47,
+      "descent_px": 12
+    }
+  ],
+  "mixed_size": [
+    {
+      "family": "Noto Sans",
+      "height_css_px": 52,
+      "font_sha256": "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d",
+      "input_sha256": "e9f087e75f461764b4009fe9c8091e4fece1696ae02bfcd47ecf46569b0a32cb",
+      "pdf_sha256": "49fe4f8954f014edd659256098ddb06240e6c76ce33801ac12cc99916e141511"
+    },
+    {
+      "family": "Inter",
+      "height_css_px": 51,
+      "font_sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031",
+      "input_sha256": "4f81bfc8fcac4d5d2dd71a9240b18f38d31fd53123d6b971ab20519b039d209a",
+      "pdf_sha256": "853a12abc69f0bd6e610092db5e8107dbdfe81e4a6e017b1b2fac2b09d851523"
+    }
+  ]
+}
