@@ -357,6 +357,17 @@ jobs:
       - name: Verify mixed inline wrapping with independent PDF readers
         run: python -I tools/smoke_inline_wrapping.py --out target/inline-wrapping
 
+      - name: Verify inline line heights and page breaks with an independent PDF reader
+        run: python -I tools/smoke_inline_line_height.py --out target/inline-line-height
+
+      - name: Retain inline line-height PDFs and measurements
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: inline-line-height-${{ runner.os }}
+          path: target/inline-line-height
+          if-no-files-found: warn
+
       - name: Verify Arabic text extraction and styled bidirectional fields
         run: python -I tools/smoke_rtl_text.py --out target/rtl-text
 
