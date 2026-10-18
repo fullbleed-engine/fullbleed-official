@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.30"
+  FULLBLEED_CI_VERSION: "2.5.31"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -207,6 +207,17 @@ jobs:
 
       - name: Verify independent font synthesis in PDFs and previews
         run: python -I tools/smoke_font_synthesis.py --out target/font-synthesis
+
+      - name: Verify saved table tags, content ownership and header relationships
+        run: python -I tools/smoke_table_tagging.py --out target/table-tagging
+
+      - name: Retain table PDFs, structure checks and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: table-tagging-${{ runner.os }}
+          path: target/table-tagging/
+          if-no-files-found: error
 
       - name: Verify static embedded stylesheets from the installed wheel
         run: python -I tools/smoke_embedded_styles.py --out target/embedded-stylesheets
