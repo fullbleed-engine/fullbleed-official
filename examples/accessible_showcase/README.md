@@ -59,6 +59,12 @@ python -m pip install -r requirements-check.txt
 python verify.py
 ```
 
+This check also rejects nested marked-content IDs and unbalanced tag boundaries
+without requiring an external validator. The pinned alpha has a
+[known table-cell tagging issue](https://github.com/fullbleed-engine/fullbleed-official/issues/97)
+when a cell contains another component. This specimen uses plain cell text with
+CSS styling; edited documents must pass the same check.
+
 For an external standards check, install [veraPDF](https://verapdf.org/software/)
 and run its PDF/UA-1 profile against the **final** PDF:
 

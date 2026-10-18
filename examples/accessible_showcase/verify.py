@@ -37,10 +37,15 @@ def inspect_structure(pdf):
         def before(op, args, cm, tm):
             if op == b"BDC":
                 props = args[1].get_object()
-                stack.append((str(args[0]), int(props["/MCID"]) if "/MCID" in props else None))
+                mcid = int(props["/MCID"]) if "/MCID" in props else None
+                if mcid is not None:
+                    parent = next((value for _, value in reversed(stack) if value is not None), None)
+                    assert parent is None, f"Nested MCID on page {page_number}: {parent} -> {mcid}"
+                stack.append((str(args[0]), mcid))
             elif op == b"BMC":
                 stack.append((str(args[0]), None))
             elif op == b"EMC":
+                assert stack, f"Unmatched marked-content end on page {page_number}"
                 stack.pop()
 
         def text(value, cm, tm, font, size):
@@ -53,6 +58,7 @@ def inspect_structure(pdf):
                         break
 
         page.extract_text(visitor_operand_before=before, visitor_text=text)
+        assert not stack, f"Unclosed marked content on page {page_number}"
     roles = Counter()
     nodes = []
     leaves = []
@@ -111,6 +117,7 @@ def inspect_structure(pdf):
     return dict(ok=True, title=reader.metadata.title, language=catalog["/Lang"],
                 page_count=len(reader.pages), roles=dict(roles), headings=headings,
                 nodes=nodes, reading_order=leaves, decorative_text_omitted=True,
+                marked_content_nesting_valid=True,
                 pdf_link_annotations=sum(len(page.get("/Annots", [])) for page in reader.pages),
                 scope="Actual PDF structure, MCID text and semantic order; not an assistive-technology user test.")
 
