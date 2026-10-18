@@ -3461,72 +3461,19 @@ fn node_to_flowables_in_scope(
                                 caption_inline_style.as_deref(),
                                 ancestors,
                             );
-                            let mut caption_ancestors = ancestors.clone();
-                            caption_ancestors.push(caption_info.clone());
-                            let mut caption_text = extract_rendered_text(
+                            if let Some(flowable) = table_caption_flowable_from_node(
                                 &child,
+                                &caption_style,
                                 resolver,
-                                &caption_style,
-                                &caption_ancestors,
-                                caption_style.white_space,
-                            );
-                            if caption_text.trim().is_empty() {
-                                if let Some(flowable) = container_flowable_with_role(
-                                    Vec::new(),
-                                    &caption_style,
-                                    Some("Caption"),
-                                ) {
-                                    if matches!(
-                                        caption_style.caption_side,
-                                        crate::style::CaptionSideMode::Bottom
-                                    ) {
-                                        bottom_caption_flowables.push(flowable);
-                                    } else {
-                                        top_caption_flowables.push(flowable);
-                                    }
-                                }
-                                continue;
-                            }
-                            if !preserve_whitespace(caption_style.white_space) {
-                                caption_text = caption_text.trim().to_string();
-                            }
-                            let caption_text =
-                                apply_text_transform(&caption_text, caption_style.text_transform);
-                            let caption_text_style = text_style_for_flow_text(&caption_style);
-                            report_missing_glyphs(
+                                ancestors,
                                 report.as_deref_mut(),
-                                font_registry.as_deref(),
-                                &caption_text_style,
-                                &caption_text,
-                            );
-                            let paragraph = Paragraph::new(caption_text)
-                                .with_style(caption_text_style)
-                                .with_align(text_align_from_style(&caption_style))
-                                .with_last_align(text_align_last_from_style(&caption_style))
-                                .with_whitespace(
-                                    preserve_whitespace(caption_style.white_space),
-                                    no_wrap(&caption_style),
-                                )
-                                .with_break_spaces(matches!(
-                                    caption_style.white_space,
-                                    WhiteSpaceMode::BreakSpaces
-                                ))
-                                .with_pagination(caption_style.pagination)
-                                .with_font_registry(font_registry.clone())
-                                .with_tag_role("Caption");
-                            let caption_side = caption_style.caption_side;
-                            if let Some(flowable) = container_flowable_with_role(
-                                vec![LayoutItem::Block {
-                                    flowable: Box::new(paragraph) as Box<dyn Flowable>,
-                                    flex_grow: 0.0,
-                                    flex_shrink: 1.0,
-                                    width_spec: None,
-                                    order: 0,
-                                }],
-                                &caption_style,
-                                Some("Caption"),
+                                font_registry.clone(),
+                                counters.table_semantics.caption(&child, node),
                             ) {
-                                if matches!(caption_side, crate::style::CaptionSideMode::Bottom) {
+                                if matches!(
+                                    caption_style.caption_side,
+                                    crate::style::CaptionSideMode::Bottom
+                                ) {
                                     bottom_caption_flowables.push(flowable);
                                 } else {
                                     top_caption_flowables.push(flowable);
@@ -3678,6 +3625,9 @@ fn node_to_flowables_in_scope(
                         let table_intrinsic_width = table.intrinsic_width();
                         let has_caption = !top_caption_flowables.is_empty()
                             || !bottom_caption_flowables.is_empty();
+                        // The existing visual wrapper includes both the caption and
+                        // the grid. It owns the single logical Table when captioned.
+                        let table = table.with_table_group_emission(!has_caption);
                         let caption_width_overflow = match style.width {
                             LengthSpec::Absolute(width) if has_caption => {
                                 table.collapsed_caption_width_overflow(width)
@@ -3755,11 +3705,12 @@ fn node_to_flowables_in_scope(
                             style.width
                         };
 
-                        let container = ContainerFlowable::new_pt(
+                        let mut container = ContainerFlowable::new_pt(
                             table_children,
                             style.font_size,
                             style.root_font_size,
                         )
+                        .with_table_semantics(counters.table_semantics.table(node))
                         .with_establishes_abs_containing_block(establishes_abs_containing_block(
                             &style,
                         ))
@@ -3853,6 +3804,9 @@ fn node_to_flowables_in_scope(
                         .with_self_visible(style.visibility.paints())
                         .with_pagination(style.pagination);
 
+                        if has_caption {
+                            container = container.with_tag_role("Table");
+                        }
                         vec![LayoutItem::Block {
                             flowable: Box::new(container) as Box<dyn Flowable>,
                             flex_grow: style.flex_grow,
@@ -11744,11 +11698,13 @@ fn container_flowables(children: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<
     container_flowables_with_role(children, style, None)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ContainerCompilationOptions {
     suppress_single_used_column_rule: bool,
     list_numbering: Option<&'static str>,
     flow_gap: Option<LengthSpec>,
+    table_semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
+    emit_tag_group: bool,
 }
 
 impl Default for ContainerCompilationOptions {
@@ -11757,6 +11713,8 @@ impl Default for ContainerCompilationOptions {
             suppress_single_used_column_rule: false,
             list_numbering: None,
             flow_gap: None,
+            table_semantics: None,
+            emit_tag_group: true,
         }
     }
 }
@@ -11900,7 +11858,7 @@ fn compile_multicol_child_stream(
                 compiled.push(compiled_multicol_run(
                     std::mem::take(&mut run),
                     style,
-                    options,
+                    options.clone(),
                 ));
             }
             compiled.push(child);
@@ -11971,6 +11929,8 @@ fn container_flowable_with_role_options(
         {
             let mut container =
                 ContainerFlowable::new_pt(Vec::new(), style.font_size, style.root_font_size)
+                    .with_table_semantics(options.table_semantics.clone())
+                    .with_tag_group_emission(options.emit_tag_group)
                     .with_establishes_abs_containing_block(establishes_abs_containing_block(style))
                     .with_establishes_stacking_context(establishes_stacking_context(style))
                     .with_transforms(style.transform.clone())
@@ -12014,7 +11974,7 @@ fn container_flowable_with_role_options(
             DisplayMode::Block | DisplayMode::FlowRoot | DisplayMode::InlineBlock
         );
     if is_multicol_container {
-        flowables = compile_multicol_child_stream(flowables, style, options);
+        flowables = compile_multicol_child_stream(flowables, style, options.clone());
     }
     if matches!(style.writing_mode, WritingModeMode::HorizontalTb)
         && length_has_percentage_component(style.padding.left)
@@ -12029,6 +11989,8 @@ fn container_flowable_with_role_options(
             .collect();
     }
     let mut container = ContainerFlowable::new_pt(flowables, style.font_size, style.root_font_size)
+        .with_table_semantics(options.table_semantics)
+        .with_tag_group_emission(options.emit_tag_group)
         .with_flow_gap(options.flow_gap)
         .with_inline_bidi_transparency(matches!(style.display, DisplayMode::Inline))
         .with_establishes_abs_containing_block(establishes_abs_containing_block(style))
@@ -13765,7 +13727,13 @@ fn table_caption_flowable_from_node(
     ancestors: &[ElementInfo],
     mut report: Option<&mut GlyphCoverageReport>,
     font_registry: Option<Arc<FontRegistry>>,
+    semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
 ) -> Option<Box<dyn Flowable>> {
+    let mut options = ContainerCompilationOptions {
+        table_semantics: semantics,
+        emit_tag_group: caption_style.visibility.paints(),
+        ..ContainerCompilationOptions::default()
+    };
     let mut caption_ancestors = ancestors.to_vec();
     caption_ancestors.push(element_info(node, resolver.has_sibling_selectors()));
     let mut caption_text = extract_rendered_text(
@@ -13776,7 +13744,15 @@ fn table_caption_flowable_from_node(
         caption_style.white_space,
     );
     if caption_text.trim().is_empty() {
-        return container_flowable_with_role(Vec::new(), caption_style, Some("Caption"));
+        // Caption remains the layout marker for the existing box, but an empty
+        // or non-painted caption has no semantic content to announce.
+        options.emit_tag_group = false;
+        return container_flowable_with_role_options(
+            Vec::new(),
+            caption_style,
+            Some("Caption"),
+            options,
+        );
     }
     if !preserve_whitespace(caption_style.white_space) {
         caption_text = caption_text.trim().to_string();
@@ -13803,9 +13779,9 @@ fn table_caption_flowable_from_node(
         ))
         .with_pagination(caption_style.pagination)
         .with_font_registry(font_registry)
-        .with_tag_role("Caption");
+        .with_tag_role("P");
 
-    container_flowable_with_role(
+    container_flowable_with_role_options(
         vec![LayoutItem::Block {
             flowable: Box::new(paragraph) as Box<dyn Flowable>,
             flex_grow: 0.0,
@@ -13815,6 +13791,7 @@ fn table_caption_flowable_from_node(
         }],
         caption_style,
         Some("Caption"),
+        options,
     )
 }
 
@@ -13935,6 +13912,7 @@ fn native_css_table_container_flowables(
                 ancestors,
                 report.as_deref_mut(),
                 font_registry.clone(),
+                counters.table_semantics.caption(&child, node),
             ) {
                 if matches!(
                     child_style.caption_side,
@@ -14019,6 +13997,7 @@ fn native_css_table_container_flowables(
     .with_minimum_height(minimum_table_height);
 
     let has_caption = !top_caption_flowables.is_empty() || !bottom_caption_flowables.is_empty();
+    let table = table.with_table_group_emission(!has_caption);
     let caption_width_overflow = match style.width {
         LengthSpec::Absolute(width) if has_caption => table.collapsed_caption_width_overflow(width),
         _ => Pt::ZERO,
@@ -14057,8 +14036,9 @@ fn native_css_table_container_flowables(
         style.width
     };
 
-    let container =
+    let mut container =
         ContainerFlowable::new_pt(table_children, style.font_size, style.root_font_size)
+            .with_table_semantics(counters.table_semantics.table(node))
             .with_establishes_abs_containing_block(establishes_abs_containing_block(style))
             .with_margin(style.margin)
             .with_border(
@@ -14146,6 +14126,9 @@ fn native_css_table_container_flowables(
             .with_self_visible(style.visibility.paints())
             .with_pagination(style.pagination);
 
+    if has_caption {
+        container = container.with_tag_role("Table");
+    }
     let flowable = Box::new(container) as Box<dyn Flowable>;
     Some(if matches!(style.display, DisplayMode::InlineTable) {
         vec![LayoutItem::Inline {
@@ -14290,6 +14273,7 @@ fn table_container_flowables(
                 ancestors,
                 report.as_deref_mut(),
                 font_registry.clone(),
+                counters.table_semantics.caption(&child, node),
             ) {
                 if matches!(
                     child_style.caption_side,
@@ -14514,9 +14498,15 @@ fn table_container_flowables(
         };
     }
 
-    let Some(table_flowable) =
-        container_flowable_with_role(table_items, &table_box_style, Some("Table"))
-    else {
+    let Some(table_flowable) = container_flowable_with_role_options(
+        table_items,
+        &table_box_style,
+        Some("Table"),
+        ContainerCompilationOptions {
+            table_semantics: counters.table_semantics.table(node),
+            ..ContainerCompilationOptions::default()
+        },
+    ) else {
         return Vec::new();
     };
 
@@ -16906,7 +16896,7 @@ fn table_flowable(
     }
 
     TableFlowable::new(body_rows)
-        .with_table_semantics(counters.table_semantics.node(node))
+        .with_table_semantics(counters.table_semantics.table(node))
         .with_header(header_rows)
         .repeat_header(true)
         .with_footer_row_count(footer_row_count)

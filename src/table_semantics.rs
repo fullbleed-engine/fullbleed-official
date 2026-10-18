@@ -12,6 +12,7 @@ pub struct TableSemanticNode {
     /// None on a table container; stable across repeated cell appearances.
     pub cell_key: Option<u64>,
     pub row_key: Option<u64>,
+    /// Source row-group or caption identity, retained across page fragments.
     pub group_key: Option<u64>,
     /// Last source row covered by the compiler-resolved span, before pagination.
     pub row_span_end: Option<u64>,
@@ -24,6 +25,7 @@ pub struct TableSemanticNode {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct HtmlTableIndex {
     by_node: HashMap<usize, Arc<TableSemanticNode>>,
+    element_keys: HashMap<usize, u64>,
 }
 
 struct SourceCell {
@@ -164,6 +166,9 @@ impl HtmlTableIndex {
                 .parent()
                 .and_then(|parent| tables.get(&parent.identity_key()).copied());
             let element = node.as_element();
+            if element.is_some() {
+                index.element_keys.insert(address, key);
+            }
             let table = if element.is_some_and(|element| element.name.local.as_ref() == "table") {
                 index.by_node.insert(
                     address,
@@ -314,6 +319,32 @@ impl HtmlTableIndex {
 
     pub(crate) fn node(&self, node: &NodeRef) -> Option<Arc<TableSemanticNode>> {
         self.by_node.get(&node.identity_key()).cloned()
+    }
+
+    pub(crate) fn table(&self, node: &NodeRef) -> Option<Arc<TableSemanticNode>> {
+        // CSS tables also need a source-owned identity. Do not use a layout
+        // counter or a DOM address as a persisted logical table key.
+        let table_key = *self.element_keys.get(&node.identity_key())?;
+        Some(Arc::new(TableSemanticNode {
+            table_key,
+            cell_key: None,
+            row_key: None,
+            group_key: None,
+            row_span_end: None,
+            header_cells: None,
+            header_issues: Vec::new(),
+        }))
+    }
+
+    pub(crate) fn caption(
+        &self,
+        node: &NodeRef,
+        table: &NodeRef,
+    ) -> Option<Arc<TableSemanticNode>> {
+        let mut semantics = self.table(table)?.as_ref().clone();
+        // A caption is a logical group whose text can span several pages.
+        semantics.group_key = self.element_keys.get(&node.identity_key()).copied();
+        Some(Arc::new(semantics))
     }
 }
 

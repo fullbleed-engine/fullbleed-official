@@ -255,6 +255,9 @@ jobs:
       - name: Verify saved table tags, content ownership and header relationships
         run: python -I tools/smoke_table_tagging.py --out target/table-tagging
 
+      - name: Verify caption ownership and reading order across pages and records
+        run: python -I tools/smoke_table_captions.py --out target/table-captions
+
       - name: Verify authored tables through PDF and both static HTML exports
         run: python -I tools/smoke_component_tables.py --out target/component-tables
 
@@ -281,6 +284,7 @@ jobs:
           name: table-tagging-${{ runner.os }}
           path: |
             target/table-tagging/
+            target/table-captions/
             target/oversized-table/
             target/reflow-cache-tests/
             target/reflow-cache-tests.xml

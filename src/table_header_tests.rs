@@ -19,6 +19,88 @@ fn tagged(html: &str, css: &str) -> Vec<u8> {
 }
 
 #[test]
+fn table_captions_belong_to_their_tables_in_the_authoring_reading_tree() {
+    for side in ["top", "bottom"] {
+        let html = "<h1>Tables</h1><table><caption>Outer caption</caption><tr><td><table><caption>Inner caption</caption><tr><td>Value</td></tr></table></td></tr></table>";
+        let css = format!("caption {{caption-side:{side}}}");
+        let engine = FullBleed::builder().build().unwrap();
+        let preview = engine
+            .render_authoring_preview(
+                AuthoringPreviewRequest {
+                    html,
+                    css: &css,
+                    dpi: 72,
+                },
+                &AuthoringCancellationToken::new(),
+                |_| {},
+            )
+            .unwrap();
+        let mut pending: Vec<_> = preview
+            .reading
+            .pages
+            .iter()
+            .flat_map(|page| page.nodes.iter().map(|node| (node, None)))
+            .collect();
+        let mut captions = Vec::new();
+        let mut tables = 0;
+        while let Some((node, parent)) = pending.pop() {
+            if node.role == "Table" {
+                tables += 1;
+                let position = node
+                    .children
+                    .iter()
+                    .position(|child| child.role == "Caption")
+                    .unwrap();
+                assert_eq!(
+                    position,
+                    if side == "top" {
+                        0
+                    } else {
+                        node.children.len() - 1
+                    }
+                );
+            }
+            if node.role == "Caption" {
+                let parent: &crate::authoring::AuthoringReadingNode = parent.unwrap();
+                assert_eq!(parent.role, "Table");
+                let owner = parent.table_semantics.as_ref().unwrap().table_key;
+                assert_eq!(node.table_semantics.as_ref().unwrap().table_key, owner);
+                assert_eq!(node.children.len(), 1);
+                assert_eq!(node.children[0].role, "P");
+                captions.push((owner, node.children[0].text.as_str()));
+            }
+            pending.extend(node.children.iter().map(|child| (child, Some(node))));
+        }
+        captions.sort_by_key(|caption| caption.0);
+        assert_eq!(tables, 2);
+        assert_eq!(captions.len(), 2);
+        assert_ne!(captions[0].0, captions[1].0);
+        assert_eq!(captions[0].1, "Outer caption");
+        assert_eq!(captions[1].1, "Inner caption");
+    }
+}
+
+#[test]
+fn table_captions_without_painted_text_do_not_emit_empty_semantic_groups() {
+    for (content, style) in [
+        ("", "padding:3pt"),
+        ("", "height:15pt;background:#d8e8e0"),
+        ("Hidden", "display:none;padding:3pt"),
+        ("Hidden", "visibility:hidden;padding:3pt"),
+    ] {
+        let html = format!(
+            "<table><caption style='{style}'>{content}</caption><tr><th>Item</th></tr><tr><td>Value</td></tr></table>"
+        );
+        let bytes = tagged(&html, "");
+        let pdf = String::from_utf8_lossy(&bytes);
+        assert!(!pdf.contains("/S /Caption "), "{style}");
+        assert_eq!(pdf.matches("/S /Table ").count(), 1, "{style}");
+        assert_eq!(pdf.matches("/S /TH ").count(), 1, "{style}");
+        assert_eq!(pdf.matches("/S /TD ").count(), 1, "{style}");
+    }
+}
+
+#[test]
 fn explicit_table_headers_reach_pdf_id_tree_and_table_attributes() {
     let html = "<table><thead><tr><th id='item'>Item</th><th id='amount'>Amount</th></tr></thead><tbody><tr><td headers='item'>Coffee</td><td headers='item amount'>12.50</td></tr></tbody></table>";
     let css = "@page {size:300pt 300pt;margin:12pt;} table {width:100%;} th,td {padding:4pt;}";
