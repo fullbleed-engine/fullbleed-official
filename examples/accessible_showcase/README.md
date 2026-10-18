@@ -4,9 +4,9 @@ A two-page community-program guide built with reusable Python components, a
 local SVG illustration and embedded fonts. All program information is fictional.
 The source contains no HTML templates or raw HTML strings.
 
-This example uses the experimental component API in **Fullbleed 2.6.0a4**. Pin
-that version when reproducing the published output; the API may change before
-stabilization.
+This source uses the experimental component API in **Fullbleed 2.6.0a5**.
+Pin the version supplied with each downloaded source kit; the API may change
+before stabilization. Historical alpha 4 downloads retain their original pin.
 
 ## Render and edit
 
@@ -60,10 +60,11 @@ python verify.py
 ```
 
 This check also rejects nested marked-content IDs and unbalanced tag boundaries
-without requiring an external validator. The pinned alpha has a
-[known table-cell tagging issue](https://github.com/fullbleed-engine/fullbleed-official/issues/97)
-when a cell contains another component. This specimen uses plain cell text with
-CSS styling; edited documents must pass the same check.
+without requiring an external validator. The schedule uses a Strong component
+inside its program cells. Alpha 5 carries the correction for the
+[table-cell tagging issue](https://github.com/fullbleed-engine/fullbleed-official/issues/97)
+that required plain text in the alpha 4 specimen. Edited documents must pass
+the same saved-PDF check.
 
 For an external standards check, install [veraPDF](https://verapdf.org/software/)
 and run its PDF/UA-1 profile against the **final** PDF:
@@ -78,8 +79,9 @@ report. Without this argument, the script explicitly records that external
 validation did not run. Java and the independent readers are verification tools,
 not dependencies of the document renderer.
 
-The published specimen passed veraPDF 1.30.3's PDF/UA-1 machine checks. Its
-validation receipt is tied to the PDF's SHA-256. Both pages were visually reviewed;
+The alpha 5 specimen passed veraPDF 1.30.3's PDF/UA-1 machine checks: 106 rules,
+5,512 checks, zero failures and zero warnings. Its validation receipt is tied to
+the PDF's SHA-256. Both pages were visually reviewed;
 the actual tag order, image description and table header scope were also checked.
 These checks are **not a screen-reader user test or blanket WCAG certification**.
 Changed content or styling needs fresh rendering, inspection and validation.

@@ -128,6 +128,8 @@ mod html_dom;
 mod html_entities;
 mod icc;
 mod image_native;
+#[cfg(test)]
+mod inline_line_height_tests;
 mod jit;
 mod jpeg_native;
 mod math;

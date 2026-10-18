@@ -7,8 +7,8 @@
       "report": "examples/acme_invoice/report.py",
       "pdf": {
         "path": "examples/acme_invoice/output/acme_sample_invoice.pdf",
-        "bytes": 93272,
-        "sha256": "986d1327890f49b2895202a4de895324ddcfe52ec17b76bd73c74a9de90d8a4f"
+        "bytes": 93274,
+        "sha256": "012f2104d921da617b2cf4b1363e665c1e13b62671e6323cb99f10bab2370011"
       },
       "png": {
         "count": 1,
@@ -16,8 +16,8 @@
           {
             "name": "acme_sample_invoice_page1.png",
             "path": "examples/acme_invoice/output/acme_sample_invoice_page1.png",
-            "bytes": 162844,
-            "sha256": "c225f53357bc230e71b2143d50b58b1c7da04b0e829f95d7b458d23c7de41092"
+            "bytes": 163021,
+            "sha256": "9ac0fe6ea62b94fa5a8073386535a51dc17d243cb3c5ed8b9e10966dccf66fe8"
           }
         ]
       },

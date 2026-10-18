@@ -4119,7 +4119,7 @@ def _build_parser():
     p_new_search.set_defaults(func=scaffold_module.cmd_new_search)
 
     p_new_remote = new_sub.add_parser("remote", help="Install a remote template project")
-    p_new_remote.add_argument("template_id", help="Remote template id (for example: i9-stamped-vdp)")
+    p_new_remote.add_argument("template_id", help="Remote template id (find available templates with: fullbleed new list)")
     p_new_remote.add_argument("path", nargs="?", default=".", help="Target directory")
     p_new_remote.add_argument(
         "--version",

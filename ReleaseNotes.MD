@@ -1,3 +1,26 @@
+# Fullbleed Release Notes - 2.6.0a5
+
+This Python component candidate integrates stable 2.5.30 inline-spacing and
+2.5.31 rich-table tagging corrections. Rich cells retain their TH/TD structure
+while nested paragraphs, styled spans, lists, figures and tables own their
+content. Plain cells retain their existing text owner. Same-font colored spans
+and generated content also use the corrected logical line box at unit line height.
+
+The merge preserves the alpha's logical oversized-cell fragmentation, authored
+layout diagnostics and semantic flex/grid behavior. Components, owned styles,
+named parts and static Bootstrap/HTML export keep their existing API. The
+paired Northstar/Common Ground examples and accessible guide require their own
+installed-output, independent-reader and source-kit verification.
+
+Python uses `2.6.0a5`; Cargo source uses `2.6.0-alpha.5`. Follow the
+[alpha 5 runbook](docs/release/2.6.0a5-runbook.md). This entry describes a candidate
+until its full source, public-package and guide-delivery gates pass. Existing
+caption-containment failures must remain visible; no general accessibility,
+CSS, Bootstrap or browser-conformance claim is made. The dedicated PDF/VT
+validator remains unconfigured.
+
+---
+
 # Fullbleed Release Notes - 2.6.0a4
 
 This Python component alpha includes the stable 2.5.29 correction for isolated
@@ -102,6 +125,87 @@ The release gate checks that both spellings, the lockfile, wheel metadata and
 installed contracts agree. This alpha distribution targets Python; the Rust
 registry's stable release is managed separately. See the
 [alpha runbook](docs/release/2.6.0a1-runbook.md) for verification and publication.
+
+---
+
+# Fullbleed Release Notes - 2.5.31
+
+Rich table cells now keep their TH/TD structure separate from independently
+tagged text, lists, images and nested tables. Previously, a cell containing a
+paragraph or styled span could produce nested marked-content IDs even when a
+PDF/UA validator reported a passing profile result. Table borders and
+backgrounds are marked as artifacts. Plain cells retain their existing text
+owner; untagged native content inside rich cells receives a content owner.
+
+The saved-PDF regression gate covers 180 cases across tagged PDF, PDF/UA-1 and
+PDF/UA-2, using direct, compiled, repeated and reflow output with both compression
+modes. It checks marked-content nesting, structure and parent-tree ownership,
+header scope, row/column spans, explicit header references, alternative text,
+pagination, text retention and repeated-render determinism. CI retains the PDFs
+and independent previews. This corrects [issue #97](https://github.com/fullbleed-engine/fullbleed-official/issues/97).
+
+Existing PDF/UA-2 table-caption containment failures remain tracked in
+[issue #98](https://github.com/fullbleed-engine/fullbleed-official/issues/98).
+The new table gate is a focused structural regression check, not proof that all
+PDF/UA documents are conformant. A pre-existing oversized rich-cell pagination
+stall remains tracked in [issue #99](https://github.com/fullbleed-engine/fullbleed-official/issues/99);
+the passing pagination fixtures split between rows. No runtime dependency or
+public authoring API is added. The experimental component library remains a
+separate opt-in release.
+
+See the [2.5.31 runbook](docs/release/2.5.31-runbook.md) for validation evidence
+and publication gates.
+
+---
+
+# Fullbleed Release Notes - 2.5.30
+
+Same-font colored spans and generated content now preserve authored row spacing
+at `line-height: 1`. Previously, affected font sizes added one CSS pixel to each
+row: 24 rows that fit on three pages as plain text could become four pages after
+adding an accent color. Direct rendering and compiled reflow use the corrected
+logical line box. Registered fonts with integral CSS-pixel sizes and unit line
+height use nearest-pixel descent. Logical line geometry retains its half-pixel
+phase until painting; mixed-size text encloses the parent strut without changing
+table, page-margin or atomic-inline baselines. Floated initials keep their
+existing glyph placement, and text shadows preserve the foreground baseline.
+
+The installed-output gate checks 380 cases by reading saved PDFs with PDFium:
+absolute baselines at integral and fractional origins, row spacing, pagination
+and mixed-size border geometry.
+The public 2.5.29 wheel fails 22 of the original 64 spacing cases. The expanded
+gate retains fresh browser measurements with pinned fonts. The existing 20
+floated-initial references and tolerances remain unchanged. Runtime dependencies
+and authoring APIs are unchanged.
+
+Remote-template help now points to `fullbleed new list` so users can discover
+available starters instead of copying an unavailable template ID.
+
+See the [2.5.30 runbook](docs/release/2.5.30-runbook.md) for the independent corpus
+review and final publication gates. Remaining fractional line-height paint
+differences are outside this correction. The static Bootstrap component alpha
+remains a separate opt-in release.
+
+---
+
+# Fullbleed Release Notes - 2.5.29
+
+Native previews of finalized PDFs now composite isolated transparency groups
+before applying their opacity. Overlapping SVG shapes and reused symbols no
+longer become darker in PNG previews than in the generated PDF. Member opacity,
+stroke opacity and nested group opacity remain distinct. Runtime dependencies
+and the document authoring APIs are unchanged.
+
+The SVG output checks now inspect both layout previews and previews read from
+the saved PDF, across direct, compiled, fixed-binding and reflow output. The
+previous public wheel fails 16 finalized-preview checks while its PDFium-rendered
+PDFs remain correct. The candidate must pass all 810 checks across 54 inputs and
+preserve the retained PDF bytes and layout-preview pixels before release.
+
+See the [2.5.29 runbook](docs/release/2.5.29-runbook.md) for evidence and publication
+gates. This is a scoped correction for isolated groups emitted by Fullbleed;
+it does not establish general external-PDF renderer or CSS conformance. The
+separate static Bootstrap component alpha remains an explicit opt-in release.
 
 ---
 

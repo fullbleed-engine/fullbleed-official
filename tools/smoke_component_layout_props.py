@@ -50,6 +50,8 @@ def main():
         document.emit_artifacts(html_path=folder / "document.html", css_path=folder / "document.css")
         (folder / "document.pdf").write_bytes(pdf)
         (folder / "reference.pdf").write_bytes(reference_pdf)
+        trace = renderer.engine_for(document).export_render_time_pagination_trace(plan.html, plan.css)
+        (folder / "pagination-trace.json").write_text(json.dumps(trace, indent=2) + "\n", encoding="utf-8")
         positions = {}
         with closing(pdfium.PdfDocument(pdf)) as rendered, closing(pdfium.PdfDocument(reference_pdf)) as baseline:
             assert len(rendered) == len(baseline), name
@@ -76,7 +78,8 @@ def main():
         assert set(positions) == set(markers)
         cases.append({"name": name, "pages": len(reader.pages), "pdf_sha256": sha256(pdf).hexdigest(),
                       "reference_sha256": sha256(reference_pdf).hexdigest(), "reference_bytes_equal": pdf == reference_pdf,
-                      "reference_pixels_equal": True, "repeat_bytes_equal": True, "missing_glyphs": 0, "positions": positions})
+                      "reference_pixels_equal": True, "repeat_bytes_equal": True, "missing_glyphs": 0,
+                      "positions": positions, "layout_events": trace["events"]})
         return positions
 
     def blocks():
@@ -89,9 +92,15 @@ def main():
                                    ("style-final", {"gap": pt(3), "style": style(row_gap=pt(9))}, 9)):
         children = [Paragraph("I_A"), Paragraph("I_B")]
         points = check("flow-" + name, Spaced(children, **kwargs), Flow(children, gap=pt(expected)), ["I_A", "I_B"])
-        # The existing text painter snaps to CSS pixels (0.75 pt); the 8 pt
-        # built-in case can therefore land a quarter point from its ideal pitch.
-        assert abs(points["I_B"]["y"] - points["I_A"]["y"] - (12 + expected)) < .4, (name, points)
+        # Check the logical gap separately from pixel-snapped text ink. Two
+        # independently snapped origins can differ by almost one CSS pixel.
+        # The 8 pt gap is fractional in CSS pixels; its pitch can be 19.5 pt
+        # even though the two 12 pt line boxes plus that gap occupy 32 pt.
+        placed = [event for event in cases[-1]["layout_events"] if event.get("result") == "placed"]
+        assert len(placed) == 1, (name, placed)
+        logical_height = placed[0]["placed_rect"]["h"]
+        assert abs(logical_height - (24 + expected)) < .01, (name, logical_height)
+        assert abs(points["I_B"]["y"] - points["I_A"]["y"] - (12 + expected)) < .751, (name, points)
 
     children = blocks()
     choices = {"align": "start", "justify": "start", "gap": pt(6), "style": style(width=pt(180))}

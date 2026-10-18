@@ -351,8 +351,41 @@ jobs:
       - name: Verify font family defaults and compiled previews
         run: python -I tools/smoke_font_families.py --out target/font-families
 
+      - name: Verify saved table tags, content ownership and header relationships
+        run: python -I tools/smoke_table_tagging.py --out target/table-tagging
+
+      - name: Verify authored tables through PDF and both static HTML exports
+        run: python -I tools/smoke_component_tables.py --out target/component-tables
+
+      - name: Retain component table PDFs, exports and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-component-tables
+          path: target/component-tables/
+          if-no-files-found: error
+
+      - name: Retain table PDFs, structure checks and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-table-tagging
+          path: target/table-tagging/
+          if-no-files-found: error
+
       - name: Verify mixed inline wrapping with independent PDF readers
         run: python -I tools/smoke_inline_wrapping.py --out target/inline-wrapping
+
+      - name: Verify inline line heights and page breaks with an independent PDF reader
+        run: python -I tools/smoke_inline_line_height.py --out target/inline-line-height
+
+      - name: Retain inline line-height PDFs and measurements
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-inline-line-height
+          path: target/inline-line-height
+          if-no-files-found: warn
 
       - name: Verify Arabic text extraction and styled bidirectional fields
         run: python -I tools/smoke_rtl_text.py --out target/rtl-text
