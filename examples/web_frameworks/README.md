@@ -186,6 +186,12 @@ The download page's screenshot is a saved sample; the PDF download is rendered
 on request from the current template. Review `output/check/preview/invoice_page1.png`
 and the PDF after a layout change.
 
+The default saved sample uses the stable version pinned above. A source alpha
+may include a reviewed `static/invoice-VERSION.png`; the demo and checks select
+that exact installed version's image when present. Both paths require an exact
+match with the newly rendered preview. This keeps source-branch checks separate
+from the public stable Docker pin.
+
 ## License
 
 Example code and the Fullbleed engine are MIT licensed. The included display

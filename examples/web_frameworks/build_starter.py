@@ -11,6 +11,7 @@ import subprocess
 import zipfile
 
 import fullbleed
+from demo import preview_path
 from invoice import load_invoice, render_invoice
 
 ROOT = Path(__file__).resolve().parent
@@ -19,7 +20,8 @@ FILES = ["README.md", "invoice.py", "demo.py", "fastapi_app.py", "flask_app.py",
          "check_examples.py", "check_http.py", "check_docker.py", "Dockerfile", ".dockerignore",
          "requirements-docker.txt", "requirements-fastapi.txt", "requirements-flask.txt",
          "requirements-django.txt", "requirements-check.txt", "templates/invoice.html",
-         "templates/invoice.css", "static/index.html", "static/invoice.png"]
+         "templates/invoice.css", "static/index.html", "static/invoice.png",
+         "static/invoice-2.6.0a5.png"]
 
 
 def main():
@@ -50,7 +52,7 @@ def main():
         str(out/"invoice.pdf"), str(out/"preview"), 110, "invoice")
     assert len(previews) == 1
     png = Path(previews[0]).read_bytes()
-    assert png == content["static/invoice.png"], "Refresh and review the saved preview before packaging."
+    assert png == content[preview_path().relative_to(ROOT).as_posix()], "Refresh and review the saved preview before packaging."
     (out/"invoice.png").write_bytes(png)
     digest = lambda data: hashlib.sha256(data).hexdigest()
     manifest = {"schema": "fullbleed.python-web-starter.v1", "engineVersion": metadata.version("fullbleed"),

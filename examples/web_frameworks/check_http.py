@@ -12,6 +12,8 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener, ProxyHandler
 
+from demo import preview_bytes
+
 ROOT = Path(__file__).resolve().parent
 OPEN = build_opener(ProxyHandler({})).open
 
@@ -75,7 +77,7 @@ def check_servers(out: Path, expected_pdf: bytes) -> list[dict]:
             assert page.decode("utf-8") == expected_html
             code, headers, preview = fetch(origin + "/preview.png")
             assert code == 200 and headers.get_content_type() == "image/png"
-            assert preview == (ROOT / "static/invoice.png").read_bytes()
+            assert preview == preview_bytes()
             url = origin + "/invoices/INV-1042.pdf"
             with ThreadPoolExecutor(max_workers=2) as pool:
                 responses = list(pool.map(fetch, [url, url]))
