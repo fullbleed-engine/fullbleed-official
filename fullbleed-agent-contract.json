@@ -1929,7 +1929,7 @@
             "options": [
               {
                 "dest": "template_id",
-                "help": "Remote template id (for example: i9-stamped-vdp)",
+                "help": "Remote template id (find available templates with: fullbleed new list)",
                 "positional": true,
                 "required": true
               },
@@ -4215,7 +4215,7 @@
     "license": "MIT",
     "name": "Fullbleed PDF Engine",
     "python_package": "fullbleed",
-    "version": "2.5.29"
+    "version": "2.5.30"
   },
   "profiles": {
     "pdf": {

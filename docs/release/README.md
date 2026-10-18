@@ -6,6 +6,7 @@ engine internals.
 
 ## Latest patch releases
 
+- `docs/release/2.5.30-runbook.md`: same-font inline spacing and pagination.
 - `docs/release/2.5.29-runbook.md`: isolated group opacity in finalized-PDF previews.
 - `docs/release/2.5.28-runbook.md`: signed inset shadows, unshadowed edges and retained comparison differences.
 - `docs/release/2.5.27-runbook.md`: inline SVG document styling and group compositing.
