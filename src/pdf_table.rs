@@ -5,11 +5,56 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub(super) fn normalize(records: Vec<TagRecord>) -> Vec<TagRecord> {
+    // A logical cell can own content on several pages. Keep its one TH/TD and
+    // attach each fragment's content in order, rather than adding extra columns
+    // to the merged row. Plain cells need a leaf Span to retain each page's MCID.
+    let cell_key = |record: &TagRecord| {
+        let node = record.table_semantics.as_ref()?;
+        matches!(record.role.as_str(), "TH" | "TD").then_some((
+            record.table_document,
+            node.table_key,
+            record.role.clone(),
+            node.cell_key?,
+            node.row_key,
+            node.group_key,
+        ))
+    };
+    let mut cell_counts = BTreeMap::new();
+    for record in &records {
+        if let Some(key) = cell_key(record) {
+            *cell_counts.entry(key).or_insert(0usize) += 1;
+        }
+    }
+    let mut cells = BTreeMap::new();
     let mut mapped = Vec::<usize>::with_capacity(records.len());
     let mut containers = BTreeMap::new();
     let mut normalized = Vec::with_capacity(records.len());
     for mut record in records {
         record.parent = record.parent.and_then(|parent| mapped.get(parent).copied());
+        if let Some(key) = cell_key(&record).filter(|key| cell_counts[key] > 1) {
+            let leaf = record.mcid.map(|_| record.clone());
+            let existing = if let Some(&existing) = cells.get(&key) {
+                existing
+            } else {
+                let existing = normalized.len();
+                record.mcid = None;
+                normalized.push(record);
+                cells.insert(key, existing);
+                existing
+            };
+            mapped.push(existing);
+            if let Some(mut leaf) = leaf {
+                leaf.role = "Span".into();
+                leaf.parent = Some(existing);
+                leaf.scope = None;
+                leaf.column_span = None;
+                leaf.row_span = None;
+                leaf.table_semantics = None;
+                leaf.structure_id = None;
+                normalized.push(leaf);
+            }
+            continue;
+        }
         let key = record.table_semantics.as_ref().and_then(|node| {
             if record.mcid.is_some() {
                 return None;

@@ -40,7 +40,7 @@ struct SourceCell {
 /// One catalog represents one document instance, not an entire recipient batch.
 #[derive(Default)]
 pub(crate) struct CompiledTableCatalog {
-    headers: BTreeMap<(u64, u64), usize>,
+    headers: BTreeMap<(u64, u64), BTreeSet<(Option<u64>, Option<u64>)>>,
     rows: BTreeMap<(u64, Option<u64>), Vec<u64>>,
 }
 
@@ -48,7 +48,10 @@ impl CompiledTableCatalog {
     pub(crate) fn observe(&mut self, role: &str, node: &TableSemanticNode) {
         if role == "TH" {
             if let Some(cell) = node.cell_key {
-                *self.headers.entry((node.table_key, cell)).or_default() += 1;
+                self.headers
+                    .entry((node.table_key, cell))
+                    .or_default()
+                    .insert((node.group_key, node.row_key));
             }
         }
         if role == "TR" {
@@ -76,7 +79,9 @@ impl CompiledTableCatalog {
     }
 
     pub(crate) fn unique_header(&self, table: u64, cell: u64) -> bool {
-        self.headers.get(&(table, cell)) == Some(&1)
+        self.headers
+            .get(&(table, cell))
+            .is_some_and(|locations| locations.len() == 1)
     }
 
     pub(crate) fn resolve(&self, source: &TableSemanticNode) -> TableSemanticNode {
