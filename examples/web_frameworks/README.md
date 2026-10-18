@@ -35,12 +35,12 @@ Or in Windows PowerShell:
 
 Choose one framework. Only install its dependencies; these packages are separate
 from the dependency-free Fullbleed runtime. The examples are checked with
-Fullbleed 2.5.11 and the framework versions pinned in the requirement files.
+Fullbleed 2.5.31 and the framework versions pinned in the requirement files.
 
 ### FastAPI
 
 ```bash
-python -m pip install fullbleed==2.5.11 -r requirements-fastapi.txt
+python -m pip install fullbleed==2.5.31 -r requirements-fastapi.txt
 python -m uvicorn fastapi_app:app --host 127.0.0.1 --port 8000
 ```
 
@@ -53,14 +53,14 @@ See [FastAPI's concurrency guide](https://fastapi.tiangolo.com/async/#path-opera
 ### Flask
 
 ```bash
-python -m pip install fullbleed==2.5.11 -r requirements-flask.txt
+python -m pip install fullbleed==2.5.31 -r requirements-flask.txt
 python -m flask --app flask_app run --host 127.0.0.1 --port 8000
 ```
 
 ### Django
 
 ```bash
-python -m pip install fullbleed==2.5.11 -r requirements-django.txt
+python -m pip install fullbleed==2.5.31 -r requirements-django.txt
 python django_app.py runserver 127.0.0.1:8000 --noreload
 ```
 
@@ -82,7 +82,7 @@ another terminal with `docker stop fullbleed-invoice`. These single-line command
 also work in PowerShell.
 
 The Dockerfile pins the official Python 3.14.8 Debian Bookworm slim image by
-multi-platform digest and installs Fullbleed 2.5.11 plus the FastAPI/Uvicorn
+multi-platform digest and installs Fullbleed 2.5.31 plus the FastAPI/Uvicorn
 runtime from wheels. `--only-binary=:all:` makes a missing wheel an installation
 error instead of starting a Rust or C build. The image needs no added compiler,
 browser, system fonts, or system PDF renderer. Font files and their licenses

@@ -48,7 +48,6 @@ system_fonts = [str(p) for root in ["/usr/share/fonts", "/usr/local/share/fonts"
 assert not system_fonts, system_fonts
 report = json.loads(Path("/app/pip-install.json").read_text())
 assert all(item["download_info"]["url"].endswith(".whl") for item in report["install"])
-assert metadata.version("fullbleed") == "2.5.11"
 print(json.dumps({"uid": os.getuid(), "gid": os.getgid(), "python": sys.version,
     "machine": platform.machine(), "os": platform.freedesktop_os_release(),
     "packages": sorted([{"name": d.metadata["Name"], "version": d.version} for d in metadata.distributions()], key=lambda d: d["name"]),
@@ -210,6 +209,11 @@ def main() -> None:
         assert status == 200 and headers.get_content_type() == "image/png"
         assert preview == (ROOT / "static/invoice.png").read_bytes()
         receipt["runtime"] = json.loads(docker("exec", "-i", name, "python", "-", input=RUNTIME))
+        pins = [line.removeprefix("fullbleed==") for line in
+                (ROOT / "requirements-docker.txt").read_text(encoding="utf-8").splitlines()
+                if line.startswith("fullbleed==")]
+        packages = {item["name"].lower(): item["version"] for item in receipt["runtime"]["packages"]}
+        assert len(pins) == 1 and packages["fullbleed"] == pins[0], (pins, packages.get("fullbleed"))
         # A second container gets no network. Only this verification process needs
         # scratch space to inspect its finalized PDF; HTTP rendering uses no files.
         offline = json.loads(docker("run", "--rm", "--interactive", "--name", offline_name,
@@ -217,10 +221,13 @@ def main() -> None:
                                     image, "python", "-", input=OFFLINE))
         assert offline["pdf_sha256"] == receipt["pdf"]["sha256"]
         png = base64.b64decode(offline.pop("preview_base64"), validate=True)
-        assert png == preview, "Container-native preview differs from the saved sample"
         (out / "invoice.png").write_bytes(png)
+        (out / "sample-preview.png").write_bytes(preview)
         receipt["offline_render"] = offline
         receipt["preview_sha256"] = hashlib.sha256(png).hexdigest()
+        receipt["sample_preview_sha256"] = hashlib.sha256(preview).hexdigest()
+        receipt["preview_matches_sample"] = png == preview
+        assert png == preview, "Container-native preview differs from the saved sample"
         receipt["http"] = {"download": 200, "missing": 404, "post": 405,
                            "identical_parallel_downloads": 4, "home_and_preview_match": True}
         # Uvicorn receives SIGTERM as PID 1 and exits normally.
