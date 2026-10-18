@@ -856,7 +856,7 @@ def test_native_split_rejection_retains_scope_and_resolves_exact_cell_sources(mo
     assert error.failure_sources == (tuple(cells[:1]) if selection == "one" else tuple(cells) if selection == "multiple" else ())
     location = cells[0].path if selection == "one" else plan.sources[0].path if selection == "unknown" else ()
     assert error.path == ("Invoice", "page 2", *location)
-    assert "top alignment" in error.message
+    assert "top or baseline alignment" in error.message
     assert error.at("Batch").failure_sources == error.failure_sources
     assert error.at("Batch").reason == error.reason
     assert error.to_dict()["failure_sources"] == [{"node_id": source.node_id, "path": list(source.path),

@@ -295,7 +295,7 @@ else:
     result = {"ok": True, "version": metadata.version("fullbleed"), "runtime": str(fullbleed.__file__),
               "cases": cases, "readme_blocks": len(snippets), "first_example_runs_alone": True,
               "ready_for_stabilization": False, "unsupported_cases": unsupported,
-              "scope": "Experimental authoring, metadata, geometry, ordinary and oversized top-aligned text cell continuation, data edits, theme colors, source maps, glyphs and deterministic fixture bytes. Native split failures retain fragment scopes and identify rejected cell constraints when available. Rowspans, page-tall images in cells, and non-top-aligned oversized cells remain unsupported. Not a conformance or performance claim."}
+              "scope": "Experimental authoring, metadata, geometry, ordinary and oversized top-aligned text cell continuation, data edits, theme colors, source maps, glyphs and deterministic fixture bytes. Native split failures retain fragment scopes and identify rejected cell constraints when available. Logical cell continuation does not yet support rowspans, page-tall images in cells, or middle/bottom-aligned oversized cells. Not a conformance or performance claim."}
     (args.out / "verification.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"ok": True, "cases": len(cases), "pages": sum(case["pages"] for case in cases)}))
 

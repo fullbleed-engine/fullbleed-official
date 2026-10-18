@@ -1,1 +1,1 @@
-fullbleed==2.6.0a5
+fullbleed==2.6.0a6

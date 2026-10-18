@@ -528,12 +528,12 @@ Actual installed-wheel rendering uncovered gaps that serialization tests missed:
 
 - A repeated table header could split without consuming a body row, creating an
   unbounded sequence of header-only pages. A native progress guard now stops
-  that cycle. The candidate also continues top-aligned oversized cells through
+  that cycle. The candidate also continues top- and baseline-aligned oversized cells through
   their logical content splitters, retaining column widths and repeated headers.
   A short companion cell finishes independently instead of repeating on every
   page. An explicit fresh-page signal lets ordinary rows move intact first.
-  Tables containing rowspans, page-tall images inside cells, and oversized
-  non-top-aligned cells remain outside this implementation. The engine's
+  Logical cell continuation does not yet support rowspans, page-tall images
+  inside cells, or middle/bottom-aligned oversized cells. The engine's
   permissive overflow fallback still exists;
   the experimental renderer detects its trace event and raises
   `layout.unsplittable` instead of returning that PDF. This check is not a general
@@ -557,7 +557,7 @@ pagination behavior that the renderer has not demonstrated.
 | Authored content model (bounded implementation) | Invalid inline/block, table/list and nested-link compositions fail before serialization with component paths; extend coverage deliberately while preserving valid rich text and transparent fragments |
 | Composition and spacing (implemented in the prototype) | Qualify fragment provenance, additive margins, independent parent gaps, page breaks and wrapper arguments in rendered fixtures; obtain author feedback on the explicit native layout contract |
 | Explicit layout-prop precedence (implemented in the prototype) | Explicit choices outrank recipes; omitted/None choices allow defaults. Check zero/false, optional forwarding, final style overrides, editor types and actual printed geometry/pagination. |
-| Oversized-row continuation (partial implementation) | Extend the tested top-aligned text cell behavior to rowspans, page-tall cell images, and other vertical alignments; qualify changing page geometry, complex decorations, and semantic continuity; unsupported cases fail explicitly |
+| Oversized-row continuation (partial implementation) | Extend the tested top/baseline text cell behavior to rowspans, page-tall cell images, and middle/bottom alignment; qualify changing page geometry, complex decorations, and semantic continuity; unsupported logical continuation cases fail explicitly |
 | Native diagnostics (partial implementation) | Native table/block split rejections identify cell constraints or container owners while retaining fragment scopes; extend precise causes through other layout models and map missing glyphs/other diagnostic families before claiming full attribution |
 | Typing and completion (partial implementation) | Generated stubs and installed mypy/Pyright checks cover styles, primitive props, layout choices, page options, record types and component arguments; token/part-name completion remains open |
 | Declared parts (implemented in the source prototype) | Required targets, explicitly optional absence and selected child forwarding are distinct; retain rendered controls for internal-container changes, private/shared children and empty/populated tables, then obtain author feedback before stabilization |

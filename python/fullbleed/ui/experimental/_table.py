@@ -42,7 +42,7 @@ def DataTable(rows, *, columns, caption=None, empty="No records.", repeat_header
 
     Rows prefer intact placement by default. None leaves that preference to
     defaults or selector styles; explicit row_break='avoid' or 'auto' overrides
-    normal selectors. Top-aligned oversized cells can
+    normal selectors. Top- or baseline-aligned oversized text cells can
     continue across pages. Unsupported layouts raise layout.unsplittable when
     the native trace reports forced overflow; this is not a general validator.
     Use with_parts(header=..., cell=..., row=..., caption=..., empty=...) to customize.

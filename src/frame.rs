@@ -218,7 +218,8 @@ impl Frame {
             SplitContext::at_fragment_start()
         } else {
             SplitContext::default()
-        };
+        }
+        .with_fragment_height(self.rect.height);
         let split_failure =
             match flowable.split_with_diagnostics(avail_width, avail_height, split_context) {
                 Ok((first, second)) => {

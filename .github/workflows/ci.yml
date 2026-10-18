@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.6.0a5"
+  FULLBLEED_CI_VERSION: "2.6.0a6"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -266,12 +266,24 @@ jobs:
           path: target/component-tables/
           if-no-files-found: error
 
+      - name: Verify oversized table cells stay visible and retain logical structure
+        run: python -I tools/smoke_oversized_table.py --out target/oversized-table
+
+      - name: Verify reflow recipients, table layout and fonts across batches
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+        run: python -m pytest tests/test_fullbleed_oversized_table.py -k reflow -q --basetemp target/reflow-cache-tests --junitxml target/reflow-cache-tests.xml
+
       - name: Retain table PDFs, structure checks and independent previews
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: table-tagging-${{ runner.os }}
-          path: target/table-tagging/
+          path: |
+            target/table-tagging/
+            target/oversized-table/
+            target/reflow-cache-tests/
+            target/reflow-cache-tests.xml
           if-no-files-found: error
 
       - name: Verify static embedded stylesheets from the installed wheel

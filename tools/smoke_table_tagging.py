@@ -194,6 +194,17 @@ def inspect(data: bytes) -> dict:
 
 
 def check(out: Path) -> dict:
+    import pypdfium2 as pdfium
+
+    def page_pixels(data):
+        pages = []
+        with pdfium.PdfDocument(data) as pdf:
+            for page in pdf:
+                bitmap = page.render(scale=2)
+                pages.append(sha256(bytes(bitmap.buffer)).hexdigest())
+                bitmap.close(); page.close()
+        return pages
+
     out.mkdir(parents=True, exist_ok=False)
     font = Path(str(resources.files("fullbleed_assets").joinpath("fonts/Inter-Variable.ttf")))
     report = {"schema": "fullbleed.table_tagging_smoke.v1", "ok": False,
@@ -203,6 +214,13 @@ def check(out: Path) -> dict:
         engine = fullbleed.PdfEngine(pdf_profile=profile, document_lang="en-US",
             document_title="Table content regression", font_files=[str(font)])
         for name, html in documents():
+            references = {}
+            reference_folder = out/profile/name/'individual-records'
+            reference_folder.mkdir(parents=True)
+            for person in ('Ada', 'Bea'):
+                data = bytes(engine.render_pdf(html.replace('{{person}}', person), CSS))
+                (reference_folder/(person+'.pdf')).write_bytes(data)
+                references[person] = page_pixels(data)
             for mode in MODES:
                 folder = out/profile/name/mode
                 folder.mkdir(parents=True)
@@ -223,6 +241,12 @@ def check(out: Path) -> dict:
                 (folder/'document.pdf').write_bytes(data)
                 result = inspect(data)
                 errors = result['errors']
+                people = ['Ada', 'Bea'] if mode in {'reflow', 'compact'} else ['Ada'] * (2 if mode == 'repeat' else 1)
+                expected_pixels = [page for person in people for page in references[person]]
+                actual_pixels = page_pixels(data)
+                result['individual_record_pixels'] = {'expected': expected_pixels, 'actual': actual_pixels}
+                if actual_pixels != expected_pixels:
+                    errors.append('Visible output differs from separately rendered records')
                 if data != render():
                     errors.append('Repeated rendering is not byte deterministic')
                 count = 1 if mode in {'direct', 'compiled'} else 2
@@ -246,7 +270,6 @@ def check(out: Path) -> dict:
                 if name == 'split-table' and len(result['pages']) <= count:
                     errors.append('Split-table control did not cross a page')
                 if profile == 'pdfua1' and mode == 'direct':
-                    import pypdfium2 as pdfium
                     previews = []
                     with pdfium.PdfDocument(data) as pdf:
                         for i in range(len(pdf)):

@@ -23,6 +23,7 @@ use std::time::Instant;
 const SOFT_HYPHEN: char = '\u{00AD}';
 
 pub(crate) const META_COMPILED_TEXT_CONSTRAINT_KEY: &str = "fb.compile.text.constraint";
+pub(crate) const META_COMPILED_TABLE_SCOPE_KEY: &str = "fb.compile.table.scope";
 
 fn huge_pt() -> Pt {
     // Large but safe sentinel for "unbounded" layout measurements.
@@ -2178,12 +2179,14 @@ pub fn draw_page_footnotes(
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SplitContext {
     at_fragment_start: bool,
+    fragment_height: Option<Pt>,
 }
 
 impl SplitContext {
     pub const fn at_fragment_start() -> Self {
         Self {
             at_fragment_start: true,
+            fragment_height: None,
         }
     }
 
@@ -2191,9 +2194,15 @@ impl SplitContext {
         self.at_fragment_start
     }
 
+    pub(crate) fn with_fragment_height(mut self, height: Pt) -> Self {
+        self.fragment_height = Some(height);
+        self
+    }
+
     fn after_content(self, has_content: bool) -> Self {
         Self {
             at_fragment_start: self.at_fragment_start && !has_content,
+            ..self
         }
     }
 }
@@ -10688,10 +10697,27 @@ impl Flowable for CssPixelHeightFlowable {
         avail_height: Pt,
         context: SplitContext,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
-        let (first, second) = self
-            .child
-            .split_with_context(avail_width, avail_height, context)?;
-        Some((
+        self.split_with_diagnostics(avail_width, avail_height, context)
+            .ok()
+    }
+
+    fn split_with_diagnostics(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Result<(Box<dyn Flowable>, Box<dyn Flowable>), SplitFailure> {
+        // A fragment that fills the child space must still fit after CSS-pixel
+        // rounding. Preserve the child's diagnostic if it cannot make progress.
+        let child_height = if round_to_css_pixel(avail_height) > avail_height {
+            floor_to_css_pixel(avail_height)
+        } else {
+            avail_height
+        };
+        let (first, second) =
+            self.child
+                .split_with_diagnostics(avail_width, child_height, context)?;
+        Ok((
             Box::new(Self::new(first)) as Box<dyn Flowable>,
             Box::new(Self::new(second)) as Box<dyn Flowable>,
         ))
@@ -14083,6 +14109,141 @@ fn split_long_word_by_width_paragraph(cell: &TableCell, word: &str, max_width: P
     parts
 }
 
+#[derive(Clone)]
+struct CompiledFragmentSurfaceFlowable {
+    source: Box<dyn Flowable>,
+    surface_size: Size,
+    fragment_height: Pt,
+    offset_y: Pt,
+    resource_id: Arc<str>,
+    tag_role: Option<Arc<str>>,
+    pagination: Pagination,
+    compiled_commands: Arc<std::sync::OnceLock<Arc<Vec<Command>>>>,
+}
+
+impl CompiledFragmentSurfaceFlowable {
+    fn new(
+        source: Box<dyn Flowable>,
+        surface_size: Size,
+        resource_id: impl Into<Arc<str>>,
+        tag_role: Option<Arc<str>>,
+        pagination: Pagination,
+    ) -> Self {
+        Self {
+            source,
+            surface_size,
+            fragment_height: surface_size.height,
+            offset_y: Pt::ZERO,
+            resource_id: resource_id.into(),
+            tag_role,
+            pagination,
+            compiled_commands: Arc::new(std::sync::OnceLock::new()),
+        }
+    }
+
+    fn commands(&self) -> Arc<Vec<Command>> {
+        self.compiled_commands
+            .get_or_init(|| {
+                let mut temp = Canvas::new(self.surface_size);
+                self.source.draw(
+                    &mut temp,
+                    Pt::ZERO,
+                    Pt::ZERO,
+                    self.surface_size.width,
+                    self.surface_size.height,
+                );
+                Arc::new(
+                    temp.finish()
+                        .pages
+                        .first()
+                        .map(|page| page.commands.clone())
+                        .unwrap_or_default(),
+                )
+            })
+            .clone()
+    }
+}
+
+impl Flowable for CompiledFragmentSurfaceFlowable {
+    fn wrap(&self, _avail_width: Pt, _avail_height: Pt) -> Size {
+        Size {
+            width: self.surface_size.width,
+            height: self.fragment_height,
+        }
+    }
+
+    fn intrinsic_width(&self) -> Option<Pt> {
+        Some(self.surface_size.width)
+    }
+
+    fn split(
+        &self,
+        _avail_width: Pt,
+        avail_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        if avail_height <= Pt::ZERO || self.fragment_height <= avail_height {
+            return None;
+        }
+        let first_height = avail_height.min(self.fragment_height);
+        let remaining_height = self.fragment_height - first_height;
+        if first_height <= Pt::ZERO || remaining_height <= Pt::ZERO {
+            return None;
+        }
+
+        let mut first = self.clone();
+        first.fragment_height = first_height;
+        first.pagination = Pagination {
+            break_before: BreakBefore::Auto,
+            break_after: BreakAfter::Auto,
+            ..self.pagination
+        };
+
+        let mut second = self.clone();
+        second.fragment_height = remaining_height;
+        second.offset_y = self.offset_y + first_height;
+        second.pagination = Pagination {
+            break_before: BreakBefore::Auto,
+            ..self.pagination
+        };
+
+        Some((Box::new(first), Box::new(second)))
+    }
+
+    fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, _avail_width: Pt, _avail_height: Pt) {
+        let commands = self.commands();
+        canvas.define_form(
+            self.resource_id.to_string(),
+            self.surface_size.width,
+            self.surface_size.height,
+            commands.as_ref().clone(),
+        );
+        let tagged = self.tag_role.as_ref().map(|role| {
+            canvas.begin_tag(role.as_ref(), None, None, None, None, true);
+        });
+        canvas.save_state();
+        canvas.clip_rect(x, y, self.surface_size.width, self.fragment_height);
+        canvas.draw_form(
+            x,
+            y - self.offset_y,
+            self.surface_size.width,
+            self.surface_size.height,
+            self.resource_id.to_string(),
+        );
+        canvas.restore_state();
+        if tagged.is_some() {
+            canvas.end_tag();
+        }
+    }
+
+    fn pagination(&self) -> Pagination {
+        self.pagination
+    }
+
+    fn diagnostic_metadata(&self) -> Vec<(String, String)> {
+        self.source.diagnostic_metadata()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TableFlowable {
     data: Arc<TableFlowableData>,
@@ -14613,8 +14774,8 @@ impl TableFlowable {
     }
 
     /// Continue an oversized leading row using each cell's logical content
-    /// splitter. This is called only at the start of a fresh fragmentainer;
-    /// ordinary rows get a chance to move intact before avoidance is relaxed.
+    /// splitter. Ordinary rows get a chance to move intact; a row known to
+    /// exceed a full fragmentainer can also use the current page remainder.
     fn split_oversized_row(
         &self,
         avail_width: Pt,
@@ -14647,8 +14808,10 @@ impl TableFlowable {
         let incompatible: Vec<_> = row
             .iter()
             .filter(|cell| {
-                !matches!(cell.valign, VerticalAlign::Top)
-                    && (!cell.text.is_empty() || cell.content.is_some())
+                !matches!(
+                    cell.valign,
+                    VerticalAlign::Top | VerticalAlign::Baseline | VerticalAlign::BaselineShift(_)
+                ) && (!cell.text.is_empty() || cell.content.is_some())
             })
             .collect();
         if !incompatible.is_empty() {
@@ -14673,6 +14836,63 @@ impl TableFlowable {
             self.border_collapse,
         );
 
+        // Baseline is the CSS default for table cells. Align the first in-flow
+        // line before splitting, then continue at the top of subsequent pages.
+        // Rejecting baseline cells here used to bypass logical pagination and
+        // place an entire tall rich cell outside the page.
+        let draw_index = (if self.include_header {
+            self.data.header_rows.len()
+        } else {
+            0
+        }) + start
+            - self.body_range.start;
+        let mut column = 0;
+        let baselines: Vec<_> = row
+            .iter()
+            .map(|cell| {
+                let span = Self::cell_span_for_start(cell, column, columns);
+                let visible = self.visible_columns_in_span(column, span, columns);
+                let width = Self::span_width(&widths, column, span)
+                    + col_gap * (visible.saturating_sub(1) as i32);
+                let border = if matches!(self.border_collapse, BorderCollapseMode::Collapse) {
+                    let painted = self
+                        .collapsed_border_for_cell(draw_index, column, span, &widths, cell)
+                        .widths;
+                    self.collapsed_layout_border(draw_index, column, span, &widths, painted)
+                } else {
+                    cell.resolved_border(width)
+                };
+                column += span;
+                if visible == 0
+                    || width <= Pt::ZERO
+                    || !matches!(
+                        cell.valign,
+                        VerticalAlign::Baseline | VerticalAlign::BaselineShift(_)
+                    )
+                    || (cell.text.is_empty() && cell.content.is_none())
+                {
+                    return None;
+                }
+                let padding = cell.resolved_padding(width);
+                let content_width =
+                    (width - padding.left - padding.right - border.left - border.right)
+                        .max(Pt::ZERO);
+                let baseline = if let Some(content) = &cell.content {
+                    content
+                        .first_baseline(content_width)
+                        .unwrap_or_else(|| content.wrap(content_width, huge_pt()).height)
+                } else {
+                    text_baseline_for_table_cell_line(
+                        &cell.style,
+                        cell.font_registry.as_deref(),
+                        cell.effective_line_height(),
+                    )
+                };
+                Some(padding.top + border.top + baseline)
+            })
+            .collect();
+        let row_baseline = baselines.iter().flatten().copied().fold(Pt::ZERO, Pt::max);
+
         let mut first = self.clone();
         first.body_range = self.body_range.start..start + 1;
         first.include_footer = self.include_footer && self.repeat_footer;
@@ -14689,8 +14909,9 @@ impl TableFlowable {
 
         let mut first_data = (*self.data).clone();
         let mut second_data = (*self.data).clone();
-        first_data.fragment_column_widths = Some((layout_width, widths.clone()));
-        second_data.fragment_column_widths = Some((layout_width, widths.clone()));
+        first_data.fragment_column_widths = Some((available_columns, layout_width, widths.clone()));
+        second_data.fragment_column_widths =
+            Some((available_columns, layout_width, widths.clone()));
         let mut heads = row.clone();
         let mut tails = row.clone();
         for (head, tail) in heads.iter_mut().zip(tails.iter_mut()) {
@@ -14735,7 +14956,12 @@ impl TableFlowable {
         let mut consumed = false;
         let mut blocked_sources = Vec::new();
         let mut column = 0usize;
-        for ((cell, head), tail) in row.iter().zip(heads.iter_mut()).zip(tails.iter_mut()) {
+        for (cell_index, ((cell, head), tail)) in row
+            .iter()
+            .zip(heads.iter_mut())
+            .zip(tails.iter_mut())
+            .enumerate()
+        {
             let span = Self::cell_span_for_start(cell, column, columns);
             let visible_span = self.visible_columns_in_span(column, span, columns);
             let width = Self::span_width(&widths, column, span)
@@ -14743,6 +14969,10 @@ impl TableFlowable {
             if width <= Pt::ZERO || visible_span == 0 {
                 column += span;
                 continue;
+            }
+            if let Some(baseline) = baselines[cell_index] {
+                let padding = head.resolved_padding(width);
+                head.padding.top = LengthSpec::Absolute(padding.top + row_baseline - baseline);
             }
             let padding = head.resolved_padding(width);
             let border = if matches!(self.border_collapse, BorderCollapseMode::Collapse) {
@@ -14755,7 +14985,7 @@ impl TableFlowable {
             };
             let content_width =
                 (width - padding.left - padding.right - border.left - border.right).max(Pt::ZERO);
-            let content_height =
+            let mut content_height =
                 (row_height - padding.top - padding.bottom - border.top - border.bottom)
                     .max(Pt::ZERO);
             head.row_min_height = row_height;
@@ -14764,8 +14994,23 @@ impl TableFlowable {
             if cell.row_min_height > Pt::ZERO && row_height > Pt::ZERO {
                 consumed = true;
             }
+            let natural = if let Some(content) = &cell.content {
+                content.wrap(content_width, huge_pt()).height
+            } else {
+                cell.effective_line_height() * cell.layout_lines(content_width).len() as i32
+            };
+            if natural > Pt::ZERO && natural <= content_height && tail.row_min_height == Pt::ZERO {
+                let complete_height = self
+                    .cell_required_height_for_draw_index(draw_index, column, span, &widths, cell);
+                if complete_height > row_height {
+                    // Leave content with the ending padding/border instead of
+                    // spilling only decoration onto an otherwise empty page.
+                    // Explicit row heights may still require an empty painted tail.
+                    content_height = content_height
+                        .min((row_height - (complete_height - natural)).max(Pt::ZERO));
+                }
+            }
             if let Some(content) = &cell.content {
-                let natural = content.wrap(content_width, huge_pt()).height;
                 if natural > content_height {
                     if let Some(source) = &cell.authoring_source_id {
                         blocked_sources.push(source.to_string());
@@ -16196,6 +16441,13 @@ impl TableFlowable {
     }
 
     fn column_layout_width(&self, available: Pt, columns: usize) -> Pt {
+        if let Some((frame_width, layout_width, _)) = &self.data.fragment_column_widths {
+            if *frame_width == available {
+                // Slicing off an outer border can change its half-width. That
+                // must not trigger new column measurements from shortened cells.
+                return *layout_width;
+            }
+        }
         if self.uses_centered_collapsed_edges() {
             let columns = columns.max(1);
             let provisional = vec![available / (columns as i32); columns];
@@ -17312,14 +17564,62 @@ impl Flowable for TableFlowable {
         let next_row_exceeds_fresh_page = body_row_heights
             .get(split_at.saturating_sub(start))
             .is_some_and(|height| *height > avail_height);
+        let known_oversized_row = context.fragment_height.is_some_and(|full_height| {
+            body_row_heights
+                .get(split_at.saturating_sub(start))
+                .is_some_and(|height| {
+                    *height
+                        + fixed_height
+                        + collapsed_extra
+                        + self.outer_row_spacing(row_gap)
+                        + row_gap * (fixed_visible_count as i32)
+                        > full_height
+                })
+        });
         let mut oversized_failure = None;
-        if context.at_fragment_start && (split_at == start || next_row_exceeds_fresh_page) {
+        if (context.at_fragment_start || known_oversized_row)
+            && (split_at == start || next_row_exceeds_fresh_page)
+        {
             match self.split_oversized_row(avail_width, avail_height, split_at) {
                 Ok(fragments) => return Ok(fragments),
                 Err(failure) => oversized_failure = Some(failure),
             }
         }
         if split_at == start && !first_has_fixed_rows {
+            // Preserve the existing paint-slicing fallback for monolithic cell
+            // contents and unsupported alignment. Logical text pagination above
+            // takes precedence and avoids repeating hidden text on each page.
+            let single_oversized_body_row = end == start + 1
+                && header_visible_count == 0
+                && footer_visible_count == 0
+                && forced_boundary.is_none()
+                && !self.data.has_row_spans();
+            if single_oversized_body_row && (context.at_fragment_start || known_oversized_row) {
+                let surface_height = self.wrap(avail_width, huge_pt()).height;
+                if surface_height > avail_height && avail_height > Pt::ZERO {
+                    let mut source = self.clone();
+                    let tag_role = source.tag_role.take();
+                    source.pagination = Pagination::default();
+                    let surface = CompiledFragmentSurfaceFlowable::new(
+                        Box::new(source),
+                        Size {
+                            width: avail_width,
+                            height: surface_height,
+                        },
+                        format!(
+                            "table-row-fragment:{}:{}:{}",
+                            self.table_id,
+                            avail_width.to_milli_i64(),
+                            surface_height.to_milli_i64()
+                        ),
+                        tag_role,
+                        self.pagination,
+                    );
+                    if let Some(fragments) = surface.split(avail_width, avail_height) {
+                        return Ok(fragments);
+                    }
+                }
+            }
             return Err(oversized_failure.unwrap_or_else(SplitFailure::unknown));
         }
 
@@ -17401,6 +17701,12 @@ impl Flowable for TableFlowable {
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, _avail_height: Pt) {
         let perf = perf_start();
+        // Cell text can determine widths and positions throughout the table.
+        // Capture this dependency independently of accessibility tagging.
+        let capture = compiled_flow_capture_enabled();
+        if capture {
+            canvas.meta(META_COMPILED_TABLE_SCOPE_KEY, "begin");
+        }
         let tagged = self.tag_role.as_ref().map(|role| {
             canvas.begin_tag(role.as_ref(), None, None, None, None, true);
             canvas.set_table_semantics(self.table_semantics.clone());
@@ -17796,6 +18102,9 @@ impl Flowable for TableFlowable {
         if tagged.is_some() {
             canvas.end_tag();
         }
+        if capture {
+            canvas.meta(META_COMPILED_TABLE_SCOPE_KEY, "end");
+        }
         perf_end("layout.table.draw", perf);
     }
 
@@ -17815,7 +18124,7 @@ struct TableFlowableData {
     column_borders: Vec<Option<TableColumnBorder>>,
     column_group_borders: Vec<Option<TableColumnGroupBorder>>,
     collapsed_columns: Vec<bool>,
-    fragment_column_widths: Option<(Pt, Vec<Pt>)>,
+    fragment_column_widths: Option<(Pt, Pt, Vec<Pt>)>,
     layout_cache: std::sync::OnceLock<TableLayoutCache>,
 }
 
@@ -17962,7 +18271,7 @@ impl TableFlowableData {
         border_collapse: BorderCollapseMode,
     ) -> Vec<Pt> {
         let columns = columns.max(1);
-        if let Some((width, resolved)) = &self.fragment_column_widths {
+        if let Some((_, width, resolved)) = &self.fragment_column_widths {
             if *width == avail_width && resolved.len() == columns {
                 return resolved.clone();
             }

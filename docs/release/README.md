@@ -4,9 +4,14 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## Component prereleases
+
+- `docs/release/2.6.0a6-runbook.md`: component pagination, reflow and source diagnostics.
+
 ## Latest patch releases
 
-- `docs/release/2.5.31-runbook.md`: rich table content ownership and retained negative controls.
+- `docs/release/2.5.32-runbook.md`: oversized table cells and compiled reflow output fidelity.
+- `docs/release/2.5.31-runbook.md`: rich table content ownership.
 - `docs/release/2.5.30-runbook.md`: same-font inline spacing and pagination.
 - `docs/release/2.5.29-runbook.md`: isolated group opacity in finalized-PDF previews.
 - `docs/release/2.5.28-runbook.md`: signed inset shadows, unshadowed edges and retained comparison differences.

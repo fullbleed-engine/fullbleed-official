@@ -4,9 +4,9 @@ A two-page community-program guide built with reusable Python components, a
 local SVG illustration and embedded fonts. All program information is fictional.
 The source contains no HTML templates or raw HTML strings.
 
-This source uses the experimental component API in **Fullbleed 2.6.0a5**.
+This source uses the experimental component API in **Fullbleed 2.6.0a6**.
 Pin the version supplied with each downloaded source kit; the API may change
-before stabilization. Historical alpha 4 downloads retain their original pin.
+before stabilization. Historical downloads retain their original pins.
 
 ## Render and edit
 

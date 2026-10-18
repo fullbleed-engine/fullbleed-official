@@ -1,3 +1,22 @@
+# Fullbleed Release Notes - 2.6.0a6
+
+This experimental component release integrates the 2.5.32 native pagination and
+compiled-reflow corrections. Rich table cells with default baseline alignment
+can continue paragraphs and lists across pages while keeping logical cells,
+column geometry and ending decoration. Replayed and changed batches retain the
+correct visible recipients, font resources and table column widths.
+
+The component runtime retains source-aware fragmentation diagnostics. Supported
+continuations and rounded list fragments use the corrected geometry; unsupported
+alignment, row spans and monolithic content retain precise authoring-source
+failures where the engine cannot continue them. Both direct HTML/CSS and authored
+component exports are included in the release gates.
+
+The Python component API remains experimental and static. No Bootstrap JavaScript
+is included. PDF/UA-2 caption containment remains a known limitation (issue #98).
+See the [alpha 6 runbook](docs/release/2.6.0a6-runbook.md) for qualification and the
+paired/accessible showcase requirements.
+
 # Fullbleed Release Notes - 2.6.0a5
 
 This Python component candidate integrates stable 2.5.30 inline-spacing and
@@ -125,6 +144,33 @@ The release gate checks that both spellings, the lockfile, wheel metadata and
 installed contracts agree. This alpha distribution targets Python; the Rust
 registry's stable release is managed separately. See the
 [alpha runbook](docs/release/2.6.0a1-runbook.md) for verification and publication.
+
+# Fullbleed Release Notes - 2.5.32
+
+Oversized table cells can continue their text, paragraphs and lists across pages
+with their repeated headers. The splitter handles top and default baseline
+alignment, keeps column widths stable, and leaves content with ending cell
+decoration instead of emitting an empty trailing page. This addresses the
+repeated-header stall in [issue #99](https://github.com/fullbleed-engine/fullbleed-official/issues/99).
+Continued cells retain one logical TH/TD and their explicit header references.
+
+Compiled reflow also preserves embedded font subsets when replaying cached pages.
+The replay cache is scoped to the actual batch values. Values whose visible text
+uses separate glyph outlines require layout when changed; updating only their
+searchable text could previously leave the first recipient's name visible.
+Changed table values also require layout so that columns and other cells follow
+the current record's content, including tables marked as presentation.
+Independent PDFium checks compare each record with a separately rendered PDF,
+including regular and synthesized-bold text, table geometry and both compression modes.
+
+The new 240-case output gate checks visible ink, page bounds, content counts,
+logical cells, header links, tagged/untagged pixels and repeated-render bytes.
+Existing caption limitations in [issue #98](https://github.com/fullbleed-engine/fullbleed-official/issues/98)
+remain separate. This does not establish general PDF/UA conformance or support
+for every oversized rowspan/alignment combination. The experimental component
+release requires its own qualification. No runtime dependency is added.
+
+See the [2.5.32 runbook](docs/release/2.5.32-runbook.md) for evidence and release gates.
 
 ---
 

@@ -423,7 +423,7 @@ class Renderer:
                     "clipped_container": "The container clips overflow and cannot paginate. Reduce its content or remove overflow clipping.",
                     "container_decoration_height": "Container margins, borders and padding leave no room for content. Reduce them or use a larger page.",
                     "table_rowspan": "Continuing an oversized table row with rowspans is unsupported. Restructure the spanning cells or make the table fit.",
-                    "table_cell_alignment": "Oversized table cells require top alignment to continue. Set the affected cells' vertical alignment to top.",
+                    "table_cell_alignment": "Oversized table cells can continue with top or baseline alignment. Set the affected cells' vertical alignment to top or baseline.",
                     "table_fixed_height": "The table's fixed rows and decorations leave no room for a body row. Reduce them or use a larger page.",
                     "table_cell_content": "The affected table cells cannot fit or make progress on this page. Resize unsplittable content or use content that can continue.",
                 }.get(reason, "Restructure the block or use a larger page.")

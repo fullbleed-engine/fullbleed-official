@@ -300,7 +300,7 @@ struct CompiledReflowPlan {
     flow_programs: Mutex<HashMap<Arc<str>, Arc<CompiledFlowProgramEntry>>>,
     html_input_cache: html_dom::CompiledFlowHtmlInputCache,
     shape_cache: pdf::CompiledFlowShapeCache,
-    pdf_program_cache: Mutex<Option<(usize, Arc<pdf::CompiledFlowPdfProgramCache>)>>,
+    pdf_program_cache: Mutex<Option<([u8; 32], Arc<pdf::CompiledFlowPdfProgramCache>)>>,
 }
 
 #[derive(Default)]
@@ -507,22 +507,38 @@ impl CompiledFlowRecordProgram {
 
         let mut patches = Vec::new();
         let mut patched_values = vec![false; values.len()];
+        let mut layout_dependent_values = vec![false; values.len()];
         for (page_index, page) in document.pages.iter().enumerate() {
             let mut font_name = Arc::<str>::from("Helvetica");
             let mut font_size = Pt::from_f32(12.0);
-            let mut state_stack = Vec::<(Arc<str>, Pt)>::new();
+            let mut text_rendering_mode = 0;
+            let mut table_depth = 0usize;
+            let mut state_stack = Vec::<(Arc<str>, Pt, u8)>::new();
             let mut pending_constraint = None;
             for (command_index, command) in page.commands.iter().enumerate() {
                 match command {
-                    Command::SaveState => state_stack.push((font_name.clone(), font_size)),
+                    Command::SaveState => {
+                        state_stack.push((font_name.clone(), font_size, text_rendering_mode))
+                    }
                     Command::RestoreState => {
-                        if let Some((saved_name, saved_size)) = state_stack.pop() {
+                        if let Some((saved_name, saved_size, saved_mode)) = state_stack.pop() {
                             font_name = saved_name;
                             font_size = saved_size;
+                            text_rendering_mode = saved_mode;
                         }
                     }
                     Command::SetFontName(value) => font_name = Arc::from(value.as_str()),
                     Command::SetFontSize(value) => font_size = *value,
+                    Command::SetTextRenderingMode(mode) => text_rendering_mode = *mode,
+                    Command::Meta { key, value }
+                        if key == flowable::META_COMPILED_TABLE_SCOPE_KEY =>
+                    {
+                        match value.as_str() {
+                            "begin" => table_depth += 1,
+                            "end" => table_depth = table_depth.saturating_sub(1),
+                            _ => {}
+                        }
+                    }
                     Command::Meta { key, value }
                         if key == flowable::META_COMPILED_TEXT_CONSTRAINT_KEY =>
                     {
@@ -532,6 +548,19 @@ impl CompiledFlowRecordProgram {
                         let constraint = pending_constraint.take();
                         let edits = Self::text_edits(text, &lookup);
                         if edits.is_empty() {
+                            continue;
+                        }
+                        if text_rendering_mode == 3 || table_depth > 0 {
+                            // Invisible text can accompany separately painted
+                            // glyph outlines. Patching only its searchable text
+                            // would leave the previous recipient visible.
+                            // Table text also affects other cells' geometry,
+                            // beyond the local text constraint of this patch.
+                            for edit in &edits {
+                                for slot in edit.value_slots.iter() {
+                                    layout_dependent_values[*slot] = true;
+                                }
+                            }
                             continue;
                         }
                         for edit in &edits {
@@ -579,6 +608,14 @@ impl CompiledFlowRecordProgram {
                         if edits.is_empty() {
                             continue;
                         }
+                        if text_rendering_mode == 3 || table_depth > 0 {
+                            for edit in &edits {
+                                for slot in edit.value_slots.iter() {
+                                    layout_dependent_values[*slot] = true;
+                                }
+                            }
+                            continue;
+                        }
                         for edit in &edits {
                             for slot in edit.value_slots.iter() {
                                 patched_values[*slot] = true;
@@ -623,6 +660,11 @@ impl CompiledFlowRecordProgram {
             }
         }
 
+        for (patched, layout_dependent) in patched_values.iter_mut().zip(layout_dependent_values) {
+            // A value may appear in more than one rendering or layout context.
+            // Every painted occurrence must support rebinding before reuse.
+            *patched &= !layout_dependent;
+        }
         let mut page_patch_counts = vec![0usize; document.pages.len()];
         for patch in &patches {
             page_patch_counts[patch.page] = page_patch_counts[patch.page].saturating_add(1);
@@ -1552,6 +1594,21 @@ impl CompiledDocument {
             .first()
             .ok_or(FullBleedError::MissingPageTemplate)?
             .page_size;
+        // Cross-call paint programs carry font-subset seeds from the completed
+        // batch. Reuse them only for the same values and ordering, not merely
+        // the same number of records. Layout and shaping caches remain reusable
+        // across different batches without retaining their previous glyph sets.
+        let mut replay_hasher = fullbleed_audit_contract::sha256::Sha256::new();
+        replay_hasher.update(&(record_count as u64).to_le_bytes());
+        replay_hasher.update(&(columns.len() as u64).to_le_bytes());
+        for column in columns {
+            replay_hasher.update(&(column.len() as u64).to_le_bytes());
+            for value in *column {
+                replay_hasher.update(&(value.len() as u64).to_le_bytes());
+                replay_hasher.update(value.as_bytes());
+            }
+        }
+        let replay_key = replay_hasher.finalize();
         let mut pdf_options = self.pdf_options.clone();
         pdf_options.compiled_flow_compression = options.compression;
         let mut pdf_stream = pdf::PdfStreamWriter::new(
@@ -1567,7 +1624,7 @@ impl CompiledDocument {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
-            .filter(|(cached_records, _)| *cached_records == record_count)
+            .filter(|(cached_key, _)| *cached_key == replay_key)
             .map(|(_, cache)| cache.clone())
         {
             pdf_stream.use_compiled_flow_program_cache(cache);
@@ -1762,8 +1819,7 @@ impl CompiledDocument {
         *plan
             .pdf_program_cache
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some((record_count, replay_cache));
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((replay_key, replay_cache));
         if let Some(perf) = self.perf.as_deref() {
             perf.log_span_ms(
                 "compile.reflow.batch",
@@ -11700,7 +11756,7 @@ mod tests {
     }
 
     #[test]
-    fn oversized_empty_table_row_preserves_background_extent_across_pages() {
+    fn oversized_empty_table_row_preserves_its_height_and_background_across_pages() {
         let engine = FullBleed::builder().build().expect("engine");
         let document = engine
             .render_to_document(
@@ -11721,19 +11777,64 @@ mod tests {
                     .iter()
                     .find_map(|command| match command {
                         Command::DrawRect {
-                            y, width, height, ..
-                        } if *width == Pt::from_f32(192.0) => Some((*y, *width, *height)),
+                            x,
+                            y,
+                            width,
+                            height,
+                        } if *width == Pt::from_f32(192.0) => Some((*x, *y, *width, *height)),
                         _ => None,
                     })
-                    .expect("each page should paint its portion of the cell background")
+                    .expect("each page should paint its visible cell background")
             })
             .collect();
-        assert!(draws.iter().all(|draw| draw.0 == Pt::from_f32(24.0)));
-        assert_eq!(
-            draws.iter().map(|draw| draw.2).fold(Pt::ZERO, |a, b| a + b),
-            Pt::from_f32(270.0)
+        assert_eq!(draws[0].3, Pt::from_f32(102.0));
+        assert_eq!(draws[1].3, Pt::from_f32(102.0));
+        assert_eq!(draws[2].3, Pt::from_f32(66.0));
+        assert!(
+            draws
+                .iter()
+                .all(|draw| { draw.0 == Pt::from_f32(24.0) && draw.1 == Pt::from_f32(24.0) })
         );
-        assert!(draws.iter().all(|draw| draw.2 <= Pt::from_f32(102.0)));
+    }
+
+    #[test]
+    fn oversized_middle_aligned_table_row_retains_paint_slicing() {
+        let document = FullBleed::builder()
+            .build()
+            .expect("engine")
+            .render_to_document(
+                "<table><tr><td>Middle</td></tr></table>",
+                "@page {size:320px 200px;margin:32px} * {margin:0;box-sizing:border-box} \
+                 table {border-collapse:collapse;width:100%} \
+                 td {background:#cfe3ff;height:360px;vertical-align:middle}",
+            )
+            .expect("render");
+        assert_eq!(document.pages.len(), 3);
+        for (page, expected_y) in document.pages.iter().zip([24.0, -78.0, -180.0]) {
+            let surface = page
+                .commands
+                .iter()
+                .find_map(|command| match command {
+                    Command::DrawForm {
+                        x,
+                        y,
+                        width,
+                        height,
+                        ..
+                    } => Some((*x, *y, *width, *height)),
+                    _ => None,
+                })
+                .expect("unsupported alignment retains the existing clipped surface");
+            assert_eq!(
+                surface,
+                (
+                    Pt::from_f32(24.0),
+                    Pt::from_f32(expected_y),
+                    Pt::from_f32(192.0),
+                    Pt::from_f32(270.0)
+                )
+            );
+        }
     }
 
     #[test]
@@ -14845,6 +14946,88 @@ mod tests {
                 .count();
             assert_eq!(count, 1, "content duplicated or missing: {marker}");
         }
+    }
+
+    #[test]
+    fn oversized_rich_table_cell_with_default_baseline_stays_inside_pages() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let paragraphs = (0..12)
+            .map(|i| format!("<p>LINE{i:03} <strong>Garden together</strong> with neighbors.</p>"))
+            .collect::<String>();
+        let items = format!(
+            "<ul>{}</ul>",
+            (0..12)
+                .map(|i| format!("<li>LINE{i:03} Garden together</li>"))
+                .collect::<String>()
+        );
+        for content in [paragraphs, items] {
+            for header in ["<thead><tr><th scope='col'>Content</th></tr></thead>", ""] {
+                let html = format!(
+                    "<h1>Long cell</h1><table>{header}<tbody><tr><td>{content}</td></tr></tbody></table>"
+                );
+                let document = engine.render_to_document(&html,
+                "@page {size:320pt 160pt;margin:18pt} body {font-family:Helvetica;font-size:10pt;line-height:1.3} h1 {font-size:16pt;margin:0 0 10pt} p {margin:0 0 4pt} ul {margin:0;padding-left:14pt} table {width:100%;border-collapse:collapse} th,td {padding:5pt;text-align:left} td {border:1pt solid #254d45;background:#e9f1ed}").expect("render");
+                assert!(document.pages.len() > 1 && document.pages.len() <= 5);
+                assert!(
+                    page_contains_text(&document.pages[0], "LINE000"),
+                    "a row taller than a full page should use the space below the heading"
+                );
+                for i in 0..12 {
+                    let marker = format!("LINE{i:03}");
+                    assert_eq!(document.pages.iter().flat_map(|p| &p.commands).filter(|command|
+                    matches!(command, Command::DrawString { text, .. } if text.contains(&marker))
+                ).count(), 1, "missing or repeated {marker}");
+                }
+                for page in &document.pages {
+                    assert!(
+                        page_contains_text(page, "LINE"),
+                        "empty table continuation page"
+                    );
+                    for command in &page.commands {
+                        if let Command::DrawString { y, text, .. } = command {
+                            // Drawing origins are not visible glyph tops; the
+                            // installed PDFium gate checks actual ink and margins.
+                            assert!(
+                                *y >= Pt::ZERO && *y <= Pt::from_f32(150.0),
+                                "text origin outside the page: {text} at {y:?}"
+                            );
+                        }
+                    }
+                    if page_contains_text(page, "Content") {
+                        assert!(
+                            page_contains_text(page, "LINE"),
+                            "header without body content"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn oversized_table_cell_fragments_keep_column_origins() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let content = (0..24)
+            .map(|i| format!("<p>LINE{i:03} <strong>Garden together</strong> with neighbors.</p>"))
+            .collect::<String>();
+        let html = format!(
+            "<table><thead><tr><th>Item</th><th>Detail</th><th>Status</th></tr></thead><tbody><tr><th>ROW_LABEL</th><td>{content}</td><td>READY</td></tr></tbody></table>"
+        );
+        let document = engine.render_to_document(&html,
+            "@page {size:420pt 160pt;margin:18pt} body {font-family:Helvetica;font-size:10pt;line-height:1.3} p {margin:0 0 4pt} table {width:100%;border-collapse:collapse} th,td {padding:5pt;text-align:left} td {border:1pt solid green}").expect("render");
+        assert!(document.pages.len() > 2);
+        let mut origins = std::collections::BTreeMap::new();
+        for page in &document.pages {
+            for command in &page.commands {
+                if let Command::DrawString { x, text, .. } = command {
+                    if matches!(text.as_str(), "Item" | "Detail" | "Status") {
+                        let expected = origins.entry(text.clone()).or_insert(*x);
+                        assert_eq!(*x, *expected, "column moved between row fragments: {text}");
+                    }
+                }
+            }
+        }
+        assert_eq!(origins.len(), 3);
     }
 
     #[test]

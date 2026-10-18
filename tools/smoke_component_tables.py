@@ -21,10 +21,13 @@ from pypdf import PdfReader
 import pypdfium2 as pdfium
 
 INSPECT = runpy.run_path(str(Path(__file__).with_name("smoke_table_tagging.py")))["inspect"]
+VISIBLE_PAGES = runpy.run_path(str(Path(__file__).with_name("smoke_oversized_table.py")))["visible_pages"]
 PROFILES = ("none", "tagged", "pdfua1", "pdfua2")
 MODES = ("document", "prepared", "styled-export", "host-styled-export")
 CASES = ("plain", "cell-css-bold", "span", "strong", "paragraph", "mixed", "list",
-         "figure", "nested-table", "bootstrap-data-table", "bootstrap-table", "split-rows", "oversized-cell")
+         "figure", "nested-table", "bootstrap-data-table", "bootstrap-table", "split-rows", "oversized-cell",
+         "oversized-baseline", "oversized-list")
+OVERSIZED = ("oversized-cell", "oversized-baseline", "oversized-list")
 FIGURE_ALT = "Blue planting-plan square"
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"><rect width="18" height="18" fill="#164b8b"/></svg>'
 
@@ -44,8 +47,11 @@ def authored(name):
         if name == "figure": return (Paragraph(marker), Image(src="table-figure.svg", alt=FIGURE_ALT))
         if name == "nested-table":
             return DataTable([marker], columns=[Column("Detail", lambda value: Paragraph(value))], caption="Details")
-        if name == "oversized-cell":
+        if name in {"oversized-cell", "oversized-baseline"}:
             return tuple(Paragraph(f"LINE{i:03} ", Strong(marker), " grows with neighbors.") for i in range(12))
+        if name == "oversized-list":
+            return element("ul", *(element("li", f"LINE{i:03} ", Strong(marker), " grows with neighbors.")
+                                   for i in range(12)))
         if name == "split-rows": return Paragraph(f"ROW{row:02} ", Strong(marker))
         if name.startswith("bootstrap"): return Paragraph("Before ", Strong(marker), " after.")
         return marker
@@ -66,16 +72,18 @@ def authored(name):
                              striped=True, small=True, class_name=table_class)
     else:
         table = DataTable(rows, columns=columns, caption="Programs", class_name=table_class,
-                          row_break="auto" if name == "oversized-cell" else None)
+                          row_break="auto" if name in OVERSIZED else None)
         table = table.with_parts(cell=style(padding=pt(4), background="#edf4f0"),
                                  header=style(padding=pt(4), background="#d4e6dc"))
-    height = 160 if name == "oversized-cell" else 340
+    height = 160 if name in OVERSIZED else 340
     rules = """p {margin:0} h1 {font-size:14pt;margin:0 0 6pt}
 .records {width:100%;table-layout:fixed} .records th,.records td {vertical-align:top}
 .bold-cell td {font-weight:700} .accent {color:#164b8b;font-weight:700}
 ul {margin:0;padding-left:12pt} img {width:18pt;height:18pt}
 caption {text-align:left;font-size:9pt;padding-bottom:3pt}
 """
+    if name == "oversized-baseline":
+        rules += ".records th,.records td {vertical-align:baseline}\n"
     document = Document(Heading("Program table", level=1), table,
                         title="Component table: " + name, lang="en-US",
                         page=Page((pt(320), pt(height)), margin=pt(18)),
@@ -87,9 +95,10 @@ table {{border-collapse:collapse}} th,td {{padding:4pt;border:0.5pt solid #164b8
 th {{background:#dbe8f8;text-align:left}} td {{background:#f2f6fc}}
 tr {{break-inside:avoid}} thead {{display:table-header-group}}
 """ + rules
-    markers = {"CELL Ada": 32 if name == "split-rows" else 12 if name == "oversized-cell" else 1}
+    markers = {"CELL Ada": 32 if name == "split-rows" else 12 if name in OVERSIZED else 1,
+               "READY": 32 if name == "split-rows" else 1}
     if name == "split-rows": markers.update({f"ROW{i:02}": 1 for i in range(32)})
-    if name == "oversized-cell": markers.update({f"LINE{i:03}": 1 for i in range(12)})
+    if name in OVERSIZED: markers.update({f"LINE{i:03}": 1 for i in range(12)})
     return document, host, markers
 
 
@@ -106,17 +115,17 @@ class AssetRenderer(Renderer):
         return engine
 
 
-def check(out):
+def check(out, names=CASES, profiles=PROFILES):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=False)
     asset = out / "table-figure.svg"
     asset.write_text(SVG, encoding="utf-8")
     font = Path(str(files("fullbleed_assets").joinpath("fonts/Inter-Variable.ttf")))
     records = []
-    for profile in PROFILES:
+    for profile in profiles:
         renderer = AssetRenderer(asset, font_files=[str(font)], pdf_profile=profile,
                                  document_timestamp="2026-10-18T00:00:00Z")
-        for name in CASES:
+        for name in names:
             folder = out / profile / name
             folder.mkdir(parents=True)
             document, host, markers = authored(name)
@@ -155,8 +164,20 @@ def check(out):
                 text = " ".join(" ".join(p["text"] for p in result["pages"]).split())
                 counts = {marker: text.count(marker) for marker in markers}
                 if counts != markers: errors.append("Missing or duplicate cell text")
-                if name in {"split-rows", "oversized-cell"} and len(result["pages"]) < 2:
+                if name in (*OVERSIZED, "split-rows") and len(result["pages"]) < 2:
                     errors.append("Pagination control did not cross a page")
+                preview = folder/(mode+"-visible")
+                save_images = profile == "pdfua1" and name in OVERSIZED
+                if save_images: preview.mkdir()
+                visible = VISIBLE_PAGES(data, preview, save_images)
+                result["visible_pages"] = visible
+                if any(page["outside_glyphs"] for page in visible):
+                    errors.append("Visible text extends beyond the authored page margins")
+                if any(page["glyphs_without_visible_ink"] for page in visible):
+                    errors.append("Extracted text has no visible ink")
+                body_marker = "LINE" if name in OVERSIZED else "ROW" if name == "split-rows" else None
+                if body_marker and any(body_marker not in page["text"] for page in visible):
+                    errors.append("A continuation page contains no body content")
                 if profile != "none":
                     if result["roles"].get("/TH", 0) < 2: errors.append("Scoped column headers lost")
                     if any(c["role"] == "/TH" and c["scope"] != "/Column" for c in result["cells"]):
@@ -187,13 +208,16 @@ def check(out):
                         for c in result.get("cells", [])]
             if relationships(checks["document"]) != relationships(checks["styled-export"]):
                 checks["styled-export"]["errors"].append("Styled HTML export changed table relationships")
+            if [p["rgba_sha256"] for p in checks["document"]["visible_pages"]] != [
+                    p["rgba_sha256"] for p in checks["styled-export"]["visible_pages"]]:
+                checks["styled-export"]["errors"].append("Styled HTML export changed visible page pixels")
             for result in checks.values():
                 result["ok"] = not result["errors"]
             assert document.compile(a11y_mode="raise") == source, "Authoring source mutated"
     report = {"schema": "fullbleed.component_tables.v1", "version": version("fullbleed"),
               "ok": all(c["ok"] for c in records), "cases": records,
               "font_sha256": sha256(font.read_bytes()).hexdigest(), "asset_sha256": sha256(asset.read_bytes()).hexdigest(),
-              "scope": "Authored table content ownership, static HTML export and pagination regression; not general PDF/UA conformance."}
+              "scope": "Authored table content ownership, visible ink/bounds, static HTML export and pagination regression; not general PDF/UA conformance."}
     (out / "verification.json").write_text(json.dumps(report, indent=2)+"\n", encoding="utf-8")
     return report
 
@@ -201,7 +225,10 @@ def check(out):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True)
-    report = check(parser.parse_args().out)
+    parser.add_argument("--case", action="append", choices=CASES)
+    parser.add_argument("--profile", action="append", choices=PROFILES)
+    args = parser.parse_args()
+    report = check(args.out, args.case or CASES, args.profile or PROFILES)
     print(json.dumps({"ok": report["ok"], "cases": len(report["cases"]),
                       "failed": sum(not c["ok"] for c in report["cases"])}))
     raise SystemExit(0 if report["ok"] else 1)

@@ -97,10 +97,10 @@ report pages, retains overflow/font diagnostics, and checks deterministic replay
 `--only invoice` or `--only report` limits the comparison. Both versions remain fixed
 A4 compositions; substantial content growth needs a layout adjustment.
 
-The checked 2.6.0a5 result has identical invoice PDF bytes. All four page images
+The checked 2.6.0a6 result has identical invoice PDF bytes. All four page images
 match; Common Ground's PDF bytes differ because component-authored SVG nodes carry
 extra graphics-state scopes. Its page appearance also matches under independent
-PDFium rendering at 144 DPI. This compares the two paths on 2.6.0a5, not byte identity
+PDFium rendering at 144 DPI. This compares the two paths on 2.6.0a6, not byte identity
 with the historical 2.4.0 website downloads.
 
 Use the components directly from this directory:

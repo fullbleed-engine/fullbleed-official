@@ -4228,7 +4228,7 @@
     "license": "MIT",
     "name": "Fullbleed PDF Engine",
     "python_package": "fullbleed",
-    "version": "2.6.0a5"
+    "version": "2.6.0a6"
   },
   "profiles": {
     "pdf": {

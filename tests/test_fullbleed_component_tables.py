@@ -12,4 +12,4 @@ def test_component_table_content_survives_pdf_and_static_html_exports(tmp_path):
     report = runpy.run_path(str(script))["check"](tmp_path / "component-tables")
     failed = [(c["profile"], c["name"], c["mode"], sorted(set(c["errors"])))
               for c in report["cases"] if not c["ok"]]
-    assert report["ok"] and len(report["cases"]) == 208, failed
+    assert report["ok"] and len(report["cases"]) == 240, failed

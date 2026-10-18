@@ -113,6 +113,7 @@ def main():
     repaired = []
     for name, doc, markers in (
         ("top-aligned-table", document(Box(Box(WorkTable()))), ["FIRST_ROW", *MARKERS]),
+        ("baseline-aligned-table", document(Box(Box(WorkTable(align="baseline")))), ["FIRST_ROW", *MARKERS]),
         ("card-fits", document(Flow(ClippedCard().with_style(height="auto", overflow="visible"))), ["CARD_CONTENT"]),
         ("padding-fits", document(Box(PaddedCard().with_style(padding_top=pt(6)))), ["CARD_CONTENT"]),
     ):
