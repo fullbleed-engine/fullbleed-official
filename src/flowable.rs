@@ -3354,7 +3354,12 @@ fn text_baseline_for_line(
     font_registry: Option<&FontRegistry>,
     line_height: Pt,
 ) -> Pt {
-    text_baseline_with_descent_snap(style, font_registry, line_height, true)
+    text_baseline_with_descent_snap(style, font_registry, line_height, true).baseline
+}
+
+struct TextLineBaseline {
+    baseline: Pt,
+    integral_paint_context: bool,
 }
 
 fn text_baseline_with_descent_snap(
@@ -3362,7 +3367,7 @@ fn text_baseline_with_descent_snap(
     font_registry: Option<&FontRegistry>,
     line_height: Pt,
     nearest_unit_descent: bool,
-) -> Pt {
+) -> TextLineBaseline {
     let metrics = font_registry.and_then(|registry| {
         let (primary, _) = resolve_font_stack(Some(registry), style);
         registry.vertical_metrics(&primary, style.font_size)
@@ -3380,7 +3385,11 @@ fn text_baseline_with_descent_snap(
         // Keep the existing conservative fallback for estimated Base-14
         // metrics and the separately handled non-unit line-height paths.
         ascent = round_to_css_pixel(ascent);
-        descent = if nearest_unit_descent && line_height == style.font_size && metrics.is_some() {
+        descent = if nearest_unit_descent
+            && line_height == style.font_size
+            && style.font_size.to_milli_i64().rem_euclid(750) == 0
+            && metrics.is_some()
+        {
             round_to_css_pixel(descent)
         } else {
             ceil_to_css_pixel(descent)
@@ -3436,15 +3445,26 @@ fn text_baseline_with_descent_snap(
     } else {
         baseline
     };
-    if style.css_pixel_snap_metrics && leading > Pt::ZERO && leading_milli.rem_euclid(750) == 0 {
-        // Integral CSS line boxes distribute an odd positive-leading pixel
-        // below the baseline. Retaining a half-pixel here paints standalone
-        // text correctly after terminal snapping, but understates the logical
-        // descent when a larger inline child joins the parent's strut.
-        floor_to_css_pixel_signed(baseline)
-    } else {
-        baseline
+    TextLineBaseline {
+        baseline,
+        // Integral registered-font baselines round at their absolute paint
+        // position. An odd positive-leading split retains its half-pixel
+        // phase and uses the floor program instead. Keep that phase available
+        // to raw table and page-margin painting, which does not terminal-snap.
+        integral_paint_context: style.css_pixel_snap_metrics
+            && metrics.is_some()
+            && style.font_size.to_milli_i64().rem_euclid(750) == 0
+            && line_height.to_milli_i64().rem_euclid(750) == 0
+            && (line_height == style.font_size || leading > Pt::ZERO),
     }
+}
+
+pub(crate) fn css_line_can_round_integral_baseline(
+    style: &TextStyle,
+    font_registry: Option<&FontRegistry>,
+) -> bool {
+    text_baseline_with_descent_snap(style, font_registry, style.line_height, true)
+        .integral_paint_context
 }
 
 pub(crate) fn css_print_line_prefers_nearest_baseline_snap(
@@ -3454,7 +3474,12 @@ pub(crate) fn css_print_line_prefers_nearest_baseline_snap(
     if !style.css_pixel_snap_metrics {
         return false;
     }
-    let baseline = text_baseline_for_line(style, font_registry, style.line_height);
+    let metrics = text_baseline_with_descent_snap(style, font_registry, style.line_height, true);
+    if metrics.integral_paint_context && metrics.baseline.to_milli_i64().rem_euclid(750) == 0 {
+        // Round the absolute integral baseline, including fractional origins.
+        return true;
+    }
+    let baseline = metrics.baseline;
     let residual = baseline - floor_to_css_pixel(baseline);
     if style.line_height == style.font_size && residual >= Pt::from_milli_i64(375) {
         // A unit line-height creates no authored leading to absorb the
@@ -3476,19 +3501,22 @@ pub(crate) fn css_print_line_prefers_nearest_baseline_snap(
 }
 
 /// The optimized text-only block compiler normally retains the CSS print
-/// floor program. A fractional used font size with a unit line height is the
-/// narrow exception: there is no authored leading in which to retain the
-/// font-relative phase, so Blink rounds the terminal baseline instead. Keep
-/// this gate separate from the broader inline-context heuristic above; using
-/// that heuristic for every direct paragraph shifts ordinary integral-pixel
-/// text (and every table/flex layout that depends on its baseline) by a pixel.
+/// floor program, preserving a positive-leading half-pixel phase when present.
+/// Integral registered-font baselines and the fractional unit-line-height
+/// exception round their absolute position. Other inline-context heuristics
+/// must not change direct paragraph paint.
 pub(crate) fn css_direct_text_prefers_nearest_baseline_snap(
     style: &TextStyle,
     font_registry: Option<&FontRegistry>,
 ) -> bool {
-    style.font_size.to_milli_i64().rem_euclid(750) != 0
-        && style.line_height == style.font_size
-        && css_print_line_prefers_nearest_baseline_snap(style, font_registry)
+    if !style.css_pixel_snap_metrics {
+        return false;
+    }
+    let metrics = text_baseline_with_descent_snap(style, font_registry, style.line_height, true);
+    (metrics.integral_paint_context && metrics.baseline.to_milli_i64().rem_euclid(750) == 0)
+        || (style.font_size.to_milli_i64().rem_euclid(750) != 0
+            && style.line_height == style.font_size
+            && css_print_line_prefers_nearest_baseline_snap(style, font_registry))
 }
 
 fn text_font_extents(style: &TextStyle, font_registry: Option<&FontRegistry>) -> (Pt, Pt) {
@@ -4360,7 +4388,7 @@ mod text_baseline_tests {
     }
 
     #[test]
-    fn css_positive_odd_leading_contributes_the_full_strut_descent() {
+    fn css_mixed_size_line_encloses_the_parent_strut_descent() {
         let mut registry = FontRegistry::new();
         registry
             .register_bytes(
@@ -4368,27 +4396,59 @@ mod text_baseline_tests {
                 Some("noto"),
             )
             .unwrap();
-        let mut style = TextStyle::default();
-        style.font_name = Arc::<str>::from("noto");
-        style.line_height_is_auto = false;
-        style.css_pixel_snap_metrics = true;
-        // Fresh Chrome 155 layout observations, the bundled font, line-height:1.5.
-        for (size_px, baseline_px) in [
-            (12, 13),
-            (16, 18),
-            (20, 22),
-            (26, 29),
-            (40, 45),
-            (42, 48),
-            (48, 54),
-            (64, 72),
-        ] {
-            style.font_size = Pt::from_milli_i64(size_px * 750);
-            style.line_height = style.font_size.mul_ratio(3, 2);
+        registry
+            .register_bytes(
+                include_bytes!("../python/fullbleed_assets/fonts/Inter-Variable.ttf").to_vec(),
+                Some("inter"),
+            )
+            .unwrap();
+        let registry = Arc::new(registry);
+        // Chrome print controls: a 20px/1.5 parent with a 48px/1 child.
+        // Noto Sans contributes a half-pixel descent to the expanded union;
+        // the resulting line encloses 50px. Inter's union is already 49px.
+        for (family, height_px, baseline_px) in [("noto", 50, 42), ("inter", 49, 41)] {
+            let mut parent = TextStyle::default();
+            parent.font_name = Arc::<str>::from(family);
+            parent.font_size = Pt::from_f32(15.0);
+            parent.line_height = Pt::from_f32(22.5);
+            parent.line_height_is_auto = false;
+            parent.css_pixel_snap_metrics = true;
+            let mut large = parent.clone();
+            large.font_size = Pt::from_f32(36.0);
+            large.line_height = large.font_size;
+            let line = InlineBlockLayoutFlowable::new_pt(
+                vec![
+                    (
+                        Box::new(
+                            Paragraph::new("")
+                                .with_style(parent)
+                                .with_font_registry(Some(registry.clone())),
+                        ),
+                        VerticalAlign::Baseline,
+                    ),
+                    (
+                        Box::new(
+                            Paragraph::new("ROW000")
+                                .with_style(large)
+                                .with_font_registry(Some(registry.clone())),
+                        ),
+                        VerticalAlign::Baseline,
+                    ),
+                ],
+                Pt::ZERO,
+                None,
+            )
+            .with_css_pixel_line_snap(true);
+            let width = Pt::from_f32(300.0);
             assert_eq!(
-                text_baseline_for_line(&style, Some(&registry), style.line_height),
-                Pt::from_milli_i64(baseline_px * 750),
-                "Noto Sans at {size_px}px/1.5",
+                line.wrap(width, Pt::from_f32(200.0)).height,
+                Pt::from_milli_i64(height_px * 750),
+                "{family} mixed-size line height",
+            );
+            assert_eq!(
+                line.first_baseline(width),
+                Some(Pt::from_milli_i64(baseline_px * 750)),
+                "{family} mixed-size baseline",
             );
         }
     }
@@ -4490,7 +4550,9 @@ mod text_baseline_tests {
         let mut integral_css_pixel_size = unit_line_height.clone();
         integral_css_pixel_size.font_size = Pt::from_f32(9.0);
         integral_css_pixel_size.line_height = Pt::from_f32(9.0);
-        assert!(!css_direct_text_prefers_nearest_baseline_snap(
+        // The exact bundled Noto Sans at 12px/1 paints its 10px logical
+        // baseline at 31px when the origin is 20.5px (Chrome print PDF).
+        assert!(css_direct_text_prefers_nearest_baseline_snap(
             &integral_css_pixel_size,
             Some(&registry),
         ));
@@ -6733,13 +6795,14 @@ impl Paragraph {
             // box. Resolve that target independently from the nearest-pixel
             // baseline now used for ordinary inline layout, so correcting a
             // line's descent neither double-shifts nor displaces the initial.
-            self.paint_offset_y +=
-                text_baseline_with_descent_snap(
-                    &self.style,
-                    self.font_registry.as_deref(),
-                    line_height,
-                    false,
-                ) - text_baseline_for_line(&self.style, self.font_registry.as_deref(), line_height);
+            self.paint_offset_y += text_baseline_with_descent_snap(
+                &self.style,
+                self.font_registry.as_deref(),
+                line_height,
+                false,
+            )
+            .baseline
+                - text_baseline_for_line(&self.style, self.font_registry.as_deref(), line_height);
             let (ascent, descent) = text_font_extents(&self.style, self.font_registry.as_deref());
             let leading = (line_height - ascent - descent).to_milli_i64();
             if leading < 0 && leading.rem_euclid(750) == 0 && (leading / 750).abs() % 2 == 1 {
@@ -10044,6 +10107,7 @@ impl Flowable for CjkDecimalMarkerFlowable {
 pub struct CssLineBoxFlowable {
     child: Box<dyn Flowable>,
     round_baseline: bool,
+    round_integral_baseline: bool,
     compensate_nested_floor: bool,
     parent_positions_top_overflow: bool,
 }
@@ -10053,6 +10117,7 @@ impl CssLineBoxFlowable {
         Self {
             child,
             round_baseline: false,
+            round_integral_baseline: false,
             compensate_nested_floor: false,
             parent_positions_top_overflow: false,
         }
@@ -10060,6 +10125,11 @@ impl CssLineBoxFlowable {
 
     pub fn with_round_baseline(mut self, enabled: bool) -> Self {
         self.round_baseline = enabled;
+        self
+    }
+
+    pub(crate) fn with_integral_baseline_rounding(mut self, enabled: bool) -> Self {
+        self.round_integral_baseline = enabled;
         self
     }
 
@@ -10099,7 +10169,13 @@ impl CssLineBoxFlowable {
                 } else {
                     absolute_baseline + top_overflow
                 };
-                let snapped = if self.round_baseline {
+                // A larger inline child can establish a different phase from
+                // its parent's strut. Resolve this policy from the actual
+                // line baseline after composition, not just the parent font.
+                let round_baseline = self.round_baseline
+                    || (self.round_integral_baseline
+                        && baseline.to_milli_i64().rem_euclid(750) == 0);
+                let snapped = if round_baseline {
                     round_to_css_pixel(snap_target)
                 } else {
                     floor_to_css_pixel(snap_target)
@@ -10111,7 +10187,7 @@ impl CssLineBoxFlowable {
                         baseline,
                         top_overflow,
                         absolute_baseline,
-                        self.round_baseline,
+                        round_baseline,
                         snapped,
                         snapped - absolute_baseline
                     );
@@ -10150,12 +10226,14 @@ impl Flowable for CssLineBoxFlowable {
             Box::new(
                 Self::new(first)
                     .with_round_baseline(self.round_baseline)
+                    .with_integral_baseline_rounding(self.round_integral_baseline)
                     .with_nested_floor_compensation(self.compensate_nested_floor)
                     .with_parent_positioned_top_overflow(self.parent_positions_top_overflow),
             ),
             Box::new(
                 Self::new(second)
                     .with_round_baseline(self.round_baseline)
+                    .with_integral_baseline_rounding(self.round_integral_baseline)
                     .with_nested_floor_compensation(self.compensate_nested_floor)
                     .with_parent_positioned_top_overflow(self.parent_positions_top_overflow),
             ),
@@ -10178,6 +10256,7 @@ impl Flowable for CssLineBoxFlowable {
             Box::new(
                 Self::new(child)
                     .with_round_baseline(self.round_baseline)
+                    .with_integral_baseline_rounding(self.round_integral_baseline)
                     .with_nested_floor_compensation(self.compensate_nested_floor)
                     .with_parent_positioned_top_overflow(self.parent_positions_top_overflow),
             ) as Box<dyn Flowable>
@@ -10188,6 +10267,7 @@ impl Flowable for CssLineBoxFlowable {
                 Box::new(
                     Self::new(child)
                         .with_round_baseline(self.round_baseline)
+                        .with_integral_baseline_rounding(self.round_integral_baseline)
                         .with_nested_floor_compensation(self.compensate_nested_floor)
                         .with_parent_positioned_top_overflow(self.parent_positions_top_overflow),
                 ) as Box<dyn Flowable>
@@ -10239,12 +10319,14 @@ impl Flowable for CssLineBoxFlowable {
             Box::new(
                 Self::new(first)
                     .with_round_baseline(self.round_baseline)
+                    .with_integral_baseline_rounding(self.round_integral_baseline)
                     .with_nested_floor_compensation(self.compensate_nested_floor)
                     .with_parent_positioned_top_overflow(self.parent_positions_top_overflow),
             ) as Box<dyn Flowable>,
             Box::new(
                 Self::new(second)
                     .with_round_baseline(self.round_baseline)
+                    .with_integral_baseline_rounding(self.round_integral_baseline)
                     .with_nested_floor_compensation(self.compensate_nested_floor)
                     .with_parent_positioned_top_overflow(self.parent_positions_top_overflow),
             ) as Box<dyn Flowable>,
@@ -10370,6 +10452,7 @@ impl Flowable for CssLineBoxFlowable {
                     .with_propagated_text_decoration_baseline_shift(shift),
             )
             .with_round_baseline(self.round_baseline)
+            .with_integral_baseline_rounding(self.round_integral_baseline)
             .with_nested_floor_compensation(self.compensate_nested_floor)
             .with_parent_positioned_top_overflow(self.parent_positions_top_overflow),
         )
@@ -10379,6 +10462,7 @@ impl Flowable for CssLineBoxFlowable {
         Box::new(
             Self::new(self.child.without_propagated_text_decoration())
                 .with_round_baseline(self.round_baseline)
+                .with_integral_baseline_rounding(self.round_integral_baseline)
                 .with_nested_floor_compensation(self.compensate_nested_floor)
                 .with_parent_positioned_top_overflow(self.parent_positions_top_overflow),
         )
@@ -10397,6 +10481,7 @@ impl Flowable for CssLineBoxFlowable {
         Box::new(
             Self::new(self.child.with_grid_item_parent_positioned_top_overflow())
                 .with_round_baseline(self.round_baseline)
+                .with_integral_baseline_rounding(self.round_integral_baseline)
                 .with_nested_floor_compensation(self.compensate_nested_floor)
                 .with_parent_positioned_top_overflow(true),
         )
@@ -10406,6 +10491,7 @@ impl Flowable for CssLineBoxFlowable {
         Box::new(
             Self::new(self.child.with_css_terminal_baseline_rounding())
                 .with_round_baseline(self.round_baseline)
+                .with_integral_baseline_rounding(self.round_integral_baseline)
                 .with_nested_floor_compensation(self.compensate_nested_floor)
                 .with_parent_positioned_top_overflow(self.parent_positions_top_overflow),
         )
@@ -18928,13 +19014,24 @@ impl InlineBlockLayoutFlowable {
                     // containing block by a whole device pixel.
                     line_height
                 } else if ordinary_text_only {
-                    // LayoutNG keeps ordinary text line advances on its 1/64
-                    // CSS-pixel layout grid. Rounding every independent inline
-                    // fragment line upward makes generated-content rows drift
-                    // and inflates an auto-height ancestor by one pixel per
-                    // row. Paint boundaries may snap later, but flow geometry
-                    // must retain the accumulated fixed-point advance.
-                    line_height
+                    if line_items
+                        .iter()
+                        .all(|item| item.size.height.to_milli_i64().rem_euclid(750) == 0)
+                    {
+                        // Mixed font sizes can leave a half-pixel residual in
+                        // the baseline union even though every authored line
+                        // height is integral. Enclose that expanded union in a
+                        // CSS pixel without discarding any run's paint phase.
+                        ceil_to_css_pixel(line_height)
+                    } else {
+                        // LayoutNG keeps ordinary text line advances on its 1/64
+                        // CSS-pixel layout grid. Rounding every independent inline
+                        // fragment line upward makes generated-content rows drift
+                        // and inflates an auto-height ancestor by one pixel per
+                        // row. Paint boundaries may snap later, but flow geometry
+                        // must retain the accumulated fixed-point advance.
+                        line_height
+                    }
                 } else {
                     ceil_to_css_pixel(line_height)
                 };

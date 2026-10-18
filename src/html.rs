@@ -20,7 +20,8 @@ use crate::flowable::{
     SvgFilterProgram, SvgFilterRegion, SvgFlowable, SvgMorphologyOperator, TableCell,
     TableColumnBorder, TableColumnGroupBorder, TableColumnWidthHint, TableFlowable,
     TableLayoutMode, TextAlign, TextStyle, VerticalAlign,
-    css_direct_text_prefers_nearest_baseline_snap, css_print_line_prefers_nearest_baseline_snap,
+    css_direct_text_prefers_nearest_baseline_snap, css_line_can_round_integral_baseline,
+    css_print_line_prefers_nearest_baseline_snap,
 };
 use crate::font::FontRegistry;
 use crate::glyph_report::GlyphCoverageReport;
@@ -6581,8 +6582,22 @@ fn coerce_items_to_inline_run(
             )
         });
     let parent_text_style = parent_style.to_text_style();
+    let integral_parent_baseline =
+        css_line_can_round_integral_baseline(&parent_text_style, font_registry.as_deref());
+    // Atomic inline boxes retain their own content's terminal paint phase.
+    // Rounding only their surrounding text can break baseline alignment.
+    let ordinary_text_only = items.iter().all(|item| match item {
+        LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => {
+            flowable.inline_x_height(Pt::ZERO).is_some()
+        }
+    });
+    let round_integral_baseline = snap_baseline_phase
+        && !preserve_nested_floor
+        && integral_parent_baseline
+        && ordinary_text_only;
     let round_nested_baseline = snap_baseline_phase
         && !preserve_nested_floor
+        && !integral_parent_baseline
         && (css_print_line_prefers_nearest_baseline_snap(
             &parent_text_style,
             font_registry.as_deref(),
@@ -6599,6 +6614,7 @@ fn coerce_items_to_inline_run(
     let wrap_line_box = |flowable: Box<dyn Flowable>| -> Box<dyn Flowable> {
         let line = CssLineBoxFlowable::new(flowable)
             .with_round_baseline(round_nested_baseline)
+            .with_integral_baseline_rounding(round_integral_baseline)
             .with_nested_floor_compensation(preserve_nested_floor)
             .with_parent_positioned_top_overflow(true);
         Box::new(line) as Box<dyn Flowable>

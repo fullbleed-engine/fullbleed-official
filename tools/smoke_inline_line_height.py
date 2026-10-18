@@ -114,7 +114,7 @@ def check(out: Path) -> dict:
               "baseline_reference": BROWSER_METRICS,
               "cases": []}
 
-    def render(name, html, css, markers, mode, preview=False):
+    def render(name, html, css, markers, mode, preview=False, binding_marker="ROW"):
         folder = out / name
         folder.mkdir()
         (folder / "source.html").write_text(html, encoding="utf-8", newline="\n")
@@ -124,9 +124,9 @@ def check(out: Path) -> dict:
         else:
             # Reflow goes through the compiled/bound-document path with the
             # same text and line geometry; each call produces one record.
-            template = html.replace("ROW", "{{prefix}}")
+            template = html.replace(binding_marker, "{{prefix}}")
             compiled = engine.compile_pdf(template, css)
-            data = bytes(compiled.render_pdf_reflow_bindings({"prefix": ["ROW"]}))
+            data = bytes(compiled.render_pdf_reflow_bindings({"prefix": [binding_marker]}))
         (folder / "document.pdf").write_bytes(data)
         pages, positions, baselines = inspect(data, markers, folder, preview=preview)
         return {"name": name, "mode": mode, "pdf_sha256": sha256(data).hexdigest(),
@@ -194,6 +194,32 @@ def check(out: Path) -> dict:
                 case["expected_border_bounds_pt"] = expected_border
                 case["ok"] = (case["pages"] == 1 and len(borders) == 1
                               and max(abs(a - b) for a, b in zip(borders[0], expected_border)) < .01)
+                # A logical baseline and its final paint phase are distinct.
+                # Whole-pixel origins hide a premature half-leading floor;
+                # these saved browser PDFs expose it at quarter-pixel origins.
+                for reference in BROWSER_METRICS["fractional_origins"]:
+                    if reference["font"] != font:
+                        continue
+                    top = reference["top_px"]
+                    size = reference["size_px"]
+                    name = f"{mode}-{font.replace(' ', '-')}-fractional-{top}"
+                    panels = "".join(
+                        f"<section style='left:{20 + column * 330}px'>{rows(variant, 1, str(column))}</section>"
+                        for column, variant in enumerate(VARIANTS)
+                    )
+                    css = stylesheet(font, size, 1.5, 2000, 200)
+                    css += f"section {{position:absolute;top:{top}px;width:310px}}"
+                    assert sha256(panels.encode()).hexdigest() == reference["html_sha256"]
+                    assert sha256(css.encode()).hexdigest() == reference["css_sha256"]
+                    case = render(name, panels, css, [f"ROW{column}000" for column in range(6)],
+                                  mode, preview=mode == "direct" and top == 20.5)
+                    report["cases"].append(case)
+                    expected = reference["paint_baseline_pt"]
+                    actual = case["baselines_pt"][0]
+                    case["expected_baselines_pt"] = [expected]
+                    case["max_baseline_error_pt"] = max(abs(value - expected) for value in actual)
+                    case["ok"] = (case["pages"] == 1 and len(actual) == 1
+                                  and case["max_baseline_error_pt"] < .01)
                 size = 20 if font == "Noto Sans" else 12
                 baseline = None
                 for variant in VARIANTS:
@@ -210,6 +236,42 @@ def check(out: Path) -> dict:
                         for marker in markers
                     )
                     case["ok"] = case["pages"] == 3 and positions_match
+        for mode in ("direct", "reflow"):
+            for reference in BROWSER_METRICS["integral_origins"]:
+                family, size, factor, weight, top = (
+                    reference[key] for key in ("font", "size_px", "factor", "weight", "top_px"))
+                html = f"""<!doctype html><html><head><style>
+@page{{size:400px 200px;margin:0}}*{{margin:0;padding:0}}
+html,body{{font-family:'{family}';font-size:{size}px;font-weight:{weight};line-height:{factor}}}
+.t{{position:absolute;top:{top}px;left:20px;width:360px}}
+</style></head><body><div class="t">Hxy</div></body></html>"""
+                assert sha256(html.encode()).hexdigest() == reference["html_sha256"]
+                case = render(f"{mode}-integral-{reference['id']}", html, "", ["Hxy"], mode,
+                              binding_marker="Hxy")
+                report["cases"].append(case)
+                expected = reference["paint_baseline_pt"]
+                actual = case["baselines_pt"][0]
+                case["expected_baselines_pt"] = [expected]
+                case["max_baseline_error_pt"] = max(abs(value - expected) for value in actual)
+                case["ok"] = (case["pages"] == 1 and len(actual) == 1
+                              and case["max_baseline_error_pt"] < .01)
+            for reference in BROWSER_METRICS["fractional_mixed_origins"]:
+                family, top = reference["family"], reference["top"]
+                html = f"""<!doctype html><html><head><style>
+@page{{size:400px 200px;margin:0}}*{{margin:0;padding:0}}
+html,body{{font-family:'{family}';font-size:20px;line-height:1.5}}
+.mixed{{position:absolute;top:{top}px;left:20px;width:300px;border-bottom:2px solid #000}}
+.large{{font-size:48px;line-height:1}}
+</style></head><body><div class="mixed"><span class="large">ROW000</span></div></body></html>"""
+                assert sha256(html.encode()).hexdigest() == reference["source_sha256"]
+                case = render(f"{mode}-fractional-mixed-{reference['id']}", html, "", ["ROW000"], mode)
+                report["cases"].append(case)
+                expected = reference["paint_baseline_pt"]
+                actual = case["baselines_pt"][0]
+                case["expected_baselines_pt"] = [expected]
+                case["max_baseline_error_pt"] = max(abs(value - expected) for value in actual)
+                case["ok"] = (case["pages"] == 1 and len(actual) == 1
+                              and case["max_baseline_error_pt"] < .01)
         report["ok"] = all(case["ok"] for case in report["cases"])
         assert report["ok"], "Inline line-height regression: " + ", ".join(
             case["name"] for case in report["cases"] if not case["ok"])
