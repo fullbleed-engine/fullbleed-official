@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "fullbleed"
-version = "2.5.32"
+version = "2.5.33"
 dependencies = [
  "fullbleed_audit_contract",
  "subsetter",

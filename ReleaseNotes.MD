@@ -1,3 +1,19 @@
+# Fullbleed Release Notes - 2.5.33
+
+Table captions now remain inside their logical Table in tagged PDF output,
+with one Caption group containing the caption paragraph. Top and bottom
+captions retain their reading order across page continuations, nested tables,
+compiled rendering and separate records. Empty or hidden captions retain
+their layout without adding empty caption tags.
+
+This stable update carries the engine correction from the 2.6.0a7 preview.
+The experimental component API remains in the separate preview release.
+CI and release builds now retain the saved-PDF caption regression matrix.
+
+See the [2.5.33 runbook](docs/release/2.5.33-runbook.md) for validation scope and
+release evidence. Profile selection alone does not establish accessibility
+conformance for an authored document.
+
 # Fullbleed Release Notes - 2.5.32
 
 Oversized table cells can continue their text, paragraphs and lists across pages

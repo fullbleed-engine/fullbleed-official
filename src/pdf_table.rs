@@ -61,7 +61,7 @@ pub(super) fn normalize(records: Vec<TagRecord>) -> Vec<TagRecord> {
             }
             let local = match record.role.as_str() {
                 "Table" => Some(0),
-                "THead" | "TBody" | "TFoot" => node.group_key,
+                "THead" | "TBody" | "TFoot" | "Caption" => node.group_key,
                 "TR" => node.row_key,
                 _ => None,
             }?;
