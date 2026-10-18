@@ -4,7 +4,7 @@ A two-page community-program guide built with reusable Python components, a
 local SVG illustration and embedded fonts. All program information is fictional.
 The source contains no HTML templates or raw HTML strings.
 
-This source uses the experimental component API in **Fullbleed 2.6.0a6**.
+This source uses the experimental component API in **Fullbleed 2.6.0a7**.
 Pin the version supplied with each downloaded source kit; the API may change
 before stabilization. Historical downloads retain their original pins.
 
@@ -20,6 +20,14 @@ responsive `guide.html`, semantic `guide-unstyled.html`, the PDF's separate
 `source.html` and `source.css`, PNG previews and diagnostic reports. Keep the
 exported `fonts/` folder and `garden.svg` beside the HTML files.
 
+The default PDF profile is PDF/UA-1. To render the same design as PDF/UA-2:
+
+```sh
+python render.py --pdf-profile pdfua2 --out output-ua2
+```
+
+Both authoring paths use the selected profile. `render-report.json` records it.
+
 - `guide.py` composes `ProgramCard`, `ProgramSchedule`, headings, lists and an image.
 - `SCHEDULE` supplies the table records. `Column` supplies labels and cell callbacks.
 - `guide.css` provides the document design. For example,
@@ -27,7 +35,7 @@ exported `fonts/` folder and `garden.svg` beside the HTML files.
   not discover or load a stylesheet. `Document(styles=...)` loads that CSS.
 - `browser.css` adds the responsive browser presentation only. It is deliberately
   excluded from the PDF source. `Page(...)` owns the PDF's A4 geometry.
-- `render.py` registers local fonts and artwork and selects the `pdfua1` profile.
+- `render.py` registers local fonts and artwork and applies the selected PDF profile.
 
 ```python
 from guide import build_document, ProgramCard
@@ -59,30 +67,40 @@ python -m pip install -r requirements-check.txt
 python verify.py
 ```
 
-This check also rejects nested marked-content IDs and unbalanced tag boundaries
-without requiring an external validator. The schedule uses a Strong component
+This check also rejects nested marked-content IDs, unbalanced tag boundaries and
+duplicate or detached table captions without requiring an external validator.
+It checks the caption's text and its place in the table's reading order.
+The schedule uses a Strong component
 inside its program cells. Alpha 5 carries the correction for the
 [table-cell tagging issue](https://github.com/fullbleed-engine/fullbleed-official/issues/97)
 that required plain text in the alpha 4 specimen. Edited documents must pass
-the same saved-PDF check.
+the same saved-PDF check. Alpha 7 also attaches the schedule caption to its Table
+in PDF/UA-2, including correct caption text and reading order across page breaks.
+
+For the PDF/UA-2 output, use the same profile and output directory when checking:
+
+```sh
+python verify.py --pdf-profile pdfua2 --out output-ua2
+```
 
 For an external standards check, install [veraPDF](https://verapdf.org/software/)
-and run its PDF/UA-1 profile against the **final** PDF:
+and run the matching profile against the **final** PDF:
 
 ```sh
 verapdf --format json -f ua1 output/common-ground-guide.pdf
+verapdf --format json -f ua2 output-ua2/common-ground-guide.pdf
 ```
 
 Alternatively, `python verify.py --verapdf-cp PATH_TO_CLASSPATH` runs the
-`org.verapdf.apps.GreenfieldCliWrapper` Java entry point and retains its JSON
-report. Without this argument, the script explicitly records that external
+`org.verapdf.apps.GreenfieldCliWrapper` Java entry point. Add
+`--pdf-profile pdfua2 --out output-ua2` for that output. The script retains the
+profile-specific JSON and stderr and requires a compliant result with empty
+stderr. Without the classpath argument, it explicitly records that external
 validation did not run. Java and the independent readers are verification tools,
 not dependencies of the document renderer.
 
-The alpha 5 specimen passed veraPDF 1.30.3's PDF/UA-1 machine checks: 106 rules,
-5,512 checks, zero failures and zero warnings. Its validation receipt is tied to
-the PDF's SHA-256. Both pages were visually reviewed;
-the actual tag order, image description and table header scope were also checked.
+Validation receipts identify the exact PDF by SHA-256. Review both rendered
+pages along with their tag order, image description and table header scope.
 These checks are **not a screen-reader user test or blanket WCAG certification**.
 Changed content or styling needs fresh rendering, inspection and validation.
 

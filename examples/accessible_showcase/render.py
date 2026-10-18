@@ -36,6 +36,8 @@ class GuideRenderer(Renderer):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=ROOT / "output")
+    parser.add_argument("--pdf-profile", choices=("pdfua1", "pdfua2"), default="pdfua1",
+                        help="PDF/UA profile for both component and HTML/CSS output (default: pdfua1)")
     args = parser.parse_args()
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -44,7 +46,7 @@ def main():
     fonts = (inter, serif)
     document = build_document()
     source = document.compile(a11y_mode="raise", target="pdf")
-    renderer = GuideRenderer(font_files=[str(font) for font in fonts], pdf_profile="pdfua1")
+    renderer = GuideRenderer(font_files=[str(font) for font in fonts], pdf_profile=args.pdf_profile)
     prepared = document.prepare(renderer, a11y_mode="raise")
     pdf = out / "common-ground-guide.pdf"
     pdf.write_bytes(prepared.render_pdf())
@@ -74,7 +76,7 @@ def main():
     command = [sys.executable, "-I", "-m", "fullbleed", "--json-only", "verify",
                "--html", str(out / "source.html"), "--css", str(out / "source.css"),
                "--document-title", document.title, "--document-lang", document.lang,
-               "--pdf-profile", "pdfua1", "--emit-pdf", str(out / "verified.pdf"),
+               "--pdf-profile", args.pdf_profile, "--emit-pdf", str(out / "verified.pdf"),
                "--fail-on", "overflow", "--fail-on", "missing-glyphs", "--fail-on", "font-subst"]
     for asset in (*fonts, ROOT / "garden.svg"):
         command.extend(("--asset", str(asset)))
@@ -86,7 +88,8 @@ def main():
     result = dict(schema="fullbleed.accessible_showcase.v1",
                   ok=checked.returncode == 0 and bool(verification.get("ok")) and parity
                      and inspection.get("page_count") == 2,
-                  runtime=metadata.version("fullbleed"), pdf=pdf.name, sha256=sha(pdf),
+                  runtime=metadata.version("fullbleed"), pdf_profile=args.pdf_profile,
+                  pdf=pdf.name, sha256=sha(pdf),
                   page_count=inspection.get("page_count"), deterministic_replay=True,
                   html_css_pdf_byte_parity=parity, native_diagnostic_gate=verification.get("ok"),
                   previews=[Path(path).relative_to(out).as_posix() for path in previews],

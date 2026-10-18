@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""A component-authored, tagged community guide. Requires fullbleed==2.6.0a6."""
+"""A component-authored, tagged community guide. Requires fullbleed==2.6.0a7."""
 
 from __future__ import annotations
 

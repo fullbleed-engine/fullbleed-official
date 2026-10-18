@@ -65,14 +65,15 @@ includes the complete component and style source for customization.
 
 ## Try the Python component alpha
 
-This branch prepares the **2.6.0a6 prerelease**, including the stable 2.5.30
-inline-spacing and 2.5.31 rich-table tagging corrections. It offers components that carry their appearance, a static
+This branch prepares the **2.6.0a7 prerelease**, including the stable 2.5.32
+pagination and reflow corrections, plus table-caption ownership for PDF/UA-2.
+It offers components that carry their appearance, a static
 Bootstrap 5.0.0 kit, and HTML export with or without styles. This API lives under
 `fullbleed.ui.experimental`; names and behavior may change. Install the alpha
 explicitly in a virtual environment after its release gates and publication finish:
 
 ```console
-python -m pip install --pre "fullbleed==2.6.0a6"
+python -m pip install --pre "fullbleed==2.6.0a7"
 ```
 
 Save this as `order.py` and run `python order.py`:
@@ -106,7 +107,7 @@ HTML export; no Bootstrap JavaScript is included.
 Continue with the [Bootstrap and styling guide](docs/component-bootstrap.md),
 the [reusable component guide](examples/component_recipes/README.md), or the
 [report and catalog](examples/component_bootstrap). The
-[alpha runbook](docs/release/2.6.0a6-runbook.md) records the release gates and
+[alpha runbook](docs/release/2.6.0a7-runbook.md) records the release gates and
 limits. For an unpublished checkout, build a wheel using
 `python build_backend/fullbleed_build_backend.py wheel --out dist` and install
 the returned path. Ordinary `pip install fullbleed` selects the stable channel.
@@ -408,7 +409,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.6.0a6-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.6.0a7-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:
@@ -529,8 +530,8 @@ fullbleed new remote component-showcase ./my-documents --version 0.1.0 --json
 The showcase contains the Northstar invoice and Common Ground report in both
 HTML/CSS and Python components, sharing data, fonts, CSS and artwork. The
 installer copies source files; it does not install dependencies or execute the
-project. The component version requires the opt-in `fullbleed==2.6.0a6`
-prerelease. Follow the [paired authoring guide](https://docs.fullbleed.dev/guides/showcase-authoring/)
+project. Each kit pins its tested component prerelease in `requirements.txt`.
+Follow the [paired authoring guide](https://docs.fullbleed.dev/guides/showcase-authoring/)
 to install it in a separate environment, compare the four pages, and edit with
 a live PDF preview. For a smaller starting point, choose the
 [`python-components` starter](https://docs.fullbleed.dev/guides/bootstrap-components-preview/)

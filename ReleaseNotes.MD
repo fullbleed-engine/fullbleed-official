@@ -1,3 +1,27 @@
+# Fullbleed Release Notes - 2.6.0a7
+
+This component preview corrects table-caption ownership (issue #98). Each
+nonempty visible caption belongs directly to its logical Table and contains
+paragraph content. Top and bottom captions retain their reading order across
+page breaks; nested tables and batch records retain separate owners. Empty or
+hidden captions preserve their layout without creating empty caption tags.
+
+The Common Ground accessible showcase now accepts `--pdf-profile pdfua1` or
+`--pdf-profile pdfua2` for rendering and verification. Both the component and
+exported HTML/CSS paths use that profile. Its independent PDF reader also
+rejects duplicate or detached captions, alongside the existing marked-content
+and reading-order checks.
+
+Caption placement and visible document content are preserved, while tagged PDF
+structure changes. The release gates compare saved output with the qualified
+caption candidate and retain independent validation evidence. See the
+[alpha 7 runbook](docs/release/2.6.0a7-runbook.md).
+
+The component API remains experimental. Bootstrap components and HTML exports
+remain static. The authored specimen's machine checks do not establish human
+assistive-technology usability or conformance for arbitrary documents. Stable
+2.5.32 remains the default installation; this is an opt-in prerelease.
+
 # Fullbleed Release Notes - 2.6.0a6
 
 This experimental component release integrates the 2.5.32 native pagination and
