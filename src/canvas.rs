@@ -1621,7 +1621,19 @@ impl Canvas {
         col_index: Option<u16>,
         spans: (usize, usize),
     ) -> Option<u32> {
-        let mcid = self.begin_tag(role, None, scope, Some(table_id), col_index, false);
+        self.begin_table_cell_tag_with_grouping(role, scope, table_id, col_index, spans, false)
+    }
+
+    pub(crate) fn begin_table_cell_tag_with_grouping(
+        &mut self,
+        role: impl Into<String>,
+        scope: Option<String>,
+        table_id: u32,
+        col_index: Option<u16>,
+        spans: (usize, usize),
+        group_only: bool,
+    ) -> Option<u32> {
+        let mcid = self.begin_tag(role, None, scope, Some(table_id), col_index, group_only);
         if let Some(Command::BeginTag {
             column_span,
             row_span,
@@ -1632,6 +1644,105 @@ impl Canvas {
             *row_span = u32::try_from(spans.1).ok().filter(|span| *span > 0);
         }
         mcid
+    }
+
+    /// Keep a cell's structural tag separate from its independently tagged
+    /// descendants. Native flowables may also paint text or images without
+    /// opening a tag; retain that content under a leaf Span rather than losing
+    /// it when the surrounding TH/TD becomes a grouping element. Geometric
+    /// decoration stays outside these leaves for the PDF writer's artifact
+    /// classification. Existing semantic and explicit artifact scopes win.
+    pub(crate) fn tag_unmarked_cell_content_since(&mut self, start: usize) {
+        let commands = self.current.commands.split_off(start);
+        let mut tags = Vec::new();
+        let mut marked = Vec::new();
+        let mut content_depth = 0usize;
+        let mut artifact_depth = 0usize;
+        let mut fallback_open = false;
+        for command in commands {
+            let content = matches!(
+                command,
+                Command::DrawString { .. }
+                    | Command::DrawStringTransformed { .. }
+                    | Command::DrawGlyphRun { .. }
+                    | Command::DrawSyntheticBoldGlyphRun { .. }
+                    | Command::DrawImage { .. }
+                    | Command::DrawForm { .. }
+                    | Command::DrawFilteredForm { .. }
+                    | Command::DrawMaskedForm { .. }
+            );
+            // Keep consecutive native text runs in one leaf, including their
+            // logical reading metadata and graphics state. Close it before a
+            // semantic/marked boundary or geometric decoration so those retain
+            // their own ownership and artifact classification.
+            let boundary = matches!(
+                command,
+                Command::BeginTag { .. }
+                    | Command::BeginTagActualText { .. }
+                    | Command::EndTag
+                    | Command::BeginArtifact { .. }
+                    | Command::BeginOptionalContent { .. }
+                    | Command::EndMarkedContent
+                    | Command::ApplyBackdropFilter { .. }
+                    | Command::ShadingFill(_)
+                    | Command::MoveTo { .. }
+                    | Command::LineTo { .. }
+                    | Command::CurveTo { .. }
+                    | Command::ClosePath
+                    | Command::Fill
+                    | Command::FillEvenOdd
+                    | Command::Stroke
+                    | Command::FillStroke
+                    | Command::FillStrokeEvenOdd
+                    | Command::DrawRect { .. }
+                    | Command::DrawImage { .. }
+                    | Command::DrawForm { .. }
+                    | Command::DrawFilteredForm { .. }
+                    | Command::DrawMaskedForm { .. }
+            );
+            if fallback_open && boundary {
+                self.end_tag();
+                fallback_open = false;
+            }
+            if content && content_depth == 0 && artifact_depth == 0 {
+                if !fallback_open {
+                    self.begin_tag("Span", None, None, None, None, false);
+                    fallback_open = true;
+                }
+                self.current.commands.push(command);
+                continue;
+            }
+            match &command {
+                Command::BeginTag { mcid, .. } => {
+                    tags.push(mcid.is_some());
+                    content_depth += usize::from(mcid.is_some());
+                }
+                Command::BeginTagActualText { .. } => {
+                    tags.push(true);
+                    content_depth += 1;
+                }
+                Command::EndTag => {
+                    if tags.pop() == Some(true) {
+                        content_depth = content_depth.saturating_sub(1);
+                    }
+                }
+                Command::BeginArtifact { .. } => {
+                    marked.push(true);
+                    artifact_depth += 1;
+                }
+                Command::BeginOptionalContent { .. } => marked.push(false),
+                Command::EndMarkedContent => {
+                    if marked.pop() == Some(true) {
+                        artifact_depth = artifact_depth.saturating_sub(1);
+                    }
+                }
+                _ => {}
+            }
+            self.current.commands.push(command);
+        }
+        if fallback_open {
+            self.end_tag();
+        }
     }
 
     pub(crate) fn set_table_semantics(

@@ -1,3 +1,33 @@
+# Fullbleed Release Notes - 2.5.31
+
+Rich table cells now keep their TH/TD structure separate from independently
+tagged text, lists, images and nested tables. Previously, a cell containing a
+paragraph or styled span could produce nested marked-content IDs even when a
+PDF/UA validator reported a passing profile result. Table borders and
+backgrounds are marked as artifacts. Plain cells retain their existing text
+owner; untagged native content inside rich cells receives a content owner.
+
+The saved-PDF regression gate covers 180 cases across tagged PDF, PDF/UA-1 and
+PDF/UA-2, using direct, compiled, repeated and reflow output with both compression
+modes. It checks marked-content nesting, structure and parent-tree ownership,
+header scope, row/column spans, explicit header references, alternative text,
+pagination, text retention and repeated-render determinism. CI retains the PDFs
+and independent previews. This corrects [issue #97](https://github.com/fullbleed-engine/fullbleed-official/issues/97).
+
+Existing PDF/UA-2 table-caption containment failures remain tracked in
+[issue #98](https://github.com/fullbleed-engine/fullbleed-official/issues/98).
+The new table gate is a focused structural regression check, not proof that all
+PDF/UA documents are conformant. A pre-existing oversized rich-cell pagination
+stall remains tracked in [issue #99](https://github.com/fullbleed-engine/fullbleed-official/issues/99);
+the passing pagination fixtures split between rows. No runtime dependency or
+public authoring API is added. The experimental component library remains a
+separate opt-in release.
+
+See the [2.5.31 runbook](docs/release/2.5.31-runbook.md) for validation evidence
+and publication gates.
+
+---
+
 # Fullbleed Release Notes - 2.5.30
 
 Same-font colored spans and generated content now preserve authored row spacing

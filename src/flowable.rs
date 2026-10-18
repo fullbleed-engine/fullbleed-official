@@ -16112,29 +16112,36 @@ impl TableFlowable {
             let tagged = cell
                 .tag_role
                 .as_ref()
-                .filter(|_| !Self::row_is_collapsed(row))
-                .map(|role| {
+                .filter(|_| !Self::row_is_collapsed(row));
+            let begin_cell_tag = |canvas: &mut Canvas| {
+                if let Some(role) = tagged {
                     let col = u16::try_from(cursor_col).ok();
                     let row_span = self.semantic_row_span_for_draw_index(
                         row_index,
                         cell.row_span(),
                         row_heights,
                     );
-                    canvas.begin_table_cell_tag(
+                    // Rich cells own their relationships and child elements,
+                    // not an MCID enclosing independently marked descendants.
+                    // Plain cells retain their single existing content owner.
+                    canvas.begin_table_cell_tag_with_grouping(
                         role.as_ref(),
                         cell.scope.clone(),
                         self.table_id,
                         col,
                         (visible_span_columns, row_span),
+                        cell.content.is_some(),
                     );
                     canvas.set_table_semantics(self.cell_semantics_for_draw_index(cell, row_index));
-                });
+                }
+            };
 
             let hide_empty_paint = matches!(self.border_collapse, BorderCollapseMode::Separate)
                 && cell.should_hide_empty_paint();
 
             if hide_empty_paint {
                 if tagged.is_some() {
+                    begin_cell_tag(canvas);
                     canvas.end_tag();
                 }
                 if authoring_scope {
@@ -16433,6 +16440,11 @@ impl TableFlowable {
                 }
             }
 
+            // Cell decoration precedes its semantic content. The PDF writer
+            // marks this paint as Artifact only for tagged profiles, keeping
+            // ordinary PDF output unchanged and borders outside leaf MCIDs.
+            begin_cell_tag(canvas);
+
             let content_width = (col_width - pad_left - pad_right).max(Pt::ZERO);
             let content_height = (cell_height - pad_top - pad_bottom).max(Pt::ZERO);
             if cell.overflow_hidden {
@@ -16444,6 +16456,7 @@ impl TableFlowable {
                     (cell_height - layout_border.top - layout_border.bottom).max(Pt::ZERO),
                 );
             }
+            let content_start = canvas.current_command_count();
             if let Some(content) = cell.content.as_ref() {
                 let wrapped = content.wrap(content_width, content_height);
                 let draw_h = wrapped.height.min(content_height).max(Pt::ZERO);
@@ -16661,6 +16674,9 @@ impl TableFlowable {
                         cursor_y = cursor_y + line_height;
                     }
                 }
+            }
+            if tagged.is_some() && cell.content.is_some() {
+                canvas.tag_unmarked_cell_content_since(content_start);
             }
             if cell.overflow_hidden {
                 canvas.restore_state();
@@ -39901,6 +39917,102 @@ impl Flowable for RelativePositionedFlowable {
         let mut snapped = self.clone();
         snapped.child = self.child.with_grid_item_block_paint_snap();
         Box::new(snapped)
+    }
+}
+
+#[cfg(test)]
+mod table_content_tagging_tests {
+    use super::*;
+    use crate::canvas::Command;
+
+    fn check_cell(content: Option<Box<dyn Flowable>>, expected: &str) {
+        let mut cell = TableCell::new(
+            if content.is_none() {
+                expected.to_owned()
+            } else {
+                String::new()
+            },
+            TextStyle::default(),
+            TextAlign::Left,
+            VerticalAlign::Top,
+            EdgeSizes::zero(),
+            Some(Color::rgb(0.9, 0.95, 0.9)),
+            BorderSpec {
+                widths: EdgeSizes::zero(),
+                color: Color::BLACK,
+            },
+            None,
+            Some(Arc::from("TD")),
+            None,
+            1,
+            Pt::from_f32(12.0),
+            None,
+            false,
+            false,
+        );
+        if let Some(content) = content {
+            cell = cell.with_content(content);
+        }
+        let table = TableFlowable::new(vec![vec![cell]]).with_tag_role("Table");
+        let size = Size {
+            width: Pt::from_f32(300.0),
+            height: Pt::from_f32(300.0),
+        };
+        let mut canvas = Canvas::new(size);
+        let height = table.wrap(size.width, size.height).height;
+        table.draw(&mut canvas, Pt::ZERO, Pt::ZERO, size.width, height);
+        let document = canvas.finish();
+        let mut stack = Vec::new();
+        let mut text = String::new();
+        let mut cells = 0;
+        for command in &document.pages[0].commands {
+            match command {
+                Command::BeginTag { mcid, role, .. } => {
+                    assert!(
+                        mcid.is_none() || stack.iter().all(Option::is_none),
+                        "nested content IDs"
+                    );
+                    if role == "TD" {
+                        cells += 1;
+                    }
+                    stack.push(*mcid);
+                }
+                Command::EndTag => {
+                    stack.pop().expect("balanced semantic tags");
+                }
+                Command::DrawString { text: value, .. } => {
+                    assert_eq!(
+                        stack.iter().filter(|mcid| mcid.is_some()).count(),
+                        1,
+                        "native table text must belong to exactly one content sequence"
+                    );
+                    text.push_str(value);
+                }
+                _ => {}
+            }
+        }
+        assert!(stack.is_empty());
+        assert_eq!(cells, 1);
+        assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn simple_native_table_text_retains_a_single_content_owner() {
+        check_cell(None, "Plain");
+    }
+
+    #[test]
+    fn mixed_native_table_flowables_keep_tagged_and_untagged_text() {
+        let content = ContainerFlowable::new_pt(
+            vec![
+                Box::new(Paragraph::new("Before")),
+                Box::new(Paragraph::new("Tagged").with_tag_role("P")),
+                Box::new(Paragraph::new("After")),
+            ],
+            Pt::from_f32(12.0),
+            Pt::from_f32(12.0),
+        );
+        check_cell(Some(Box::new(content)), "BeforeTaggedAfter");
     }
 }
 

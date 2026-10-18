@@ -323,6 +323,17 @@ jobs:
       - name: Verify font family defaults and compiled previews
         run: python -I tools/smoke_font_families.py --out target/font-families
 
+      - name: Verify saved table tags, content ownership and header relationships
+        run: python -I tools/smoke_table_tagging.py --out target/table-tagging
+
+      - name: Retain table PDFs, structure checks and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-table-tagging
+          path: target/table-tagging/
+          if-no-files-found: error
+
       - name: Verify mixed inline wrapping with independent PDF readers
         run: python -I tools/smoke_inline_wrapping.py --out target/inline-wrapping
 
