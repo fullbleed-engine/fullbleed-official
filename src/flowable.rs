@@ -14178,6 +14178,7 @@ pub struct TableFlowable {
     repeat_footer: bool,
     draw_background: bool,
     tag_role: Option<Arc<str>>,
+    emit_table_group: bool,
     table_id: u32,
     table_semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
     first_fragment: bool,
@@ -14223,6 +14224,7 @@ impl TableFlowable {
             repeat_footer: false,
             draw_background: false,
             tag_role: None,
+            emit_table_group: true,
             table_id,
             table_semantics: None,
             first_fragment: true,
@@ -14247,6 +14249,11 @@ impl TableFlowable {
         semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
     ) -> Self {
         self.table_semantics = semantics;
+        self
+    }
+
+    pub(crate) fn with_table_group_emission(mut self, enabled: bool) -> Self {
+        self.emit_table_group = enabled;
         self
     }
 
@@ -17516,6 +17523,7 @@ impl Flowable for TableFlowable {
             repeat_footer: self.repeat_footer,
             draw_background: self.draw_background,
             tag_role: self.tag_role.clone(),
+            emit_table_group: self.emit_table_group,
             table_id: self.table_id,
             table_semantics: self.table_semantics.clone(),
             first_fragment: self.first_fragment,
@@ -17547,6 +17555,7 @@ impl Flowable for TableFlowable {
             repeat_footer: self.repeat_footer,
             draw_background: self.draw_background,
             tag_role: self.tag_role.clone(),
+            emit_table_group: self.emit_table_group,
             table_id: self.table_id,
             table_semantics: self.table_semantics.clone(),
             first_fragment: false,
@@ -17578,10 +17587,14 @@ impl Flowable for TableFlowable {
         if capture {
             canvas.meta(META_COMPILED_TABLE_SCOPE_KEY, "begin");
         }
-        let tagged = self.tag_role.as_ref().map(|role| {
-            canvas.begin_tag(role.as_ref(), None, None, None, None, true);
-            canvas.set_table_semantics(self.table_semantics.clone());
-        });
+        let tagged = self
+            .tag_role
+            .as_ref()
+            .filter(|_| self.emit_table_group)
+            .map(|role| {
+                canvas.begin_tag(role.as_ref(), None, None, None, None, true);
+                canvas.set_table_semantics(self.table_semantics.clone());
+            });
         let columns = self.max_columns();
         let (col_gap, row_gap) = self.resolve_spacing(avail_width);
         let visible_columns = self.visible_column_count(columns);
@@ -26774,6 +26787,8 @@ struct ContainerState {
     contain_floats: bool,
     self_visible: bool,
     tag_role: Option<Arc<str>>,
+    emit_tag_group: bool,
+    table_semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
     list_numbering: Option<&'static str>,
     html_figure_group: bool,
     establishes_abs_containing_block: bool,
@@ -26881,6 +26896,8 @@ impl ContainerFlowable {
             contain_floats: false,
             self_visible: true,
             tag_role: None,
+            emit_tag_group: true,
+            table_semantics: None,
             list_numbering: None,
             html_figure_group: false,
             establishes_abs_containing_block: false,
@@ -27299,6 +27316,19 @@ impl ContainerFlowable {
 
     pub fn with_tag_role(mut self, role: impl Into<Arc<str>>) -> Self {
         self.state.tag_role = Some(role.into());
+        self
+    }
+
+    pub(crate) fn with_table_semantics(
+        mut self,
+        semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
+    ) -> Self {
+        self.state.table_semantics = semantics;
+        self
+    }
+
+    pub(crate) fn with_tag_group_emission(mut self, enabled: bool) -> Self {
+        self.state.emit_tag_group = enabled;
         self
     }
 
@@ -35748,6 +35778,8 @@ impl Flowable for ContainerFlowable {
             contain_floats: self.state.contain_floats,
             self_visible: self.state.self_visible,
             tag_role: self.state.tag_role.clone(),
+            emit_tag_group: self.state.emit_tag_group,
+            table_semantics: self.state.table_semantics.clone(),
             list_numbering: self.state.list_numbering,
             html_figure_group: self.state.html_figure_group,
             establishes_abs_containing_block: self.state.establishes_abs_containing_block,
@@ -35854,6 +35886,8 @@ impl Flowable for ContainerFlowable {
             contain_floats: self.state.contain_floats,
             self_visible: self.state.self_visible,
             tag_role: self.state.tag_role.clone(),
+            emit_tag_group: self.state.emit_tag_group,
+            table_semantics: self.state.table_semantics.clone(),
             list_numbering: self.state.list_numbering,
             html_figure_group: self.state.html_figure_group,
             establishes_abs_containing_block: self.state.establishes_abs_containing_block,
@@ -36585,17 +36619,23 @@ impl Flowable for ContainerFlowable {
         }
 
         canvas.begin_compositor_scope();
-        let tagged = self.state.tag_role.as_ref().map(|role| {
-            canvas.begin_tag(role.as_ref(), None, None, None, None, true);
-            if self.state.html_figure_group {
-                canvas.meta(META_HTML_FIGURE_GROUP_KEY, "true");
-            }
-            if role.as_ref() == "L" {
-                if let Some(numbering) = self.state.list_numbering {
-                    canvas.meta(META_LIST_NUMBERING_KEY, numbering);
+        let tagged = self
+            .state
+            .tag_role
+            .as_ref()
+            .filter(|_| self.state.emit_tag_group)
+            .map(|role| {
+                canvas.begin_tag(role.as_ref(), None, None, None, None, true);
+                canvas.set_table_semantics(self.state.table_semantics.clone());
+                if self.state.html_figure_group {
+                    canvas.meta(META_HTML_FIGURE_GROUP_KEY, "true");
                 }
-            }
-        });
+                if role.as_ref() == "L" {
+                    if let Some(numbering) = self.state.list_numbering {
+                        canvas.meta(META_LIST_NUMBERING_KEY, numbering);
+                    }
+                }
+            });
         let cache = self.cached_layout(avail_width, avail_height);
         let margin = cache.margin;
         let border = cache.border;
