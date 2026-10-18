@@ -1,3 +1,32 @@
+# Fullbleed Release Notes - 2.5.32
+
+Oversized table cells can continue their text, paragraphs and lists across pages
+with their repeated headers. The splitter handles top and default baseline
+alignment, keeps column widths stable, and leaves content with ending cell
+decoration instead of emitting an empty trailing page. This addresses the
+repeated-header stall in [issue #99](https://github.com/fullbleed-engine/fullbleed-official/issues/99).
+Continued cells retain one logical TH/TD and their explicit header references.
+
+Compiled reflow also preserves embedded font subsets when replaying cached pages.
+The replay cache is scoped to the actual batch values. Values whose visible text
+uses separate glyph outlines require layout when changed; updating only their
+searchable text could previously leave the first recipient's name visible.
+Changed table values also require layout so that columns and other cells follow
+the current record's content, including tables marked as presentation.
+Independent PDFium checks compare each record with a separately rendered PDF,
+including regular and synthesized-bold text, table geometry and both compression modes.
+
+The new 240-case output gate checks visible ink, page bounds, content counts,
+logical cells, header links, tagged/untagged pixels and repeated-render bytes.
+Existing caption limitations in [issue #98](https://github.com/fullbleed-engine/fullbleed-official/issues/98)
+remain separate. This does not establish general PDF/UA conformance or support
+for every oversized rowspan/alignment combination. The experimental component
+release requires its own qualification. No runtime dependency is added.
+
+See the [2.5.32 runbook](docs/release/2.5.32-runbook.md) for evidence and release gates.
+
+---
+
 # Fullbleed Release Notes - 2.5.31
 
 Rich table cells now keep their TH/TD structure separate from independently

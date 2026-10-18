@@ -326,12 +326,24 @@ jobs:
       - name: Verify saved table tags, content ownership and header relationships
         run: python -I tools/smoke_table_tagging.py --out target/table-tagging
 
+      - name: Verify oversized table cells stay visible and retain logical structure
+        run: python -I tools/smoke_oversized_table.py --out target/oversized-table
+
+      - name: Verify reflow recipients, table layout and fonts across batches
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+        run: python -m pytest tests/test_fullbleed_oversized_table.py -k reflow -q --basetemp target/reflow-cache-tests --junitxml target/reflow-cache-tests.xml
+
       - name: Retain table PDFs, structure checks and independent previews
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: release-table-tagging
-          path: target/table-tagging/
+          path: |
+            target/table-tagging/
+            target/oversized-table/
+            target/reflow-cache-tests/
+            target/reflow-cache-tests.xml
           if-no-files-found: error
 
       - name: Verify mixed inline wrapping with independent PDF readers

@@ -1367,7 +1367,6 @@ pub(crate) struct CompiledFlowPdfProgramCache {
 }
 
 struct CompiledFlowFontSeed {
-    first_page_index: usize,
     logical_name: Arc<str>,
     glyph_map: Arc<BTreeMap<u16, String>>,
 }
@@ -1791,16 +1790,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         fonts.sort_unstable_by_key(|font| font.start_id);
         let font_seeds = fonts
             .into_iter()
-            .map(|font| {
-                let first_page_index = self
-                    .page_ids
-                    .partition_point(|page_id| *page_id < font.start_id)
-                    .saturating_sub(1);
-                CompiledFlowFontSeed {
-                    first_page_index,
-                    logical_name: Arc::from(font.logical_name.as_str()),
-                    glyph_map: Arc::new(font.glyph_map.clone()),
-                }
+            .map(|font| CompiledFlowFontSeed {
+                logical_name: Arc::from(font.logical_name.as_str()),
+                glyph_map: Arc::new(font.glyph_map.clone()),
             })
             .collect::<Vec<_>>();
         self.compiled_flow_page_programs
@@ -2146,25 +2138,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         } else {
             None
         };
-        if encoded.is_some() {
-            let font_seeds = self
-                .compiled_flow_page_programs
-                .font_seeds
-                .iter()
-                .filter(|seed| seed.first_page_index == page_index)
-                .map(|seed| (seed.logical_name.clone(), seed.glyph_map.clone()))
-                .collect::<Vec<_>>();
-            for (font_name, glyph_map) in font_seeds {
-                self.ensure_font(font_name.as_ref())?;
-                let font_key = self.font_key(font_name.as_ref());
-                if let Some(font) = self.fonts.get_mut(&font_key) {
-                    for (glyph_id, value) in glyph_map.iter() {
-                        font.glyph_map
-                            .entry(*glyph_id)
-                            .or_insert_with(|| value.clone());
-                    }
-                }
-            }
+        if encoded.is_some() || cached_program.is_some() {
             if let Some(fonts) = cached_program
                 .as_ref()
                 .and_then(|program| program.resource_fonts.as_deref())
@@ -5182,6 +5156,17 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             StreamFontKind::TrueTypeIdentityH => 5,
         });
 
+        // Cached page programs skip normal glyph collection. Restore their
+        // complete subset when the font is first used, including on an uncached
+        // page. Allocating fonts eagerly would reorder objects relative to
+        // glyph-paint forms and change otherwise identical PDF bytes.
+        let glyph_map = self
+            .compiled_flow_page_programs
+            .font_seeds
+            .iter()
+            .find(|seed| self.font_key(&seed.logical_name) == key)
+            .map(|seed| (*seed.glyph_map).clone())
+            .unwrap_or_default();
         self.fonts.insert(
             key,
             StreamFont {
@@ -5190,7 +5175,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 encoding,
                 start_id,
                 kind,
-                glyph_map: BTreeMap::new(),
+                glyph_map,
                 font_data,
             },
         );
