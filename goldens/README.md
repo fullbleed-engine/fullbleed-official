@@ -60,3 +60,13 @@ Run a subset:
 ```bash
 python goldens/run_golden_suite.py --cases acme_invoice,bank_statement verify
 ```
+
+## Reviewed baseline changes
+
+The 2.5.30 inline line-height correction moves only Acme's large heading up
+0.75 points. Its 54px Inter, weight 800, `line-height: 1` baseline is now 72pt,
+matching a Chrome 155 saved PDF using the same bundled font. At the golden's
+144-DPI size, all changed pixels lie within `(69, 82, 542, 148)` on the
+1224-by-1584 page. The remaining invoice content and the bank-statement and
+coastal-menu baselines are unchanged. The installed inline-line-height gate
+also retains independent controls for this font size and weight.

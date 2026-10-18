@@ -20,7 +20,8 @@ use crate::flowable::{
     SvgFilterProgram, SvgFilterRegion, SvgFlowable, SvgMorphologyOperator, TableCell,
     TableColumnBorder, TableColumnGroupBorder, TableColumnWidthHint, TableFlowable,
     TableLayoutMode, TextAlign, TextStyle, VerticalAlign,
-    css_direct_text_prefers_nearest_baseline_snap, css_print_line_prefers_nearest_baseline_snap,
+    css_direct_text_prefers_nearest_baseline_snap, css_line_can_round_integral_baseline,
+    css_print_line_prefers_nearest_baseline_snap,
 };
 use crate::font::FontRegistry;
 use crate::glyph_report::GlyphCoverageReport;
@@ -3056,7 +3057,8 @@ fn node_to_flowables_in_scope(
                                                 .with_style(first_style.clone())
                                                 .with_font_registry(font_registry.clone())
                                                 .with_whitespace(true, true)
-                                                .with_intrinsic_first_letter_indent();
+                                                .with_intrinsic_first_letter_indent()
+                                                .with_floating_first_letter_paint_phase();
                                             let contents = vec![LayoutItem::Block {
                                                 flowable: Box::new(CssLineBoxFlowable::new(
                                                     Box::new(glyph),
@@ -6580,8 +6582,22 @@ fn coerce_items_to_inline_run(
             )
         });
     let parent_text_style = parent_style.to_text_style();
+    let integral_parent_baseline =
+        css_line_can_round_integral_baseline(&parent_text_style, font_registry.as_deref());
+    // Atomic inline boxes retain their own content's terminal paint phase.
+    // Rounding only their surrounding text can break baseline alignment.
+    let ordinary_text_only = items.iter().all(|item| match item {
+        LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => {
+            flowable.inline_x_height(Pt::ZERO).is_some()
+        }
+    });
+    let round_integral_baseline = snap_baseline_phase
+        && !preserve_nested_floor
+        && integral_parent_baseline
+        && ordinary_text_only;
     let round_nested_baseline = snap_baseline_phase
         && !preserve_nested_floor
+        && !integral_parent_baseline
         && (css_print_line_prefers_nearest_baseline_snap(
             &parent_text_style,
             font_registry.as_deref(),
@@ -6598,6 +6614,7 @@ fn coerce_items_to_inline_run(
     let wrap_line_box = |flowable: Box<dyn Flowable>| -> Box<dyn Flowable> {
         let line = CssLineBoxFlowable::new(flowable)
             .with_round_baseline(round_nested_baseline)
+            .with_integral_baseline_rounding(round_integral_baseline)
             .with_nested_floor_compensation(preserve_nested_floor)
             .with_parent_positioned_top_overflow(true);
         Box::new(line) as Box<dyn Flowable>
@@ -8948,47 +8965,50 @@ mod tests {
     }
 
     #[test]
-    fn direct_text_shadow_retains_its_shadow_form_line_phase() {
-        let resolver = StyleResolver::new(
-            "* { margin: 0; padding: 0; } \
-             html, body, div { display: block; } \
-             .t { font-family: Helvetica; font-size: 42px; line-height: 1; \
-                  text-shadow: 1px 1px 0 #000; }",
-        );
-        let story = html_to_story_with_resolver_and_fonts_and_report(
-            "<html><body><div class='t'>Shadow</div></body></html>",
-            &resolver,
-            None,
-            None,
-            None,
-            false,
-            false,
-            None,
-            None,
-        );
-        assert_eq!(story.len(), 1);
-
-        let page = Size {
-            width: Pt::from_f32(200.0),
-            height: Pt::from_f32(80.0),
+    fn direct_text_shadow_preserves_unshadowed_line_geometry() {
+        let geometry = |shadow| {
+            let resolver = StyleResolver::new(&format!(
+                "* {{ margin: 0; padding: 0; }} \
+                 html, body, div {{ display: block; }} \
+                 .t {{ font-family: Helvetica; font-size: 42px; line-height: 1; \
+                       text-shadow: {shadow}; }}"
+            ));
+            let story = html_to_story_with_resolver_and_fonts_and_report(
+                "<html><body><div class='t'>Shadow</div></body></html>",
+                &resolver,
+                None,
+                None,
+                None,
+                false,
+                false,
+                None,
+                None,
+            );
+            assert_eq!(story.len(), 1);
+            let page = Size {
+                width: Pt::from_f32(200.0),
+                height: Pt::from_f32(80.0),
+            };
+            let size = story[0].wrap(page.width, page.height);
+            let mut canvas = Canvas::new(page);
+            story[0].draw(&mut canvas, Pt::ZERO, Pt::ZERO, size.width, size.height);
+            let foreground_y = canvas.finish().pages[0]
+                .commands
+                .iter()
+                .filter_map(|command| match command {
+                    Command::DrawString { text, y, .. } if text == "Shadow" => Some(*y),
+                    _ => None,
+                })
+                .last()
+                .expect("foreground text draw command");
+            (size.height, foreground_y)
         };
-        let size = story[0].wrap(page.width, page.height);
-        let mut canvas = Canvas::new(page);
-        story[0].draw(&mut canvas, Pt::ZERO, Pt::ZERO, size.width, size.height);
-        let draw_y = canvas.finish().pages[0]
-            .commands
-            .iter()
-            .filter_map(|command| match command {
-                Command::DrawString { text, y, .. } if text == "Shadow" => Some(*y),
-                _ => None,
-            })
-            .last()
-            .expect("shadowed direct text draw command");
-
+        let plain = geometry("none");
+        assert_eq!(plain, (Pt::from_f32(31.5), Pt::from_f32(-6.75)));
         assert_eq!(
-            draw_y,
-            Pt::from_f32(-6.0),
-            "the shadow form keeps the inline-union phase shared by its source glyph run"
+            geometry("1px 1px 0 #000"),
+            plain,
+            "text shadows must not move the foreground or enlarge the line box"
         );
     }
 
@@ -9169,8 +9189,8 @@ mod tests {
 
         assert_eq!(
             height,
-            Pt::from_f32(9.75),
-            "the auto-width value should shrink to its text instead of occupying a second line"
+            Pt::from_f32(9.0),
+            "both inline blocks should fit on one authored 12px line without adding leading"
         );
     }
 

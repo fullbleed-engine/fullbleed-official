@@ -1,3 +1,33 @@
+# Fullbleed Release Notes - 2.5.30
+
+Same-font colored spans and generated content now preserve authored row spacing
+at `line-height: 1`. Previously, affected font sizes added one CSS pixel to each
+row: 24 rows that fit on three pages as plain text could become four pages after
+adding an accent color. Direct rendering and compiled reflow use the corrected
+logical line box. Registered fonts with integral CSS-pixel sizes and unit line
+height use nearest-pixel descent. Logical line geometry retains its half-pixel
+phase until painting; mixed-size text encloses the parent strut without changing
+table, page-margin or atomic-inline baselines. Floated initials keep their
+existing glyph placement, and text shadows preserve the foreground baseline.
+
+The installed-output gate checks 380 cases by reading saved PDFs with PDFium:
+absolute baselines at integral and fractional origins, row spacing, pagination
+and mixed-size border geometry.
+The public 2.5.29 wheel fails 22 of the original 64 spacing cases. The expanded
+gate retains fresh browser measurements with pinned fonts. The existing 20
+floated-initial references and tolerances remain unchanged. Runtime dependencies
+and authoring APIs are unchanged.
+
+Remote-template help now points to `fullbleed new list` so users can discover
+available starters instead of copying an unavailable template ID.
+
+See the [2.5.30 runbook](docs/release/2.5.30-runbook.md) for the independent corpus
+review and final publication gates. Remaining fractional line-height paint
+differences are outside this correction. The static Bootstrap component alpha
+remains a separate opt-in release.
+
+---
+
 # Fullbleed Release Notes - 2.5.29
 
 Native previews of finalized PDFs now composite isolated transparency groups
