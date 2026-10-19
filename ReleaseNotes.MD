@@ -1,3 +1,27 @@
+# Fullbleed Release Notes - 2.5.34
+
+Compiled reflow now refreshes running headers and footers when record values
+change. A binding shared by ordinary body text and a captured running element
+could previously update the body while retaining the preceding record's header.
+This corrects the reproduced behavior in [issue #104](https://github.com/fullbleed-engine/fullbleed-official/issues/104).
+
+Generated page-margin text and decoration now share balanced artifact marking,
+keeping page numbers and repeated navigation outside the body reading order in
+tagged output. This addresses [issue #103](https://github.com/fullbleed-engine/fullbleed-official/issues/103).
+
+Documents with running content reuse compiled layout only for identical binding
+values. Changing body values also triggers reflow when the header itself is
+static, reducing cache reuse. The choice preserves correct record content;
+dependency-aware reuse can be optimized separately.
+
+The stable correction retains existing page-margin geometry. The proposed
+component page-band API remains in development. CI and release jobs retain
+saved-PDF regressions for page furniture and running record values.
+
+See the [2.5.34 runbook](docs/release/2.5.34-runbook.md) for verification scope
+and release gates. Fixture checks do not establish accessibility for arbitrary
+authored documents.
+
 # Fullbleed Release Notes - 2.5.33
 
 Table captions now remain inside their logical Table in tagged PDF output,
