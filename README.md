@@ -65,13 +65,13 @@ includes the complete component and style source for customization.
 
 ## Try the Python component alpha
 
-This branch prepares the **2.6.0a8 prerelease**, including the stable 2.5.34
+The published **2.6.0a8 prerelease** includes the stable 2.5.34
 running-header and tagged page-furniture corrections, plus the preview's
 page-margin sizing and internal running-content layout improvements.
 It offers components that carry their appearance, a static
 Bootstrap 5.0.0 kit, and HTML export with or without styles. This API lives under
 `fullbleed.ui.experimental`; names and behavior may change. Install the alpha
-explicitly in a virtual environment after its release gates and publication finish:
+explicitly in a virtual environment:
 
 ```console
 python -m pip install --pre "fullbleed==2.6.0a8"
@@ -112,6 +112,9 @@ the [reusable component guide](examples/component_recipes/README.md), or the
 limits. For an unpublished checkout, build a wheel using
 `python build_backend/fullbleed_build_backend.py wheel --out dist` and install
 the returned path. Ordinary `pip install fullbleed` selects the stable channel.
+
+This source checkout also implements reusable [page bands and page numbers](docs/component-page-bands.md).
+Those constructors are **unreleased** and are not part of the published a8 wheel.
 
 ## Choose your language
 
@@ -525,18 +528,19 @@ Discover remote starters from the registry:
 ```bash
 fullbleed new list --json
 fullbleed new search components --json
-fullbleed new remote component-showcase ./my-documents --version 0.1.0 --json
+fullbleed new remote component-showcase ./my-documents --version 0.1.3 --json
 ```
 
 The showcase contains the Northstar invoice and Common Ground report in both
-HTML/CSS and Python components, sharing data, fonts, CSS and artwork. The
+HTML/CSS and Python components, plus the authored accessible community guide.
+The paired designs share data, fonts, CSS and artwork. The
 installer copies source files; it does not install dependencies or execute the
 project. Each kit pins its tested component prerelease in `requirements.txt`.
-Follow the [paired authoring guide](https://docs.fullbleed.dev/guides/showcase-authoring/)
+Follow the [current preview guide](https://docs.fullbleed.dev/guides/component-preview-8/)
 to install it in a separate environment, compare the four pages, and edit with
 a live PDF preview. For a smaller starting point, choose the
 [`python-components` starter](https://docs.fullbleed.dev/guides/bootstrap-components-preview/)
-at template version `0.1.0`.
+at template version `0.1.2`; that smaller kit retains its tested a6 runtime pin.
 
 `fullbleed new local accessible` is the verbose accessibility-first starter and
 demonstrates the `fullbleed.accessibility` runtime surface (engine verifier,
