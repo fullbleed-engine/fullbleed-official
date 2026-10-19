@@ -156,6 +156,7 @@ mod python;
 mod python_abi;
 mod raster;
 mod raster_native;
+mod running_layout;
 mod sfnt;
 mod sfnt_cff;
 mod sfnt_outline;
@@ -509,6 +510,7 @@ impl CompiledFlowRecordProgram {
         let mut patches = Vec::new();
         let mut patched_values = vec![false; values.len()];
         let mut layout_dependent_values = vec![false; values.len()];
+        let mut running_layout_requires_reflow = false;
         for (page_index, page) in document.pages.iter().enumerate() {
             let mut font_name = Arc::<str>::from("Helvetica");
             let mut font_size = Pt::from_f32(12.0);
@@ -544,6 +546,12 @@ impl CompiledFlowRecordProgram {
                         if key == flowable::META_COMPILED_TEXT_CONSTRAINT_KEY =>
                     {
                         pending_constraint = CompiledTextConstraint::parse(value);
+                    }
+                    Command::Meta { key, .. }
+                        if key == running_layout::REFLOW_GUARD_META
+                            || key.starts_with(canvas::META_RUNNING_ELEMENT_PREFIX) =>
+                    {
+                        running_layout_requires_reflow = true;
                     }
                     Command::DrawString { x, text, .. } => {
                         let constraint = pending_constraint.take();
@@ -665,6 +673,13 @@ impl CompiledFlowRecordProgram {
             // A value may appear in more than one rendering or layout context.
             // Every painted occurrence must support rebinding before reuse.
             *patched &= !layout_dependent;
+        }
+        if running_layout_requires_reflow {
+            // A binding can appear both in body text and in a captured margin
+            // form. Page-local patches do not establish the form's content,
+            // final slot geometry, or fit. Reuse only identical bindings until
+            // those dependencies can be proven independently.
+            patched_values.fill(false);
         }
         let mut page_patch_counts = vec![0usize; document.pages.len()];
         for patch in &patches {
@@ -1021,7 +1036,7 @@ impl CompiledReflowPlan {
             }
             Err(error) => {
                 entry.ready.notify_all();
-                Err(error)
+                Err(running_layout::with_record_index(error, row))
             }
         }
     }
@@ -6798,6 +6813,7 @@ impl FullBleed {
 
             passes += 1;
             let t_story = std::time::Instant::now();
+            let running_layouts = running_layout::RunningLayouts::default();
             let story = match input {
                 HtmlLayoutInput::Source(html) => {
                     html::html_to_story_with_resolver_and_fonts_and_report_and_target_pages(
@@ -6811,6 +6827,7 @@ impl FullBleed {
                         self.perf.as_deref(),
                         Some(doc_id),
                         uses_target_counters.then(|| target_pages.clone()),
+                        Some(running_layouts.clone()),
                     )
                 }
                 HtmlLayoutInput::Parsed(document) => {
@@ -6825,12 +6842,14 @@ impl FullBleed {
                         self.perf.as_deref(),
                         Some(doc_id),
                         uses_target_counters.then(|| target_pages.clone()),
+                        Some(running_layouts.clone()),
                     )
                 }
             };
             story_ms += t_story.elapsed().as_secs_f64() * 1000.0;
 
-            let mut doc = DocTemplate::new(page_templates.clone());
+            let mut doc =
+                DocTemplate::new(page_templates.clone()).with_running_layouts(running_layouts);
             if let Some(logger) = self.debug.clone() {
                 doc = doc.with_debug(logger, Some(doc_id));
             }
@@ -9681,6 +9700,11 @@ fn page_margin_box_container(
     (rect.quantized(), align)
 }
 
+struct ResolvedMarginRunning {
+    value: doc_context::RunningElementValue,
+    layout: Option<Arc<running_layout::RunningLayout>>,
+}
+
 struct ResolvedPageMarginBox {
     kind: style::CssPageMarginBoxKind,
     rect: Rect,
@@ -9688,7 +9712,7 @@ struct ResolvedPageMarginBox {
     width: Option<Pt>,
     background: Option<(Color, f32)>,
     paragraph: Option<Paragraph>,
-    running: Vec<doc_context::RunningElementValue>,
+    running: Vec<ResolvedMarginRunning>,
 }
 
 impl ResolvedPageMarginBox {
@@ -9708,13 +9732,37 @@ impl ResolvedPageMarginBox {
             }
         }
         for element in &self.running {
-            let extent = if horizontal {
-                element.width
+            let (low, high) = if let Some(layout) = &element.layout {
+                if horizontal {
+                    let intrinsic = layout.child.intrinsic_width();
+                    let low = layout
+                        .child
+                        .flex_min_content_width(self.rect.width)
+                        .or(intrinsic)
+                        .unwrap_or(Pt::ZERO);
+                    let high = layout
+                        .child
+                        .flex_max_content_width(self.rect.width)
+                        .or(intrinsic)
+                        .unwrap_or(self.rect.width);
+                    (low, high)
+                } else {
+                    let height = layout
+                        .child
+                        .wrap(self.rect.width, Pt::from_i32(1_000_000))
+                        .height;
+                    (height, height)
+                }
             } else {
-                element.height
+                let extent = if horizontal {
+                    element.value.width
+                } else {
+                    element.value.height
+                };
+                (extent, extent)
             };
-            minimum = minimum.max(extent);
-            maximum = maximum.max(extent);
+            minimum = minimum.max(low);
+            maximum = maximum.max(high);
         }
         page_margin::AxisSize::new(if horizontal { self.width } else { None }, minimum, maximum)
     }
@@ -9785,9 +9833,6 @@ fn with_page_margin_boxes(
             continue;
         }
         let (rect, align) = page_margin_box_container(page_size, margins, kind);
-        if rect.width <= Pt::ZERO || rect.height <= Pt::ZERO {
-            continue;
-        }
         let font_size = margin_box
             .font_size
             .or(setup.font_size)
@@ -9845,6 +9890,7 @@ fn with_page_margin_boxes(
     template.append_on_page_finalize(move |canvas, context| {
         let mut boxes = Vec::with_capacity(definitions.len());
         for (kind, rect, align, parts, text_style, width, background) in &definitions {
+            let empty_container = rect.width <= Pt::ZERO || rect.height <= Pt::ZERO;
             let mut rect = *rect;
             if let Some(width) = width {
                 use style::CssPageMarginBoxKind::*;
@@ -9880,7 +9926,10 @@ fn with_page_margin_boxes(
                     }
                     style::CssPageMarginContentPart::RunningElement { name, position } => {
                         if let Some(element) = context.running_element(name, position) {
-                            running.push(element.clone());
+                            running.push(ResolvedMarginRunning {
+                                value: element.clone(),
+                                layout: context.running_layout(&element.resource_id),
+                            });
                         }
                     }
                 }
@@ -9891,6 +9940,9 @@ fn with_page_margin_boxes(
                     .with_align(*align)
                     .with_font_registry(Some(font_registry.clone()))
             });
+            if empty_container && !running.iter().any(|element| element.layout.is_some()) {
+                continue;
+            }
             boxes.push(ResolvedPageMarginBox {
                 kind: *kind,
                 rect,
@@ -9902,6 +9954,25 @@ fn with_page_margin_boxes(
             });
         }
         layout_page_margin_boxes(&mut boxes, page_size, margins);
+        for item in &mut boxes {
+            for element in &mut item.running {
+                if let Some(layout) = element.layout.take() {
+                    match layout.materialize(
+                        &element.value.resource_id,
+                        item.kind.css_name(),
+                        context.page_number,
+                        item.rect,
+                        canvas,
+                    ) {
+                        Ok(value) => element.value = value,
+                        Err(error) => {
+                            canvas.meta(running_layout::FIT_ERROR_META, error);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
         for item in boxes {
             let content_rect = item.rect;
             canvas.save_state();
@@ -9924,7 +9995,11 @@ fn with_page_margin_boxes(
                     canvas.restore_state();
                 }
             }
-            for element in item.running {
+            for running in item.running {
+                let element = running.value;
+                if element.width <= Pt::ZERO || element.height <= Pt::ZERO {
+                    continue;
+                }
                 let x = match item.align {
                     flowable::TextAlign::Left | flowable::TextAlign::Justify => content_rect.x,
                     flowable::TextAlign::Center => {

@@ -30,6 +30,9 @@ on:
       - src/html.rs
       - src/lib.rs
       - src/page_margin.rs
+      - src/running_layout.rs
+      - src/doc_context.rs
+      - src/doc_template.rs
       - src/style.rs
       - tools/smoke_filtered_overflow.py
       - tests/test_fullbleed_filtered_overflow.py

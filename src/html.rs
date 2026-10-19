@@ -114,6 +114,7 @@ struct CounterState {
     target_texts: Arc<HashMap<String, String>>,
     target_pages: Arc<HashMap<String, usize>>,
     table_semantics: Arc<crate::table_semantics::HtmlTableIndex>,
+    running_layouts: Option<crate::running_layout::RunningLayouts>,
 }
 
 #[derive(Debug, Clone)]
@@ -1066,6 +1067,7 @@ pub fn html_to_story_with_resolver_and_fonts_and_report(
         perf,
         doc_id,
         None,
+        None,
     )
 }
 
@@ -1080,6 +1082,7 @@ pub(crate) fn html_to_story_with_resolver_and_fonts_and_report_and_target_pages(
     perf: Option<&crate::perf::PerfLogger>,
     doc_id: Option<usize>,
     target_pages: Option<Arc<HashMap<String, usize>>>,
+    running_layouts: Option<crate::running_layout::RunningLayouts>,
 ) -> Vec<Box<dyn Flowable>> {
     let t_parse = std::time::Instant::now();
     let document = parse_html(html);
@@ -1111,6 +1114,7 @@ pub(crate) fn html_to_story_with_resolver_and_fonts_and_report_and_target_pages(
         perf,
         doc_id,
         target_pages,
+        running_layouts,
     )
 }
 
@@ -1126,6 +1130,7 @@ pub(crate) fn html_document_to_story_with_resolver_and_fonts_and_report_and_targ
     perf: Option<&crate::perf::PerfLogger>,
     doc_id: Option<usize>,
     target_pages: Option<Arc<HashMap<String, usize>>>,
+    running_layouts: Option<crate::running_layout::RunningLayouts>,
 ) -> Vec<Box<dyn Flowable>> {
     // ComputedStyle owns its wide CSS state on the heap, including these
     // document-level styles retained during recursive DOM compilation.
@@ -1137,6 +1142,7 @@ pub(crate) fn html_document_to_story_with_resolver_and_fonts_and_report_and_targ
         document_target_texts(document),
         target_pages.unwrap_or_else(|| Arc::new(HashMap::new())),
     );
+    counters.running_layouts = running_layouts;
 
     let mut root_style = base_style.clone();
     if let Ok(html_el) = document.select_first("html") {
@@ -4282,8 +4288,23 @@ fn node_to_flowables_in_scope(
             }
             let named_strings = named_string_values_for_node(node, &style);
             if let Some(running_name) = style.running_name.as_ref() {
-                flowables =
-                    wrap_running_element(flowables, &style, running_name.clone(), named_strings);
+                let deferred = node.as_element().and_then(|element| {
+                    let attributes = element.attributes.borrow();
+                    (attributes.get(crate::running_layout::LAYOUT_ATTRIBUTE) == Some("margin"))
+                        .then(|| {
+                            (
+                                counters.running_layouts.clone(),
+                                attributes.get("data-fb-id").map(str::to_owned),
+                            )
+                        })
+                });
+                flowables = wrap_running_element(
+                    flowables,
+                    &style,
+                    running_name.clone(),
+                    named_strings,
+                    deferred,
+                );
             } else if !named_strings.is_empty() {
                 flowables = wrap_named_string_occurrence(flowables, named_strings);
             }
@@ -12404,6 +12425,10 @@ fn wrap_running_element(
     style: &ComputedStyle,
     name: Arc<str>,
     named_strings: Vec<(String, String)>,
+    deferred: Option<(
+        Option<crate::running_layout::RunningLayouts>,
+        Option<String>,
+    )>,
 ) -> Vec<LayoutItem> {
     if flowables.is_empty() {
         return Vec::new();
@@ -12422,9 +12447,15 @@ fn wrap_running_element(
             .with_self_visible(style.visibility.paints()),
         )
     };
-    let marker = RunningElementFlowable::new(child, name)
+    let deferred_key = deferred.and_then(|(registry, source)| {
+        registry.map(|registry| registry.register(child.clone(), source))
+    });
+    let mut marker = RunningElementFlowable::new(child, name)
         .with_named_strings(named_strings)
         .with_pagination(style.pagination);
+    if let Some(key) = deferred_key {
+        marker = marker.with_deferred_layout(key);
+    }
     vec![LayoutItem::Block {
         flowable: Box::new(marker),
         flex_grow: 0.0,

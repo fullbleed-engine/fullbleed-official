@@ -39597,6 +39597,7 @@ pub struct RunningElementFlowable {
     name: Arc<str>,
     named_strings: Arc<Vec<(String, String)>>,
     pagination: Pagination,
+    deferred_layout: Option<String>,
 }
 
 impl RunningElementFlowable {
@@ -39606,6 +39607,7 @@ impl RunningElementFlowable {
             name: name.into(),
             named_strings: Arc::new(Vec::new()),
             pagination: Pagination::default(),
+            deferred_layout: None,
         }
     }
 
@@ -39619,21 +39621,9 @@ impl RunningElementFlowable {
         self
     }
 
-    fn form_id(&self, width: Pt, height: Pt, commands: &[Command]) -> String {
-        let mut hash = 0xcbf29ce484222325u64;
-        let mut absorb = |bytes: &[u8]| {
-            for byte in bytes {
-                hash ^= u64::from(*byte);
-                hash = hash.wrapping_mul(0x100000001b3);
-            }
-        };
-        absorb(self.name.as_bytes());
-        absorb(&width.to_milli_i64().to_le_bytes());
-        absorb(&height.to_milli_i64().to_le_bytes());
-        for command in commands {
-            absorb(format!("{command:?}").as_bytes());
-        }
-        format!("css-running-{hash:016x}")
+    pub(crate) fn with_deferred_layout(mut self, key: String) -> Self {
+        self.deferred_layout = Some(key);
+        self
     }
 }
 
@@ -39654,6 +39644,16 @@ impl Flowable for RunningElementFlowable {
     }
 
     fn draw(&self, canvas: &mut Canvas, _x: Pt, _y: Pt, avail_width: Pt, _avail_height: Pt) {
+        if let Some(key) = &self.deferred_layout {
+            canvas.meta(
+                format!("{META_RUNNING_ELEMENT_PREFIX}{}", self.name),
+                key.clone(),
+            );
+            for (name, value) in self.named_strings.iter() {
+                canvas.meta(format!("{META_NAMED_STRING_PREFIX}{name}"), value.clone());
+            }
+            return;
+        }
         let width = self
             .child
             .intrinsic_width()
@@ -39677,7 +39677,7 @@ impl Flowable for RunningElementFlowable {
             .first()
             .map(|page| page.commands.clone())
             .unwrap_or_default();
-        let resource_id = self.form_id(width, height, &commands);
+        let resource_id = crate::running_layout::form_id(&self.name, width, height, &commands);
         canvas.define_form(resource_id.clone(), width, height, commands);
         canvas.meta(
             format!("{META_RUNNING_ELEMENT_PREFIX}{}", self.name),

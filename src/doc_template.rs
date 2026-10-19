@@ -55,7 +55,10 @@ fn resolve_page_generated_values<T: Clone>(
     resolved
 }
 
-fn collect_page_generated_content(pages: &[crate::canvas::Page]) -> Vec<PageGeneratedContent> {
+fn collect_page_generated_content(
+    pages: &[crate::canvas::Page],
+    running_layouts: &crate::running_layout::RunningLayouts,
+) -> Vec<PageGeneratedContent> {
     let mut form_sizes = HashMap::<String, (Pt, Pt)>::new();
     for page in pages {
         for command in &page.commands {
@@ -90,14 +93,18 @@ fn collect_page_generated_content(pages: &[crate::canvas::Page]) -> Vec<PageGene
                 continue;
             };
             if let Some(name) = key.strip_prefix(META_RUNNING_ELEMENT_PREFIX) {
-                if let Some((width, height)) = form_sizes.get(value) {
+                let size = form_sizes
+                    .get(value)
+                    .copied()
+                    .or_else(|| running_layouts.get(value).map(|_| (Pt::ZERO, Pt::ZERO)));
+                if let Some((width, height)) = size {
                     running
                         .entry(name.to_string())
                         .or_default()
                         .push(RunningElementValue {
                             resource_id: value.clone(),
-                            width: *width,
-                            height: *height,
+                            width,
+                            height,
                         });
                 }
             } else if let Some(name) = key.strip_prefix(META_NAMED_STRING_PREFIX) {
@@ -365,6 +372,7 @@ pub struct DocTemplate {
     story: Vec<Box<dyn Flowable>>,
     debug: Option<Arc<DebugLogger>>,
     debug_doc_id: Option<usize>,
+    running_layouts: crate::running_layout::RunningLayouts,
 }
 
 impl DocTemplate {
@@ -374,6 +382,7 @@ impl DocTemplate {
             story: Vec::new(),
             debug: None,
             debug_doc_id: None,
+            running_layouts: crate::running_layout::RunningLayouts::default(),
         }
     }
 
@@ -385,6 +394,14 @@ impl DocTemplate {
 
     pub fn add_flowable(&mut self, flowable: Box<dyn Flowable>) {
         self.story.push(flowable);
+    }
+
+    pub(crate) fn with_running_layouts(
+        mut self,
+        running_layouts: crate::running_layout::RunningLayouts,
+    ) -> Self {
+        self.running_layouts = running_layouts;
+        self
     }
 
     pub fn build(self) -> Result<Document, FullBleedError> {
@@ -937,7 +954,8 @@ impl DocTemplate {
 
         let mut document = canvas.finish_without_show();
         let total_pages = document.pages.len();
-        let generated_content = collect_page_generated_content(&document.pages);
+        let generated_content =
+            collect_page_generated_content(&document.pages, &self.running_layouts);
         let mut page_counter = 0i32;
         for (index, page) in document.pages.iter_mut().enumerate() {
             let template_name = page.commands.iter().find_map(|command| match command {
@@ -985,12 +1003,35 @@ impl DocTemplate {
                         .get(index)
                         .map(|content| content.named_strings.clone())
                         .unwrap_or_default(),
+                    self.running_layouts.clone(),
                 ),
             );
             let mut overlay_document = overlay.finish();
             let Some(overlay_page) = overlay_document.pages.pop() else {
                 continue;
             };
+            if overlay_page.commands.is_empty() {
+                // A deferred selection may resolve to no paint. Do not add
+                // graphics-state operators to an otherwise unchanged page.
+                continue;
+            }
+            if let Some(error) = overlay_page
+                .commands
+                .iter()
+                .find_map(|command| match command {
+                    Command::Meta { key, value }
+                        if key == crate::running_layout::FIT_ERROR_META =>
+                    {
+                        Some(value)
+                    }
+                    _ => None,
+                })
+            {
+                return Err(FullBleedError::UnplaceableFlowable(format!(
+                    "{}{error}",
+                    crate::running_layout::FIT_ERROR_PREFIX
+                )));
+            }
             let overlay_command_count = overlay_page.commands.len();
             let mut finalized_commands = Vec::with_capacity(
                 page.commands

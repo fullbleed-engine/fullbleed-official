@@ -4158,6 +4158,29 @@ pub(crate) enum CssPageMarginBoxKind {
     RightBottom,
 }
 
+impl CssPageMarginBoxKind {
+    pub fn css_name(self) -> &'static str {
+        match self {
+            Self::TopLeftCorner => "top-left-corner",
+            Self::TopLeft => "top-left",
+            Self::TopCenter => "top-center",
+            Self::TopRight => "top-right",
+            Self::TopRightCorner => "top-right-corner",
+            Self::BottomLeftCorner => "bottom-left-corner",
+            Self::BottomLeft => "bottom-left",
+            Self::BottomCenter => "bottom-center",
+            Self::BottomRight => "bottom-right",
+            Self::BottomRightCorner => "bottom-right-corner",
+            Self::LeftTop => "left-top",
+            Self::LeftMiddle => "left-middle",
+            Self::LeftBottom => "left-bottom",
+            Self::RightTop => "right-top",
+            Self::RightMiddle => "right-middle",
+            Self::RightBottom => "right-bottom",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CssPageContentPosition {
     Start,

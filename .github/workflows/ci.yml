@@ -264,6 +264,17 @@ jobs:
       - name: Verify page-margin sizing and alignment across pages and records
         run: python -I tools/smoke_page_margin_layout.py --out target/page-margin-layout
 
+      - name: Verify deferred running content uses final slots and current records
+        run: python -I tools/smoke_running_layout.py --out target/running-layout
+
+      - name: Retain deferred running-layout PDFs and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: running-layout-${{ runner.os }}
+          path: target/running-layout/
+          if-no-files-found: error
+
       - name: Retain page-margin geometry PDFs, measurements and previews
         if: always()
         uses: actions/upload-artifact@v7

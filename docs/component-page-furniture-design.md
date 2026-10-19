@@ -140,9 +140,53 @@ and a rich-content sizing contract before promising visible neighboring slots.
 This work does not add margin-box height, min/max size, padding or box-margin
 properties, and does not expose the proposed component constructors.
 
+### Deferred rich-content prerequisite
+
+The next internal path retains a running element's native layout until its
+page-margin slot has been allocated. It then lays out that element at the final
+slot width on each page. A named page with a narrower paper size can therefore
+wrap the same header differently. Ordinary CSS running elements keep their
+existing captured-form behavior. The reserved `data-fb-running-layout="margin"`
+marker selects this experimental implementation; it is not a public component
+authoring API.
+
+A measured box that exceeds its allocated slot fails native finalization with
+`layout.page_margin_size`. The diagnostic carries the reason, one-based page,
+slot, available rectangle, measured size and source identifiers. Measurements
+use integer millipoints. Compiled reflow failures also identify the one-based
+record. An empty margin and nested running content are rejected explicitly.
+These diagnostics use the existing error type rather than adding a public enum
+variant. The native file and writer APIs remain streaming APIs; callers that
+need atomic replacement must stage their output.
+
+Retained margin forms also change the cache's correctness requirements. A value
+can appear in both the body and a header. Updating only body text would retain
+the previous record's header and bypass its fit check. This also affects ordinary
+CSS running headers when the same value appears in the body. Documents using
+running content therefore reuse a compiled layout only for identical bindings;
+changed values require native reflow. No performance improvement is claimed for
+that conservative choice. Documents without running content retain their
+existing cache behavior.
+
+[`smoke_running_layout.py`](../tools/smoke_running_layout.py) exercises saved
+PDFs across tagged output, both PDF/UA profiles and five emission paths. It
+checks narrow body boxes, named page widths, neighboring slots, first-page
+suppression, styled footers and one component reused at two slot widths. Ordinary
+running headers also have a shared-value regression. The check
+also verifies record values, body tags, raster equality, deterministic output,
+error context and recovery after a failed record. External PDF/UA validation is
+still a separate check on the saved fixtures.
+
+This measured-box check is **not a complete visible-overflow check**. Fixed-size
+descendants, positioned content, transforms and effects can paint beyond their
+layout boxes. Proving or rejecting those cases remains necessary before exposing
+`PageBand` with a fit guarantee. Slot ownership and HTML export behavior also
+remain part of the proposed component contract above.
+
 The local investigation is retained under
 `target/growth/component-page-furniture-20261018/` and
-`target/growth/component-margin-layout-20261019/`. The installed public release
+`target/growth/component-margin-layout-20261019/`, with the deferred-layout work
+under `target/growth/component-running-layout-20261019/`. The installed public release
 is the negative control; a source change alone does not establish that a release
 contains the correction.
 
