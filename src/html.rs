@@ -2510,6 +2510,27 @@ fn node_to_flowables_in_scope(
             }
 
             if matches!(style.display, DisplayMode::None) && screen_reader_text.is_none() {
+                // A finalized PageNumbers slot still needs its authored hidden
+                // style. No running occurrence is emitted, but falling back to
+                // page-context text would make a hidden value visible again.
+                if info
+                    .attrs
+                    .get(crate::running_layout::LAYOUT_ATTRIBUTE)
+                    .map(String::as_str)
+                    == Some("band")
+                    && style.running_name.is_some()
+                {
+                    if let (Some(registry), Some(source)) =
+                        (&counters.running_layouts, info.attrs.get("data-fb-id"))
+                    {
+                        registry.register(
+                            Box::new(Spacer::new_pt(Pt::ZERO)),
+                            Some(source.clone()),
+                            true,
+                            style.clone(),
+                        );
+                    }
+                }
                 return Vec::new();
             }
             if style_can_mutate_counters(&style) {
@@ -11749,6 +11770,52 @@ fn container_flowables_with_options(
     container_flowables_with_role_options(children, style, None, options)
 }
 
+/// Rebuild a managed generated-text slot with its captured CSS after native
+/// page values are known. Reuse the ordinary line/container compilers so class
+/// selectors, fonts, padding, backgrounds and transforms travel together.
+pub(crate) fn finalized_margin_text(
+    text: String,
+    style: &ComputedStyle,
+    fonts: Arc<FontRegistry>,
+) -> Box<dyn Flowable> {
+    if matches!(style.display, DisplayMode::None) {
+        return Box::new(Spacer::new_pt(Pt::ZERO));
+    }
+    let text = apply_text_transform(&text, style.text_transform);
+    let text_style = text_style_for_flow_text(style);
+    let round_baseline = css_direct_text_prefers_nearest_baseline_snap(&text_style, Some(&fonts));
+    let owns_overflow = text_style.text_shadows.is_empty();
+    let paragraph = Paragraph::new(text)
+        .with_style(text_style)
+        .with_align(text_align_from_style(style))
+        .with_last_align(text_align_last_from_style(style))
+        .with_whitespace(preserve_whitespace(style.white_space), no_wrap(style))
+        .with_break_spaces(matches!(style.white_space, WhiteSpaceMode::BreakSpaces))
+        .with_pagination(style.pagination)
+        .with_font_registry(Some(fonts));
+    let children = vec![LayoutItem::Block {
+        flowable: Box::new(
+            CssLineBoxFlowable::new(Box::new(paragraph))
+                .with_round_baseline(round_baseline)
+                .with_parent_positioned_top_overflow(owns_overflow),
+        ),
+        flex_grow: 0.0,
+        flex_shrink: 1.0,
+        width_spec: None,
+        order: 0,
+    }];
+    container_flowable_with_role_options(
+        children,
+        style,
+        None,
+        ContainerCompilationOptions {
+            emit_tag_group: false,
+            ..ContainerCompilationOptions::default()
+        },
+    )
+    .unwrap_or_else(|| Box::new(Spacer::new_pt(Pt::ZERO)))
+}
+
 fn establishes_abs_containing_block(style: &ComputedStyle) -> bool {
     !matches!(style.position, PositionMode::Static) || !style.transform.is_empty()
 }
@@ -12450,7 +12517,7 @@ fn wrap_running_element(
         )
     };
     let deferred_key = deferred.and_then(|(registry, source, managed)| {
-        registry.map(|registry| registry.register(child.clone(), source, managed))
+        registry.map(|registry| registry.register(child.clone(), source, managed, style.clone()))
     });
     let mut marker = RunningElementFlowable::new(child, name)
         .with_named_strings(named_strings)

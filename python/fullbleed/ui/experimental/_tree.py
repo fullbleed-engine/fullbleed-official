@@ -102,6 +102,10 @@ def _children(values) -> tuple:
             finally:
                 active.remove(identity)
         else:
+            from ._page import PageNumbers
+            if isinstance(value, PageNumbers):
+                raise AuthoringError("Place PageNumbers directly in a PageBand left, center or right slot; "
+                                     "page values are not ordinary body content.", code="page_numbers.slot")
             raise AuthoringError(f"Unsupported child {type(value).__name__}; format data or call its component", code="children.type")
 
     visit(values)

@@ -13,6 +13,12 @@ The `2.6.0a8` alpha has its own package version. Install it explicitly with
 The [implementation review](../../docs/component-authoring-design.md) explains
 the design decisions, remaining gaps, and criteria for stabilizing this API.
 
+The source branch also has an **unreleased**
+[PageBand API](../../docs/component-page-bands.md) for reusable headers, footers
+and finalized page numbers, with a
+[three-page report example](../component_page_bands/README.md). Build the checkout
+to try that addition; it is not in the published `2.6.0a8` wheel.
+
 The [invoice and report](documents.py) use the same [design kit](kit.py). Neither
 document imports a stylesheet or coordinates selectors. The kit contains the
 styles and the components that use them. The example data is the existing

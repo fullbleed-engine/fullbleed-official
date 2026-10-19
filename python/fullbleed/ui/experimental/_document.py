@@ -18,6 +18,7 @@ from ._style import AuthoringError, Length, Style, Theme, mm
 from ._tree import Node, _children, _required_tokens
 from ._semantics import ContentContext, normalize_mode, semantic_report
 from ._resources import style_element
+from ._page import PageBand, PageNumbers, band_nodes, slot_css, HTML_BAND_CSS
 
 
 def _capture_document_styles(value) -> tuple:
@@ -87,6 +88,8 @@ class Page:
     size: str | tuple[Length, Length] = "A4"
     margin: Length | tuple[Length, ...] = mm(18)
     landscape: bool = False
+    header: PageBand | None = field(default=None, kw_only=True)
+    footer: PageBand | None = field(default=None, kw_only=True)
 
     def __post_init__(self):
         if isinstance(self.size, str):
@@ -105,6 +108,9 @@ class Page:
             self._physical(length)
         if not isinstance(self.landscape, bool):
             raise AuthoringError("landscape must be a boolean", code="page.orientation")
+        for name, value in (("header", self.header), ("footer", self.footer)):
+            if value is not None and not isinstance(value, PageBand):
+                raise AuthoringError(f"Page {name} expects a PageBand value", code="page.band")
 
     @staticmethod
     def _physical(length, positive=False):
@@ -161,6 +167,27 @@ class LayoutError(AuthoringError):
         }
 
 
+class PageBandError(LayoutError):
+    """Native page-furniture fit failure with the authored slot and measurements."""
+
+    def __init__(self, message, *, details, sources=(), path=()):
+        self._details = deepcopy(details)
+        self.slot = details["slot"]
+        self.record = details.get("record")
+        super().__init__(message, page=details["page"], sources=sources,
+                         reason=details["reason"], code=details["code"], path=path)
+
+    @property
+    def details(self):
+        return deepcopy(self._details)
+
+    def at(self, name):
+        return PageBandError(self.message, details=self._details, sources=self.sources, path=(name, *self.path))
+
+    def to_dict(self):
+        return {**super().to_dict(), "slot": self.slot, "record": self.record, "details": self.details}
+
+
 @dataclass(frozen=True)
 class DocumentSource:
     """Pure authoring output; use Document.prepare for an owned native layout."""
@@ -213,10 +240,22 @@ class Document:
         mode = normalize_mode(a11y_mode)
         selector_styles = self.styles if include_styles else ""
         rules, sources, output, resources = {}, [], [], {}
-        semantic_root = Element("main") if mode else None
+        groups, band_slots = ({}, {}) if fragment_only else band_nodes(self.page, self.theme, target)
+        has_bands = bool(groups)
+        roots = self.children
+        if has_bands:
+            body_root = Node("main", self.children)
+            # Register both running bands before body pagination starts. A footer
+            # after the body would first bind on its last page (and can turn a
+            # terminal forced break into an unwanted extra page).
+            ordered = (groups.get("header"), groups.get("footer"), body_root) if target == "pdf" else (
+                groups.get("header"), body_root, groups.get("footer"))
+            roots = tuple(node for node in ordered if node is not None)
+        margin_rules = []
+        semantic_root = Element("div" if has_bands else "main") if mode else None
         # Explicit traversal avoids Python recursion limits for nested documents.
-        root_context = ContentContext(parent=None if fragment_only else "main")
-        pending = [(child, (), None, root_context, semantic_root) for child in reversed(self.children)]
+        root_context = ContentContext(parent=None if fragment_only else "body" if has_bands else "main")
+        pending = [(child, (), None, root_context, semantic_root) for child in reversed(roots)]
         while pending:
             node, path, source, context, semantic_parent = pending.pop()
             if isinstance(node, _Closing):
@@ -228,6 +267,10 @@ class Document:
                 if semantic_parent is not None:
                     semantic_parent.children.append(node)
                 continue
+            band_slot = band_slots.get(id(node))
+            if band_slot is not None and target == "pdf":
+                # Repeated PDF furniture is artifact content, outside body semantics.
+                semantic_parent = None
             if target == "pdf":
                 node = node._for_print()
             if node.name is not None:
@@ -264,6 +307,14 @@ class Document:
                 attributes["class"] = " ".join(filter(None, (attributes.get("class"), class_name)))
             if explicit:
                 attributes["style"] = explicit
+            if band_slot is not None and target == "pdf" and include_styles:
+                edge, position, band, number = band_slot
+                attributes["data-fb-running-layout"] = "band"
+                attributes["style"] = explicit + f" position: running(fbx-{edge}-{position}) !important;"
+                try:
+                    margin_rules.extend(slot_css(edge, position, band, number, node_id))
+                except AuthoringError as error:
+                    raise error.at(f"Page.{edge}.{position}") from error
             output.append(f"<{node.tag}{_render_attrs(attributes)}>")
             if semantic_parent is not None:
                 semantic_node = Element(node.tag, props=attributes)
@@ -278,16 +329,34 @@ class Document:
         dependency_css = tuple(resource.text for resource in resources.values() if resource.kind == "css")
         component_rules = tuple(f".{name} {{ {value} }}" for name, value in rules.items())
         component_css = "\n".join((*dependency_css, *component_rules)) if include_styles else ""
+        if has_bands and include_styles:
+            from ..._abi import _stylesheet_page_margins
+            owned = {("top" if edge == "header" else "bottom") + "-" + position
+                     for edge, position, _, _ in band_slots.values()}
+            authored = "\n".join((component_css, selector_styles))
+            try:
+                conflicts = _stylesheet_page_margins(authored)
+            except ValueError as error:
+                raise AuthoringError(str(error), code="styles.syntax", path=("Document", "styles")) from error
+            for selector, slot, offset in conflicts:
+                if slot in owned:
+                    raise AuthoringError(
+                        f"PageBand owns @{slot}; remove the competing @page {selector} rule at CSS byte {offset} "
+                        "and customize that band's component or PageNumbers value.",
+                        code="styles.page_band", path=("Document", "styles", selector or "@page", slot),
+                    )
         css = ""
         if include_styles:
             css = component_css if fragment_only else "\n".join((
                 *dependency_css, self.page.to_css(), f"body {{ {text} }}",
                 "* { box-sizing: border-box; }", *component_rules, selector_styles,
+                *((HTML_BAND_CSS,) if has_bands and target == "html" else margin_rules),
             ))
         fragment = "".join(output)
+        content = fragment if has_bands else "<main>" + fragment + "</main>"
         html = (f'<!doctype html><html lang="{escape(self.lang, quote=True)}"><head>'
-                f'<meta charset="utf-8"><title>{escape(self.title)}</title></head><body><main>'
-                + fragment + "</main></body></html>")
+                f'<meta charset="utf-8"><title>{escape(self.title)}</title></head><body>'
+                + content + "</body></html>")
         report = semantic_report(semantic_root, self, sources, mode) if mode else None
         return DocumentSource(html, css, tuple(sources), json.dumps(report, sort_keys=True) if report is not None else None,
                               _fragment=fragment,
@@ -297,6 +366,9 @@ class Document:
     def required_tokens(self) -> tuple[str, ...]:
         """Sorted explicit token names used by content and the theme's text style."""
         names = set(_required_tokens(self.children)) | set(self.theme.text._token_names())
+        for band in (self.page.header, self.page.footer):
+            if band is not None:
+                names.update(band._tokens())
         for fragment in self._styles:
             if not isinstance(fragment, str):
                 names.update(fragment[1]._token_names())
@@ -330,7 +402,11 @@ class Document:
         or mutable engine is shared between documents.
         """
         plan = self.compile(a11y_mode=a11y_mode, target="pdf")
-        prepared = renderer.engine_for(self).compile_pdf(plan.html, plan.css)
+        try:
+            prepared = renderer.engine_for(self).compile_pdf(plan.html, plan.css)
+        except ValueError as error:
+            renderer._raise_page_band_error(self, plan, error)
+            raise
         renderer._check_layout(self, plan, prepared.export_render_time_pagination_trace())
         return prepared
 
@@ -400,9 +476,41 @@ class Renderer:
     def checked_engine_for(self, document: Document, plan: DocumentSource):
         """Compatibility helper; use Document.prepare to reuse the checked layout."""
         engine = self.engine_for(document)
-        trace = engine.export_render_time_pagination_trace(plan.html, plan.css)
+        try:
+            trace = engine.export_render_time_pagination_trace(plan.html, plan.css)
+        except ValueError as error:
+            self._raise_page_band_error(document, plan, error)
+            raise
         self._check_layout(document, plan, trace)
         return engine
+
+    @staticmethod
+    def _raise_page_band_error(document, plan, error):
+        marker = "page-margin layout: "
+        if marker not in str(error):
+            return
+        try:
+            details = json.loads(str(error).split(marker, 1)[1])
+        except (ValueError, TypeError):
+            return
+        if details.get("schema") != "fullbleed.page_margin_fit.v1":
+            return
+        by_id = {source.node_id: source for source in plan.sources}
+        sources = tuple(by_id[node_id] for node_id in details.get("source_ids", ()) if node_id in by_id)
+        advice = {
+            "paint_bounds_unknown": "Use a registered embedded font and supported paint operations; the engine cannot prove this content fits. "
+                                    "Register fonts with Renderer(font_files=...) and select their family in Theme or the component's style.",
+            "slot_outside_reserved_margin": "Keep this slot inside the margins configured on Page.",
+            "nested_running_content": "Use ordinary components inside a PageBand; nested running elements are unsupported.",
+            "paint_overflow": "Leave space around strokes, outlines and transformed content, or reduce the slot's content. "
+                              "Conservative paint bounds must fit before the band can be placed.",
+        }.get(details["reason"], "Reduce this slot's content or enlarge the corresponding Page margin.")
+        check = details.get("paint_check", {}).get("reason")
+        detail = f" ({check})" if check else ""
+        raise PageBandError(
+            f"Page {details['page']} @{details['slot']} could not fit its authored content{detail}. {advice}",
+            details=details, sources=sources, path=(document.title, *sources[0].path) if sources else (document.title,),
+        ) from error
 
     @staticmethod
     def _check_layout(document: Document, plan: DocumentSource, trace):

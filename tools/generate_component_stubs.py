@@ -303,11 +303,12 @@ DataTable: _TableFactory
 '''
 
     document = HEADER + '''from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from os import PathLike
 from typing import Any, Literal, Protocol
-from ._style import AuthoringError, Length, Theme
+from ._style import AuthoringError, Length, Theme, Style, _StyleInput
 from ._tree import _Child
+from ._page import PageBand
 
 class _SelectorStyles(Protocol):
     def to_css(self) -> str: ...
@@ -324,6 +325,8 @@ class Page:
     size: str | tuple[Length, Length] = ...
     margin: Length | tuple[Length, ...] = ...
     landscape: bool = ...
+    header: PageBand | None = field(default=..., kw_only=True)
+    footer: PageBand | None = field(default=..., kw_only=True)
     def to_css(self) -> str: ...
 
 @dataclass(frozen=True)
@@ -351,6 +354,14 @@ class DocumentSource:
     sources: tuple[Source, ...]
     @property
     def a11y_report(self) -> dict[str, Any] | None: ...
+
+class PageBandError(LayoutError):
+    slot: str
+    record: int | None
+    def __init__(self, message: str, *, details: dict[str, Any], sources: Iterable[Source] = ..., path: Iterable[str] = ...) -> None: ...
+    @property
+    def details(self) -> dict[str, Any]: ...
+    def at(self, name: str) -> PageBandError: ...
 
 @dataclass(frozen=True, init=False)
 class Document:
@@ -391,7 +402,32 @@ from ._tree import Node
 
 def to_legacy(node: Node, *, theme: Theme | None = ...) -> tuple[Element | str, ...]: ...
 '''
-    return {"_style.pyi": style, "_tree.pyi": tree, "_table.pyi": table,
+    page = HEADER + '''from dataclasses import dataclass
+from ._style import Style, _StyleInput
+from ._tree import _Child
+
+@dataclass(frozen=True, init=False)
+class PageNumbers:
+    total: bool
+    prefix: str
+    separator: str
+    suffix: str
+    style: Style
+    class_name: str | None
+    def __init__(self, *, total: bool = ..., prefix: str = ..., separator: str = ..., suffix: str = ...,
+                 style: _StyleInput = ..., class_name: str | None = ...) -> None: ...
+
+@dataclass(frozen=True, init=False)
+class PageBand:
+    left: tuple[_Child, ...] | PageNumbers
+    center: tuple[_Child, ...] | PageNumbers
+    right: tuple[_Child, ...] | PageNumbers
+    first_page: bool
+    blank_pages: bool
+    def __init__(self, *, left: _Child | PageNumbers = ..., center: _Child | PageNumbers = ...,
+                 right: _Child | PageNumbers = ..., first_page: bool = ..., blank_pages: bool = ...) -> None: ...
+'''
+    return {"_style.pyi": style, "_tree.pyi": tree, "_table.pyi": table, "_page.pyi": page,
             "_document.pyi": document, "_bridge.pyi": bridge, "bootstrap/__init__.pyi": bootstrap_stub()}
 
 

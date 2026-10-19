@@ -4232,6 +4232,8 @@ pub(crate) struct CssPageMarginBox {
     pub font_size: Option<Pt>,
     pub font_weight: Option<u16>,
     pub line_height: Option<CssPageLineHeight>,
+    /// Reserved component authoring opt-in; identifies the authored slot.
+    pub managed_source: Option<String>,
 }
 
 impl CssPageMarginBox {
@@ -4252,6 +4254,10 @@ impl CssPageMarginBox {
             font_size: declarations.font_size.or(self.font_size),
             font_weight: declarations.font_weight.or(self.font_weight),
             line_height: declarations.line_height.or(self.line_height),
+            managed_source: declarations
+                .managed_source
+                .clone()
+                .or_else(|| self.managed_source.clone()),
         }
     }
 }
@@ -8169,6 +8175,14 @@ fn apply_native_page_margin_box_declarations(
     {
         "content" => {
             parsed.content = parse_page_margin_box_content(&declaration.value);
+        }
+        "-fb-page-band" => {
+            if let Some(values) = crate::css_native::parse_string_or_ident_list(&declaration.value)
+            {
+                if values.len() == 1 && !values[0].is_empty() {
+                    parsed.managed_source = values.into_iter().next();
+                }
+            }
         }
         "background" | "background-color" => {
             parsed.background = parse_color_string(&declaration.value);

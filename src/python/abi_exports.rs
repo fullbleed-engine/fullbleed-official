@@ -291,6 +291,13 @@ fn dispatch_free_function(
                 .map_err(|error| PyValueError::new_err(error.to_string()))?
                 .into_py_value()
         }
+        "_stylesheet_page_margins" => {
+            expect_arity(payload, 1)?;
+            let css: String = argument(payload, 0)?;
+            crate::css_native::stylesheet_page_margins(&css)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?
+                .into_py_value()
+        }
         "finalize_stamp_pdf" => {
             expect_arity(payload, 6)?;
             let template: String = argument(payload, 0)?;

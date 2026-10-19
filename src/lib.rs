@@ -9886,6 +9886,7 @@ fn with_page_margin_boxes(
                 .width
                 .and_then(style::CssPageMarginSize::definite),
             margin_box.background,
+            margin_box.managed_source.clone(),
         ));
     }
     if definitions.is_empty() {
@@ -9893,7 +9894,9 @@ fn with_page_margin_boxes(
     }
     template.append_on_page_finalize(move |canvas, context| {
         let mut boxes = Vec::with_capacity(definitions.len());
-        for (kind, rect, align, parts, text_style, width, background) in &definitions {
+        for (kind, rect, align, parts, text_style, width, background, managed_source) in
+            &definitions
+        {
             let empty_container = rect.width <= Pt::ZERO || rect.height <= Pt::ZERO;
             let mut rect = *rect;
             if let Some(width) = width {
@@ -9938,13 +9941,57 @@ fn with_page_margin_boxes(
                     }
                 }
             }
-            let paragraph = (!text.is_empty()).then(|| {
-                Paragraph::new(text)
-                    .with_style(text_style.clone())
-                    .with_align(*align)
-                    .with_font_registry(Some(font_registry.clone()))
-            });
-            if empty_container && !running.iter().any(|element| element.layout.is_some()) {
+            let mut paragraph = None;
+            if let Some(source) = managed_source {
+                let child: Box<dyn Flowable> =
+                    if let Some(style) = context.margin_authored_style(source) {
+                        html::finalized_margin_text(text, &style, font_registry.clone())
+                    } else {
+                        Box::new(
+                            Paragraph::new(text)
+                                .with_style(text_style.clone())
+                                .with_align(*align)
+                                .with_font_registry(Some(font_registry.clone())),
+                        )
+                    };
+                let layout = context.managed_margin_layout(child, source.clone());
+                if !running.is_empty() {
+                    canvas.meta(
+                        running_layout::FIT_ERROR_META,
+                        layout.fit_error(
+                            context.page_number,
+                            kind.css_name(),
+                            rect,
+                            None,
+                            "managed_generated_content_with_running_element",
+                        ),
+                    );
+                    return;
+                }
+                running.push(ResolvedMarginRunning {
+                    value: doc_context::RunningElementValue {
+                        resource_id: format!(
+                            "fb-margin-{}-{}",
+                            kind.css_name(),
+                            context.page_number
+                        ),
+                        width: Pt::ZERO,
+                        height: Pt::ZERO,
+                    },
+                    layout: Some(Arc::new(layout)),
+                });
+            } else if !text.is_empty() {
+                paragraph = Some(
+                    Paragraph::new(text)
+                        .with_style(text_style.clone())
+                        .with_align(*align)
+                        .with_font_registry(Some(font_registry.clone())),
+                );
+            }
+            if empty_container
+                && managed_source.is_none()
+                && !running.iter().any(|element| element.layout.is_some())
+            {
                 continue;
             }
             boxes.push(ResolvedPageMarginBox {

@@ -10,7 +10,8 @@ from ._tree import (
     Box, Card, Emphasis, Flow, Footer, Fragment, Grid, Header, Heading, Image,
     ComponentFactory, Node, PageBreak, Paragraph, Row, Stack, Strong, Text, Section, component, styled,
 )
-from ._document import DocumentSource, Document, LayoutError, Page, Renderer, Source, to_html
+from ._document import DocumentSource, Document, LayoutError, PageBandError, Page, Renderer, Source, to_html
+from ._page import PageBand, PageNumbers
 from ._table import Column, DataTable
 from ._bridge import to_legacy
 
@@ -19,4 +20,5 @@ __all__ = [
     "Box", "Card", "Emphasis", "Flow", "Footer", "Fragment", "Grid", "Header", "Heading", "Image",
     "ComponentFactory", "Node", "PageBreak", "Paragraph", "Row", "Stack", "Strong", "Text", "Section", "component", "styled",
     "DocumentSource", "Document", "LayoutError", "Page", "Renderer", "Source", "Column", "DataTable", "to_legacy", "to_html",
+    "PageBand", "PageNumbers", "PageBandError",
 ]

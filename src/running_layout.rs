@@ -41,6 +41,7 @@ pub(crate) struct RunningLayout {
     pub source_ids: Vec<String>,
     managed: bool,
     paint: Arc<PaintContext>,
+    authored_style: Option<crate::style::ComputedStyle>,
 }
 
 struct PaintContext {
@@ -49,7 +50,7 @@ struct PaintContext {
 }
 
 impl RunningLayout {
-    fn fit_error(
+    pub(crate) fn fit_error(
         &self,
         page: usize,
         slot: &str,
@@ -242,11 +243,31 @@ impl RunningLayouts {
         }
     }
 
+    pub(crate) fn managed(&self, child: Box<dyn Flowable>, source: String) -> RunningLayout {
+        RunningLayout {
+            child,
+            source_ids: vec![source],
+            managed: true,
+            paint: self.paint.clone(),
+            authored_style: None,
+        }
+    }
+
+    pub(crate) fn authored_style(&self, source: &str) -> Option<crate::style::ComputedStyle> {
+        self.layouts
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .iter()
+            .find(|layout| layout.source_ids.first().is_some_and(|id| id == source))
+            .and_then(|layout| layout.authored_style.clone())
+    }
+
     pub fn register(
         &self,
         child: Box<dyn Flowable>,
         source_id: Option<String>,
         managed: bool,
+        authored_style: crate::style::ComputedStyle,
     ) -> String {
         let mut seen = BTreeSet::new();
         let source_ids = source_id
@@ -261,6 +282,7 @@ impl RunningLayouts {
             source_ids,
             managed,
             paint: self.paint.clone(),
+            authored_style: Some(authored_style),
         }));
         key
     }

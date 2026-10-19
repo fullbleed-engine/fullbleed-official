@@ -912,6 +912,11 @@ def _stylesheet_page_geometry(css):
     return _call(None, "_stylesheet_page_geometry", css)
 
 
+def _stylesheet_page_margins(css):
+    """Inspect authored page-margin rules with the native CSS parser."""
+    return _call(None, "_stylesheet_page_margins", css)
+
+
 def finalize_stamp_pdf(template, overlay, out, page_map=None, dx=0.0, dy=0.0):
     return _call(None, "finalize_stamp_pdf", template, overlay, out, page_map, dx, dy)
 

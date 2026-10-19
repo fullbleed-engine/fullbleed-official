@@ -1,7 +1,12 @@
 # Repeated page furniture for component authors
 
-Design in progress, 2026-10-18. This describes the next component contract;
-the proposed constructors below are **not implemented or released**.
+Design investigation started 2026-10-18. The constructors are now implemented
+on the source branch and have passed [local qualification](component-page-bands-validation.md);
+they are **not released**.
+The [current authoring contract](component-page-bands.md) and
+[executable example](../examples/component_page_bands/README.md) describe that
+implementation. The prerequisite sections below retain the investigation and
+the evidence for each earlier stage.
 
 ## The authoring task
 
@@ -17,7 +22,7 @@ ordinary immutable component, literal text, or a page-number value. For example,
 the proposed shape is:
 
 ```python
-# Proposed API: this is not an executable example.
+# API shape; see the linked example for imports, fonts and complete setup.
 Document(
     ReportBody(data),
     page=Page(

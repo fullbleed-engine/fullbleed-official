@@ -281,6 +281,17 @@ jobs:
       - name: Verify managed page-margin paint before implicit Form clipping
         run: python -I tools/smoke_page_margin_paint.py --out target/page-margin-paint
 
+      - name: Verify component page bands, HTML exports and record page values
+        run: python -I tools/smoke_component_page_bands.py --out target/component-page-bands
+
+      - name: Retain component page-band PDFs, source and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: component-page-bands-${{ runner.os }}
+          path: target/component-page-bands/
+          if-no-files-found: error
+
       - name: Retain managed paint diagnostics and independent PDF previews
         if: always()
         uses: actions/upload-artifact@v7

@@ -97,4 +97,19 @@ impl DocContext {
     ) -> Option<std::sync::Arc<crate::running_layout::RunningLayout>> {
         self.running_layouts.get(key)
     }
+
+    pub(crate) fn managed_margin_layout(
+        &self,
+        child: Box<dyn crate::flowable::Flowable>,
+        source: String,
+    ) -> crate::running_layout::RunningLayout {
+        self.running_layouts.managed(child, source)
+    }
+
+    pub(crate) fn margin_authored_style(
+        &self,
+        source: &str,
+    ) -> Option<crate::style::ComputedStyle> {
+        self.running_layouts.authored_style(source)
+    }
 }

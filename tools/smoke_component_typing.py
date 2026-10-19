@@ -18,6 +18,7 @@ import fullbleed.ui.experimental as components
 VALID = '''from dataclasses import dataclass
 from fullbleed.ui.experimental import (
     Column, DataTable, Document, DocumentSource, Flow, Grid, Heading, Image, LayoutError, Node, Page, Paragraph,
+    PageBand, PageBandError, PageNumbers,
     Renderer, Row, Source, Stack, Style, Theme, component, css, mm, pt, style, styled, to_legacy, token,
 )
 
@@ -91,6 +92,12 @@ selector_css: str = selector_document.styles
 typed_selector_document = Document(Paragraph("Paid", class_name="notice"),
                                    styles={".notice": style(color=token("accent"))},
                                    theme=Theme({"accent": "blue"}))
+numbers = PageNumbers(total=True, prefix="", separator=" / ", class_name="folio", style=style(font_size=pt(8)))
+band = PageBand(left=[Paragraph("Brand")], right=numbers, first_page=False, blank_pages=True)
+band_page = Page("A4", mm(20), False, header=band, footer=PageBand(center="Report"))
+band_html: str = Document(Heading("Report"), page=band_page).to_html(include_styles=False)
+def band_problem(error: PageBandError) -> tuple[str, int | None]:
+    return error.at("Batch").slot, error.record
 
 def prepare_outputs(document: Document, renderer: Renderer) -> tuple[bytes, list[bytes]]:
     prepared = document.prepare(renderer, a11y_mode="raise")
@@ -121,6 +128,16 @@ kit_source: DocumentSource = Document(kit_field).compile(target="pdf")
 '''
 
 INVALID_CASES = [
+    ("page_band_type", 'Page(header=Paragraph("Header"))'),
+    ("page_band_keyword_only", 'Page("A4", mm(20), False, band)'),
+    ("page_band_child_type", 'PageBand(left=object())'),
+    ("page_band_policy_type", 'PageBand(first_page="no")'),
+    ("page_numbers_flag_type", 'PageNumbers(total="yes")'),
+    ("page_numbers_label_type", 'PageNumbers(prefix=1)'),
+    ("page_numbers_slot_only", 'Paragraph(numbers)'),
+    ("page_numbers_readonly", 'numbers.total = False'),
+    ("page_band_readonly", 'band.left = ()'),
+    ("page_header_readonly", 'band_page.header = None'),
     ("forward_part_name_type", 'valid.forward_parts(3)'),
     ("forward_part_alias_type", 'valid.forward_parts(heading=3)'),
     ("optional_part_name_type", 'component(optional_parts=(3,))'),
@@ -201,7 +218,7 @@ def main():
     source = Path(__file__).resolve().parents[1] / "python"
     assert source not in Path(components.__file__).parents, "Use an installed candidate wheel with python -I"
     assert Path(components.__file__).with_name("py.typed").is_file(), "The wheel must carry its typing marker"
-    for name in ("_style", "_tree", "_table", "_document", "_bridge"):
+    for name in ("_style", "_tree", "_table", "_document", "_page", "_bridge"):
         assert Path(components.__file__).with_name(name + ".pyi").is_file(), name
     environment = dict(os.environ)
     environment.pop("MYPYPATH", None)

@@ -163,3 +163,103 @@ fn managed_paint_rechecks_each_record_after_empty_binding() {
         before
     );
 }
+
+const PAGE_NUMBERS: &str = r#"@page {size:320pt 240pt;margin:30pt 20pt 50pt;
+@bottom-right {content:"Page " counter(page) " of " counter(pages);width:150pt;-fb-page-band:"numbers"}}
+* {margin:0;box-sizing:border-box} html,body {font:10pt/12pt "Fullbleed Preview Mono"}
+section {break-after:page}"#;
+
+fn numbered_html() -> &'static str {
+    "<html><body><section>First</section><section>Second</section><section>Third</section></body></html>"
+}
+
+#[test]
+fn managed_generated_margin_uses_final_page_values() {
+    use crate::canvas::Command;
+    let document = engine()
+        .render_to_document(numbered_html(), PAGE_NUMBERS)
+        .unwrap();
+    assert_eq!(document.pages.len(), 3);
+    for (page, content) in document.pages.iter().enumerate() {
+        let text: String = content
+            .commands
+            .iter()
+            .filter_map(|command| {
+                if let Command::DefineForm { commands, .. } = command {
+                    Some(
+                        commands
+                            .iter()
+                            .filter_map(|command| match command {
+                                Command::DrawString { text, .. } => Some(text.as_str()),
+                                _ => None,
+                            })
+                            .collect::<String>(),
+                    )
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(text.contains(&format!("Page {} of 3", page + 1)), "{text}");
+    }
+}
+
+#[test]
+fn managed_generated_margin_rejects_overflow_with_slot_source() {
+    let css =
+        format!("{PAGE_NUMBERS} @page {{@bottom-right {{font-size:80pt;line-height:100pt}}}}");
+    let error = engine()
+        .render_to_buffer(numbered_html(), &css)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("layout.page_margin_size")
+            && error.contains("\"source_ids\":[\"numbers\"]")
+            && error.contains("\"slot\":\"bottom-right\""),
+        "{error}"
+    );
+    let css = format!("{PAGE_NUMBERS} @page {{@bottom-right {{width:400pt}}}}");
+    let error = engine()
+        .render_to_buffer(numbered_html(), &css)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("slot_outside_reserved_margin"), "{error}");
+}
+
+#[test]
+fn managed_generated_margin_suppression_preserves_page_count() {
+    use crate::canvas::Command;
+    let css = format!("{PAGE_NUMBERS} @page:first {{@bottom-right {{content:none}}}}");
+    let document = engine().render_to_document(numbered_html(), &css).unwrap();
+    assert_eq!(document.pages.len(), 3);
+    assert!(
+        !document.pages[0]
+            .commands
+            .iter()
+            .any(|command| matches!(command, Command::DefineForm { .. }))
+    );
+    assert!(
+        document.pages[1]
+            .commands
+            .iter()
+            .any(|command| matches!(command, Command::DefineForm { .. }))
+    );
+}
+
+#[test]
+fn managed_generated_margin_preserves_display_none() {
+    use crate::canvas::Command;
+    let source = numbered_html().replace(
+        "<body>",
+        "<body><div class='folio' data-fb-id='numbers' data-fb-running-layout='band'>Page 0</div>",
+    );
+    let css = format!("{PAGE_NUMBERS} .folio {{position:running(folio);display:none}}");
+    let document = engine().render_to_document(&source, &css).unwrap();
+    assert_eq!(document.pages.len(), 3);
+    assert!(document.pages.iter().all(|page| {
+        !page
+            .commands
+            .iter()
+            .any(|command| matches!(command, Command::DefineForm { .. }))
+    }));
+}
