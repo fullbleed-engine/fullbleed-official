@@ -506,6 +506,7 @@ impl CompiledFlowRecordProgram {
         let mut patches = Vec::new();
         let mut patched_values = vec![false; values.len()];
         let mut layout_dependent_values = vec![false; values.len()];
+        let mut running_content_requires_reflow = false;
         for (page_index, page) in document.pages.iter().enumerate() {
             let mut font_name = Arc::<str>::from("Helvetica");
             let mut font_size = Pt::from_f32(12.0);
@@ -541,6 +542,11 @@ impl CompiledFlowRecordProgram {
                         if key == flowable::META_COMPILED_TEXT_CONSTRAINT_KEY =>
                     {
                         pending_constraint = CompiledTextConstraint::parse(value);
+                    }
+                    Command::Meta { key, .. }
+                        if key.starts_with(canvas::META_RUNNING_ELEMENT_PREFIX) =>
+                    {
+                        running_content_requires_reflow = true;
                     }
                     Command::DrawString { x, text, .. } => {
                         let constraint = pending_constraint.take();
@@ -662,6 +668,12 @@ impl CompiledFlowRecordProgram {
             // A value may appear in more than one rendering or layout context.
             // Every painted occurrence must support rebinding before reuse.
             *patched &= !layout_dependent;
+        }
+        if running_content_requires_reflow {
+            // Body text patches do not establish the values inside captured
+            // running Forms. Reuse only identical bindings until those
+            // dependencies can be proven independently.
+            patched_values.fill(false);
         }
         let mut page_patch_counts = vec![0usize; document.pages.len()];
         for patch in &patches {
@@ -9859,6 +9871,10 @@ fn with_page_margin_boxes(
                 }
             }
             canvas.save_state();
+            // Page furniture is repeated navigation, not document reading-order
+            // content. Include generated text, running elements and decoration
+            // in the same balanced artifact scope after pagination is finalized.
+            canvas.begin_artifact(None);
             if let Some((color, alpha)) = background {
                 if alpha > 0.0 {
                     canvas.save_state();
@@ -9934,6 +9950,7 @@ fn with_page_margin_boxes(
                     content_rect.height,
                 );
             }
+            canvas.end_marked_content();
             canvas.restore_state();
         });
     }
@@ -12058,6 +12075,94 @@ mod tests {
         assert_eq!(document.pages.len(), 2);
         assert!(page_contains_text(&document.pages[0], "P1"));
         assert!(page_contains_text(&document.pages[1], "P2"));
+    }
+
+    #[test]
+    fn compiled_reflow_updates_a_binding_shared_with_running_header_text() {
+        let engine = FullBleed::builder().build().unwrap();
+        let html =
+            "<html><body><div class='header'>{{person}}</div><p>{{person}}</p></body></html>";
+        let css = "@page {size:300pt 220pt;margin:80pt 20pt 20pt;@top-left {content:element(head)}} body {margin:0;font:10pt Helvetica} p {margin:0} .header {position:running(head)}";
+        let compiled = engine.compile_document(html, css).unwrap();
+        let plan = compiled.compiled_reflow_plan().unwrap();
+        let mut document = plan.template.instantiate();
+        let mut glyphs = CompiledFlowWorkerGlyphs::new();
+        let names = ["Ada", "Beatrice", "Ada"].map(str::to_string);
+        for (row, name) in names.iter().enumerate() {
+            let record = plan
+                .render_compiled_flow_record(row, &mut document, &mut glyphs, &[&names])
+                .unwrap();
+            let headers = record
+                .program
+                .document
+                .pages
+                .iter()
+                .flat_map(|page| {
+                    page.commands.iter().filter_map(|command| match command {
+                        Command::DefineForm {
+                            resource_id,
+                            commands,
+                            ..
+                        } if resource_id.starts_with("css-running-") => Some(
+                            commands
+                                .iter()
+                                .filter_map(|command| match command {
+                                    Command::DrawString { text, .. } => Some(text.as_str()),
+                                    _ => None,
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" "),
+                        ),
+                        _ => None,
+                    })
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(headers, vec![name.clone()]);
+        }
+    }
+
+    #[test]
+    fn page_margin_text_is_an_artifact_without_hiding_body_content() {
+        let engine = FullBleed::builder()
+            .pdf_profile(PdfProfile::Tagged)
+            .build()
+            .expect("engine");
+        let document = engine
+            .render_to_document(
+                "<main><p>BODY1</p><p>BODY2</p></main>",
+                "@page { size: 180pt 160pt; margin: 24pt; \
+                   @top-left { content: 'HEADER'; background: #d8e8e0; } \
+                   @bottom-right { content: 'PAGE' counter(page) '/' counter(pages); } } \
+                 * { margin: 0; font-size: 10pt; } p + p { break-before: page; }",
+            )
+            .expect("render tagged page furniture");
+        assert_eq!(document.pages.len(), 2);
+        for (index, page) in document.pages.iter().enumerate() {
+            let mut scopes = Vec::new();
+            let mut real = String::new();
+            let mut artifacts = String::new();
+            for command in &page.commands {
+                match command {
+                    Command::BeginArtifact { .. } => scopes.push(true),
+                    Command::BeginOptionalContent { .. } => scopes.push(false),
+                    Command::EndMarkedContent => {
+                        assert!(scopes.pop().is_some(), "unbalanced artifact close");
+                    }
+                    Command::DrawString { text, .. } => {
+                        if scopes.contains(&true) {
+                            artifacts.push_str(text);
+                        } else {
+                            real.push_str(text);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            assert!(scopes.is_empty(), "unclosed artifact scope");
+            assert_eq!(real, format!("BODY{}", index + 1));
+            assert!(artifacts.contains("HEADER"));
+            assert!(artifacts.contains(&format!("PAGE{}/2", index + 1)));
+        }
     }
 
     #[test]
