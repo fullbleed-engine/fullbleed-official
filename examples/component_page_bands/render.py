@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Render the unpublished PageBand example; no dependencies beyond Fullbleed."""
+"""Render the PageBand example with Fullbleed 2.6.0a9 or later."""
 from __future__ import annotations
 
 import argparse

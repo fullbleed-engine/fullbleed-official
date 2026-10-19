@@ -1,10 +1,17 @@
 # Headers, footers and page numbers
 
-**Unreleased experimental API.** These constructors are implemented on
-`feat/component-authoring-prototype`; they are not in the published `2.6.0a8`
-wheel. Build and install this checkout to try them. Names and contracts may
-change before stabilization. The [qualification record](component-page-bands-validation.md)
-documents the installed-wheel, saved-PDF and browser checks.
+**Experimental API introduced in 2.6.0a9.** The earlier `2.6.0a8` wheel does
+not provide these constructors. Names and contracts may change before
+stabilization. Install the explicit prerelease, or build this checkout when
+working from an unpublished candidate:
+
+```console
+python -m pip install --pre "fullbleed==2.6.0a9"
+```
+
+The [initial API qualification](component-page-bands-validation.md) records the
+installed-wheel, saved-PDF and browser checks from implementation. The
+[alpha 9 runbook](release/2.6.0a9-runbook.md) defines the new-version release gates.
 
 Put reusable components in a `PageBand`, then attach it to `Page`. The engine
 repeats the content within the page's reserved margins and supplies finalized
