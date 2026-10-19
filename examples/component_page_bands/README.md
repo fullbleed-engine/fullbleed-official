@@ -1,10 +1,12 @@
 # Reusable page bands
 
-This **unreleased source example** requires the PageBand implementation on
-`feat/component-authoring-prototype`. The published `2.6.0a8` wheel does not
-provide these constructors. Build and install this checkout before running it.
+This example requires the experimental PageBand API in **Fullbleed 2.6.0a9**.
+The earlier `2.6.0a8` wheel does not provide these constructors. Install the
+explicit prerelease, or build this checkout when working from an unpublished
+candidate.
 
 ```console
+python -m pip install --pre "fullbleed==2.6.0a9"
 python examples/component_page_bands/render.py --out target/page-bands --pdf-profile pdfua2
 ```
 

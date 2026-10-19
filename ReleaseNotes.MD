@@ -1,3 +1,38 @@
+# Fullbleed Release Notes - 2.6.0a9
+
+This component alpha adds reusable page headers, footers and finalized page
+numbers to the installable Python API. Put ordinary components in a `PageBand`
+and attach it through `Page(header=..., footer=...)`. Their styles, resources,
+themes, named parts and authored `class_name` selectors travel with them.
+
+`PageNumbers` supports current and total pages, including numbering that resets
+for each compiled record. Bands have explicit first-page and blank-page policy.
+The existing three positional `Page` geometry arguments remain compatible.
+The Common Ground field-notes example shares styled brand components between
+its body and margins and renders three numbered pages.
+
+Native layout and conservative painted-bound checks reject managed band content
+that cannot be proved to fit before it can be clipped. Diagnostics retain the
+page, slot, record and authoring source. `Page` owns the margins; bands do not
+silently enlarge them. Text measurements require explicitly registered fonts.
+Conservative bounds can reject some decorations that would visually fit.
+
+Styled and unstyled HTML exports contain one semantic header, main and footer,
+with explicit `[page]` and `[pages]` placeholders. They do not paginate the browser.
+Bootstrap components and exports remain static. Existing authored showcases and
+the accessible guide are included in the release qualification.
+
+The API remains under `fullbleed.ui.experimental`. Streaming output is not atomic,
+and changed bindings reflow running content. Existing CSS comparator failures and
+disputed references remain visible. Fixture-specific PDF/UA checks do not
+establish conformance for arbitrary documents or human assistive-technology
+usability. Dedicated PDF/VT validation remains unconfigured.
+
+Python uses `2.6.0a9`; Cargo source uses `2.6.0-alpha.9`. The
+[alpha 9 runbook](docs/release/2.6.0a9-runbook.md) defines qualification and public
+verification. This entry describes a candidate until publication finishes.
+Ordinary `pip install fullbleed` continues to select the stable channel.
+
 # Fullbleed Release Notes - 2.6.0a8
 
 This component preview brings the published 2.5.34 running-header and page-furniture

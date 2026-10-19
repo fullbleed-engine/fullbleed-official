@@ -8,7 +8,7 @@
 
 Build invoices, reports, statements, and variable-data print jobs with a deterministic Rust engine. Use the native Rust API, the Python package, or the optional JavaScript and .NET integrations. The Python wheel includes the engine, fonts, and CLI with no required third-party Python packages or system PDF stack. The JavaScript package includes the WebAssembly engine and fonts for Node.js and browser workers; the .NET package includes native libraries for in-process rendering.
 
-[Try PDF components](https://docs.fullbleed.dev/assets/react-demo/) · [Documentation](https://docs.fullbleed.dev/) · [Examples](https://docs.fullbleed.dev/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [crates.io](https://crates.io/crates/fullbleed) · [npm](https://www.npmjs.com/package/fullbleed) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](LICENSE)
+[Try PDF components](https://docs.fullbleed.dev/assets/react-demo/) · [Documentation](https://docs.fullbleed.dev/) · [Examples](https://docs.fullbleed.dev/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [crates.io](https://crates.io/crates/fullbleed) · [npm](https://www.npmjs.com/package/fullbleed) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/LICENSE)
 
 <p>
   <a href="https://docs.fullbleed.dev/assets/showcase/invoice.pdf"><img src="https://docs.fullbleed.dev/assets/showcase/invoice-1.png" width="48%" alt="Northstar Studio invoice rendered by Fullbleed, with serif typography and forest-green tables"></a>
@@ -47,8 +47,8 @@ Path("invoice.pdf").write_bytes(Invoice("Maple & Finch").render_pdf(fullbleed.Pd
 
 This complete workflow is available in 2.5.25. Text is escaped and components
 compile to the same HTML/CSS print engine. Follow the
-[component authoring guide](docs/component-authoring.md) or run the
-[designed component invoice](examples/components) with explicit fonts, reusable
+[component authoring guide](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/component-authoring.md) or run the
+[designed component invoice](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a9/examples/components) with explicit fonts, reusable
 rows, paid/unpaid states and PNG previews.
 
 The [opt-in Python component alpha](https://docs.fullbleed.dev/guides/bootstrap-components-preview/)
@@ -65,16 +65,16 @@ includes the complete component and style source for customization.
 
 ## Try the Python component alpha
 
-The published **2.6.0a8 prerelease** includes the stable 2.5.34
-running-header and tagged page-furniture corrections, plus the preview's
-page-margin sizing and internal running-content layout improvements.
-It offers components that carry their appearance, a static
+The **2.6.0a9 prerelease** adds reusable headers and footers with `PageBand`,
+and finalized page values with `PageNumbers`. Use ordinary components in the
+reserved page margins, including their styles and `class_name` selectors.
+It also offers components that carry their appearance, a static
 Bootstrap 5.0.0 kit, and HTML export with or without styles. This API lives under
 `fullbleed.ui.experimental`; names and behavior may change. Install the alpha
 explicitly in a virtual environment:
 
 ```console
-python -m pip install --pre "fullbleed==2.6.0a8"
+python -m pip install --pre "fullbleed==2.6.0a9"
 ```
 
 Save this as `order.py` and run `python order.py`:
@@ -105,16 +105,22 @@ stylesheet. `.with_style(...)` customizes a root, and `.with_parts(...)` customi
 advertised internal elements. All Bootstrap components are static, including
 HTML export; no Bootstrap JavaScript is included.
 
-Continue with the [Bootstrap and styling guide](docs/component-bootstrap.md),
-the [reusable component guide](examples/component_recipes/README.md), or the
-[report and catalog](examples/component_bootstrap). The
-[alpha runbook](docs/release/2.6.0a8-runbook.md) records the release gates and
+Continue with the [Bootstrap and styling guide](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/component-bootstrap.md),
+the [reusable component guide](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/examples/component_recipes/README.md), or the
+[report and catalog](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a9/examples/component_bootstrap). The
+[alpha runbook](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/release/2.6.0a9-runbook.md) records the release gates and
 limits. For an unpublished checkout, build a wheel using
 `python build_backend/fullbleed_build_backend.py wheel --out dist` and install
 the returned path. Ordinary `pip install fullbleed` selects the stable channel.
 
-This source checkout also implements reusable [page bands and page numbers](docs/component-page-bands.md).
-Those constructors are **unreleased** and are not part of the published a8 wheel.
+Attach [page bands and page numbers](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/component-page-bands.md) through
+`Page(header=PageBand(...), footer=PageBand(...))`. The
+[Common Ground field-notes example](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/examples/component_page_bands/README.md)
+uses shared brand components, styled page numbers and a table across three pages.
+The API supports per-record numbering, first-page suppression and blank-page
+policy. Fit diagnostics identify content that cannot be proved to stay within
+its reserved margin. HTML exports use one header and footer with explicit page
+placeholders. These constructors require a9; the earlier a8 wheel omits them.
 
 ## Choose your language
 
@@ -161,7 +167,7 @@ pdf = fullbleed.PdfEngine().render_pdf(html, css)
 Path("invoice.pdf").write_bytes(pdf)
 ```
 
-Open `invoice.pdf`. The [quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) adds fonts, previews, and a complete project. The runnable source is in [`examples/quickstart/hello.py`](examples/quickstart/hello.py).
+Open `invoice.pdf`. The [quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) adds fonts, previews, and a complete project. The runnable source is in [`examples/quickstart/hello.py`](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/examples/quickstart/hello.py).
 
 ### Node.js
 
@@ -215,26 +221,26 @@ Install [`FullBleed.DotNet`](https://www.nuget.org/packages/FullBleed.DotNet/0.2
 
 | You want to build | Start here |
 | --- | --- |
-| Distinctive invoices, reports, notices, and statements | [Designed showcase with fonts and source](examples/design_showcase) |
+| Distinctive invoices, reports, notices, and statements | [Designed showcase with fonts and source](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a9/examples/design_showcase) |
 | A native Rust application | [Rust quickstart and runnable examples](https://docs.fullbleed.dev/getting-started/rust/) |
 | A Node.js or TypeScript application | [Node quickstart and designed invoice project](https://docs.fullbleed.dev/getting-started/node/) |
 | PDFs generated in your web application's browser | [Browser worker SDK, editable demo, and complete project](https://docs.fullbleed.dev/guides/browser-pdf/) |
 | A C# or .NET application | [NuGet quickstart and designed invoice](https://docs.fullbleed.dev/getting-started/dotnet/) |
-| An invoice from JSON | [Complete, checked example](examples/agent_workflows) |
-| Automatic rebuilds while editing HTML/CSS (2.5.0+) | [Watch-mode invoice example](examples/render_watch) |
-| Catch PDF changes in pull requests | [Standalone project with a reviewed baseline and CI workflow](examples/pdf_regression) |
-| A PDF download in FastAPI, Flask, or Django | [Runnable web app examples](examples/web_frameworks) |
+| An invoice from JSON | [Complete, checked example](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a9/examples/agent_workflows) |
+| Automatic rebuilds while editing HTML/CSS (2.5.0+) | [Watch-mode invoice example](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a9/examples/render_watch) |
+| Catch PDF changes in pull requests | [Standalone project with a reviewed baseline and CI workflow](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a9/examples/pdf_regression) |
+| A PDF download in FastAPI, Flask, or Django | [Runnable web app examples](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a9/examples/web_frameworks) |
 | Queued PDF invoices in Laravel | [Blade templates, retries, and private downloads (PHP and Python)](https://docs.fullbleed.dev/guides/laravel-pdf/) |
 | A PDF response from Rust and Axum | [Invoice endpoint with request limits and editable templates](https://docs.fullbleed.dev/guides/axum-pdf/) |
 | PDF generation in AWS Lambda | [Python container starter with local runtime checks](https://docs.fullbleed.dev/guides/aws-lambda-pdf/) |
 | PDF attachments in an n8n workflow | [Webhook-to-PDF workflow and local Docker kit](https://docs.fullbleed.dev/guides/n8n-pdf/) |
-| A styled PDF report from a pandas DataFrame | [Paginated report with CSV data and verification](examples/pandas_report) |
-| A styled invoice from CSV | [Acme invoice project](examples/acme_invoice) |
+| A styled PDF report from a pandas DataFrame | [Paginated report with CSV data and verification](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a9/examples/pandas_report) |
+| A styled invoice from CSV | [Acme invoice project](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a9/examples/acme_invoice) |
 | Simplified Chinese and English in one PDF | [Bilingual invoice with explicit fonts and glyph checks](https://docs.fullbleed.dev/guides/chinese-pdf/) |
-| A report that flows across pages | [Business report example](examples/agent_workflows) |
-| Tagged output with accessibility checks | [Accessibility workflow](docs/ui-accessibility.md) |
-| Many documents from one template | [Fixed and reflowing variable-data examples](examples/agent_workflows) |
-| Print profiles and PDF/VT record hierarchies | [Print output and verification scope](docs/pdf-vt.md) |
+| A report that flows across pages | [Business report example](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a9/examples/agent_workflows) |
+| Tagged output with accessibility checks | [Accessibility workflow](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/ui-accessibility.md) |
+| Many documents from one template | [Fixed and reflowing variable-data examples](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a9/examples/agent_workflows) |
+| Print profiles and PDF/VT record hierarchies | [Print output and verification scope](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/pdf-vt.md) |
 | A coding-agent or MCP integration | [Agent setup](#agent-discovery-and-integrations) |
 
 [See generated PDFs and their source →](https://docs.fullbleed.dev/examples/)
@@ -244,7 +250,7 @@ Install [`FullBleed.DotNet`](https://www.nuget.org/packages/FullBleed.DotNet/0.2
 - **Simple deployment:** prebuilt wheels for 15 platform targets, with no browser or system-font installation needed for the bundled workflow.
 - **Repeatable documents:** explicit assets and metadata, deterministic rendering, and SHA-256 reproducibility checks.
 - **Document-focused layout:** pagination, headers and footers, tables, template overlays, and per-page data.
-- **Volume workflows:** compile a template once, then bind fixed or reflowing records. [Measured workloads and limits](docs/performance-pass-2026-08-04.md).
+- **Volume workflows:** compile a template once, then bind fixed or reflowing records. [Measured workloads and limits](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/performance-pass-2026-08-04.md).
 - **Inspectable output:** PDF inspection, PNG previews, structured diagnostics, and profile verification tooling.
 
 Native previews of unembedded Standard 14 fonts use compact bundled outline
@@ -252,15 +258,15 @@ substitutes, so basic Helvetica, Times, Courier, Symbol, and Dingbats text rende
 without system fonts. Registered and embedded font programs take precedence.
 The font-resolution trace identifies the `bundled_substitute` outcome; runtime
 discovery reports `bundled_standard_font_previews`. See the
-[font sources, licenses, and coverage limits](src/preview_fonts/README.md).
+[font sources, licenses, and coverage limits](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/src/preview_fonts/README.md).
 
-Fullbleed uses static HTML/CSS as a document layout language. Check the [CSS coverage and remaining gaps](docs/css-coverage.md) for your templates. Use a browser when JavaScript or live website behavior is part of the required result.
+Fullbleed uses static HTML/CSS as a document layout language. Check the [CSS coverage and remaining gaps](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/css-coverage.md) for your templates. Use a browser when JavaScript or live website behavior is part of the required result.
 
-Profile selection alone does not establish standards conformance. The [release evidence](docs/release/2.4.0-validation-report.md) records the checks performed and their limits.
+Profile selection alone does not establish standards conformance. The [release evidence](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/release/2.4.0-validation-report.md) records the checks performed and their limits.
 
 ## Get help and contribute
 
-Ask usage questions and share documents in [Discussions](https://github.com/fullbleed-engine/fullbleed-official/discussions). For a reproducible bug or feature proposal, [open an issue](https://github.com/fullbleed-engine/fullbleed-official/issues/new/choose). The [contributor guide](CONTRIBUTING.md) covers local setup, tests, and where to make changes.
+Ask usage questions and share documents in [Discussions](https://github.com/fullbleed-engine/fullbleed-official/discussions). For a reproducible bug or feature proposal, [open an issue](https://github.com/fullbleed-engine/fullbleed-official/issues/new/choose). The [contributor guide](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/CONTRIBUTING.md) covers local setup, tests, and where to make changes.
 
 If Fullbleed is useful to you, [support its maintenance](https://docs.fullbleed.dev/support/) through sponsorship, documentation, or a useful example. Sponsorship is optional; Fullbleed remains MIT licensed and free to use.
 
@@ -274,9 +280,9 @@ fullbleed agent-manifest --json
 fullbleed agent-contract --format json
 ```
 
-The committed [`fullbleed-agent-contract.json`](fullbleed-agent-contract.json), [`cli_schema.md`](cli_schema.md), and [`llms.txt`](llms.txt) are generated from the built wheel. CI rejects version, command, schema, profile, or capability drift. Runtime introspection remains authoritative.
+The committed [`fullbleed-agent-contract.json`](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/fullbleed-agent-contract.json), [`cli_schema.md`](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/cli_schema.md), and [`llms.txt`](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/llms.txt) are generated from the built wheel. CI rejects version, command, schema, profile, or capability drift. Runtime introspection remains authoritative.
 
-The first-party, versionless [`skills/fullbleed/SKILL.md`](skills/fullbleed/SKILL.md) teaches tool selection and the render/preview/diagnose/verify loop without duplicating the manual. It is bundled in the wheel and can be exported into any absent or empty agent-skill directory:
+The first-party, versionless [`skills/fullbleed/SKILL.md`](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/skills/fullbleed/SKILL.md) teaches tool selection and the render/preview/diagnose/verify loop without duplicating the manual. It is bundled in the wheel and can be exported into any absent or empty agent-skill directory:
 
 ```bash
 fullbleed agent skill-path --json
@@ -296,7 +302,7 @@ The stdio server confines document paths to the selected workspace and delegates
 
 Use Fullbleed when the requested artifact is a deterministic print document built from structured content. Use a browser when the requested artifact is a screenshot or interactive state of an arbitrary live website. Use a general PDF editor when existing page content itself must be rewritten.
 
-Cold-agent testing is available through `fullbleed agent-acceptance`; compact copyable workflows live in [`examples/agent_workflows`](examples/agent_workflows), and the approach-neutral benchmark scaffold lives in [`agentdocbench`](agentdocbench).
+Cold-agent testing is available through `fullbleed agent-acceptance`; compact copyable workflows live in [`examples/agent_workflows`](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a9/examples/agent_workflows), and the approach-neutral benchmark scaffold lives in [`agentdocbench`](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a9/agentdocbench).
 
 
 This README is the canonical usage guide for:
@@ -378,8 +384,8 @@ describe the Base-14 fast lane; they are not claims for registered-font shaping.
 The fixed-copy result remains scoped to identical content; the variable-data result is scoped to
 paint-only text whose geometry does not reflow. Neither is a claim that arbitrary new HTML or
 size-changing records render 200x faster. See
-[`docs/performance-pass-2026-08-04.md`](docs/performance-pass-2026-08-04.md) for measurements and
-[`docs/performance-architecture.md`](docs/performance-architecture.md) for the packed vector IR,
+[`docs/performance-pass-2026-08-04.md`](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/performance-pass-2026-08-04.md) for measurements and
+[`docs/performance-architecture.md`](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/performance-architecture.md) for the packed vector IR,
 typed-binding, virtual-linker, and shader roadmap.
 
 Fullbleed 2.2.5 hardens the third compiler lane introduced in 2.2.4 for
@@ -413,7 +419,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.6.0a8-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.6.0a9-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:
@@ -443,7 +449,7 @@ Platform artifact policy:
 
 Separate Windows and Linux jobs check Python 3.15.0rc3 with the standard GIL,
 including the Python suite and byte-for-byte PDF/preview comparisons against
-Python 3.10. See the [preview coverage and its limits](docs/python-compatibility.md).
+Python 3.10. See the [preview coverage and its limits](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/python-compatibility.md).
 
 Verify command surface:
 
@@ -812,7 +818,7 @@ Render/verify/plan key flags:
   Output intent metadata (`--output-intent-identifier|--output-intent-info|--output-intent-components`) requires `--output-intent-icc`.
   `pdfx4` and `pdfvt1` force PDF 1.6 and require a title and explicit write date
   (`--timestamp current`, a fixed UTC date, or `--timestamp-source SOURCE_DATE_EPOCH`).
-  [PDF/VT composition](docs/pdf-vt.md) documents record hierarchies, `--pdf-vt-job`,
+  [PDF/VT composition](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/pdf-vt.md) documents record hierarchies, `--pdf-vt-job`,
   private DPM, conservative reuse hints, and the independent release-validation boundary.
   Run `python tools/validate_pdf_profiles.py --download-verapdf --install-pdf-oxide --strict-external`
   to regenerate profile specimens, capture inspect/JIT evidence, replay
@@ -1074,13 +1080,14 @@ Bootstrap notes:
 
 For the full, maintained coverage statement, see `docs/css-coverage.md`.
 
-The latest retained full-corpus result for the source carried into 2.5.28 is
-**1,620 PASS, 24 FAIL and 18 REFERENCE-DISPUTED** across 1,662 cases.
-The [independent run](https://github.com/fullbleed-engine/fullbleed-official/actions/runs/38992175451)
-keeps its failed conclusion. The [release runbook](docs/release/2.5.28-runbook.md)
-records the reviewed inset-shadow changes and remaining comparison differences.
-This is scoped source verification, not complete CSS parity or proof of a
-published package. Earlier dated results below are historical, not the current gate.
+The retained full-corpus comparison of the merged component source (`4379bb4`)
+reports **1,619 PASS, 25 FAIL and 18 REFERENCE-DISPUTED** across 1,662 cases.
+The [independent run](https://github.com/fullbleed-engine/fullbleed-official/actions/runs/39291276349)
+keeps its failed conclusion. All 5,489 saved outputs and all scores matched the
+reviewed baseline. The [alpha 9 runbook](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/release/2.6.0a9-runbook.md)
+requires qualification of the new version and verification of its public package.
+This comparison does not establish complete CSS parity or conformance for arbitrary
+documents. Earlier dated results below are historical, not the current gate.
 
 Summary as of May 19, 2026:
 
@@ -1148,7 +1155,7 @@ Entrypoint formats:
 ## Rust chart compilation
 
 For Rust-based visual/source frontends, the engine also provides
-[document-context chart compilation](docs/chart-typography.md): normal CSS font
+[document-context chart compilation](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/chart-typography.md): normal CSS font
 selection and size, project-font legend measurement/wrapping, semantic tables,
 and observable layout failures. Generated SVG is derived output, not authoring
 source.
@@ -1261,7 +1268,7 @@ PdfEngine(
 ```
 
 For regular/italic family selection and exact face mappings, see
-[Registering fonts](docs/font-registration.md).
+[Registering fonts](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/font-registration.md).
 
 Module exports:
 
@@ -1334,7 +1341,7 @@ native worker and record output is linked in input order through a bounded queue
 values are parsed as trusted markup: sanitize untrusted input or use scalar `{{slot}}` bindings,
 which remain literal text. Choose `CompiledFlowCompression.Throughput` (default) or
 `CompiledFlowCompression.Compact` per render; modes can be mixed safely in one process. See
-[`docs/python-api.md`](docs/python-api.md) for the trust boundary and current limitations.
+[`docs/python-api.md`](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a9/docs/python-api.md) for the trust boundary and current limitations.
 
 When `deterministic_hash` is set, engine writes PDF SHA-256 to the provided file path.
 
