@@ -20,8 +20,7 @@ FILES = ["README.md", "invoice.py", "demo.py", "fastapi_app.py", "flask_app.py",
          "check_examples.py", "check_http.py", "check_docker.py", "Dockerfile", ".dockerignore",
          "requirements-docker.txt", "requirements-fastapi.txt", "requirements-flask.txt",
          "requirements-django.txt", "requirements-check.txt", "templates/invoice.html",
-         "templates/invoice.css", "static/index.html", "static/invoice.png",
-         "static/invoice-2.6.0a5.png"]
+         "templates/invoice.css", "static/index.html", "static/invoice.png"]
 
 
 def main():
@@ -38,6 +37,17 @@ def main():
     def committed(path: Path) -> bytes:
         return subprocess.check_output(["git", "show", source_commit+":"+path.relative_to(REPOSITORY).as_posix()], cwd=REPOSITORY)
     content = {name: committed(ROOT/name) for name in FILES}
+    # The demo selects the installed runtime's reviewed preview. Carry each
+    # committed version-specific sample so a new preview never falls out of the
+    # standalone archive when the engine version advances.
+    prefix = ROOT.relative_to(REPOSITORY).as_posix() + "/"
+    tracked = subprocess.check_output(
+        ["git", "ls-tree", "-r", "--name-only", source_commit, "--", prefix + "static/"],
+        cwd=REPOSITORY, text=True).splitlines()
+    for name in tracked:
+        path = Path(name.removeprefix(prefix))
+        if path.parent == Path("static") and path.name.startswith("invoice-") and path.suffix == ".png":
+            content[path.as_posix()] = committed(ROOT/path)
     for path in sorted((ROOT/"fonts").iterdir()):
         if path.is_file(): content[path.relative_to(ROOT).as_posix()] = committed(path)
     for item in json.loads(content["fonts/sources.json"])["files"]:

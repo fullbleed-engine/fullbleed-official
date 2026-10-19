@@ -192,6 +192,19 @@ that exact installed version's image when present. Both paths require an exact
 match with the newly rendered preview. This keeps source-branch checks separate
 from the public stable Docker pin.
 
+To rebuild the standalone download from a repository checkout, first commit
+the example's source and reviewed previews, then run from the repository root:
+
+```bash
+python examples/web_frameworks/build_starter.py --out target/python-web-starter
+```
+
+The output directory must be new. The builder includes committed version-specific
+previews alongside the stable sample, checks the selected preview against a fresh
+render, and records source and asset hashes in `source.json`. The ZIP has its own
+`MANIFEST.json` and deterministic member timestamps. CI builds and retains this
+download after checking all three framework adapters.
+
 ## License
 
 Example code and the Fullbleed engine are MIT licensed. The included display

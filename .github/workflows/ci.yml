@@ -670,6 +670,9 @@ jobs:
       - name: Check PDF responses from FastAPI, Flask, and Django
         run: python examples/web_frameworks/check_examples.py --out target/web-framework-check
 
+      - name: Build the downloadable web starter from committed source
+        run: python examples/web_frameworks/build_starter.py --out target/web-framework-check/starter
+
       - name: Retain framework response PDFs and verification
         if: always()
         uses: actions/upload-artifact@v7
