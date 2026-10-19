@@ -4290,13 +4290,14 @@ fn node_to_flowables_in_scope(
             if let Some(running_name) = style.running_name.as_ref() {
                 let deferred = node.as_element().and_then(|element| {
                     let attributes = element.attributes.borrow();
-                    (attributes.get(crate::running_layout::LAYOUT_ATTRIBUTE) == Some("margin"))
-                        .then(|| {
-                            (
-                                counters.running_layouts.clone(),
-                                attributes.get("data-fb-id").map(str::to_owned),
-                            )
-                        })
+                    let mode = attributes.get(crate::running_layout::LAYOUT_ATTRIBUTE);
+                    matches!(mode, Some("margin" | "band")).then(|| {
+                        (
+                            counters.running_layouts.clone(),
+                            attributes.get("data-fb-id").map(str::to_owned),
+                            mode == Some("band"),
+                        )
+                    })
                 });
                 flowables = wrap_running_element(
                     flowables,
@@ -12428,6 +12429,7 @@ fn wrap_running_element(
     deferred: Option<(
         Option<crate::running_layout::RunningLayouts>,
         Option<String>,
+        bool,
     )>,
 ) -> Vec<LayoutItem> {
     if flowables.is_empty() {
@@ -12447,8 +12449,8 @@ fn wrap_running_element(
             .with_self_visible(style.visibility.paints()),
         )
     };
-    let deferred_key = deferred.and_then(|(registry, source)| {
-        registry.map(|registry| registry.register(child.clone(), source))
+    let deferred_key = deferred.and_then(|(registry, source, managed)| {
+        registry.map(|registry| registry.register(child.clone(), source, managed))
     });
     let mut marker = RunningElementFlowable::new(child, name)
         .with_named_strings(named_strings)

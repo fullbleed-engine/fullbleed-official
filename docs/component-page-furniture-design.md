@@ -183,12 +183,70 @@ layout boxes. Proving or rejecting those cases remains necessary before exposing
 `PageBand` with a fit guarantee. Slot ownership and HTML export behavior also
 remain part of the proposed component contract above.
 
+### Paint-fit prerequisite
+
+The next internal candidate adds `data-fb-running-layout="band"`. It keeps the
+deferred final-slot layout, then inspects the native display list before placing
+it in a running Form. This remains an implementation prerequisite, not a released
+`PageBand` constructor. Existing ordinary running elements and the `"margin"`
+mode retain their behavior.
+
+The evaluator distinguishes empty paint, a finite conservative bound, and an
+unknown extent. It follows transforms, authored clips, path strokes, embedded
+glyph programs, actual PDF text spacing, and referenced Forms. Font selection,
+rounded glyph widths and text adjustments share the PDF writer's implementation.
+Type 3 glyphs use the coordinates actually emitted by its outline writer. The
+checker does not substitute a preview font for an unembedded standard font.
+Managed Forms establish explicit drawing defaults so inherited stroke or text
+state cannot invalidate their check. Their bytes can therefore differ from the
+older measured-only mode even when their visible output is identical.
+
+Paint outside the measured Form fails with `paint_overflow`, including positioned
+content inside an otherwise zero-height layout. The allocated slot must also fit
+the reserved page margin. These checks use a declared one-millipoint tolerance;
+they concern vector geometry, not device-specific antialiasing. Conservative
+control-point bounds can reject a tightly fitted curve even when its actual ink
+would fit. Authored clipping is respected; the outer running Form's implicit
+clipping cannot turn overflow into a pass. Nested Forms that may clip their own
+content are rejected as unknown.
+
+The existing diagnostic gains a `paint` rectangle, relative to the measured
+Form, or a `paint_check` object containing the unsupported reason, zero-based
+command index and nested Form identifiers. Page, record, slot and authored source
+identifiers remain available. Unknown extents fail explicitly. Initial unsupported
+operations include filtered or masked Forms, backdrop filters, cropped images,
+hairline strokes, stroked/clipping text, and normal text without a registered
+Unicode-embedded font program. An unreadable glyph is unknown, not empty;
+whitespace needs a provably empty program. Effects are not silently removed,
+scaled or clipped.
+The evaluator also rejects missing/cyclic resources and limits recursive work.
+
+[`smoke_page_margin_paint.py`](../tools/smoke_page_margin_paint.py) retains the
+source, saved PDFs and independent-reader previews for this candidate. Accepted
+fixtures are compared with the measured-only path and with explicitly altered
+inspection PDFs whose outer Form BBox is expanded. The latter can reveal hidden
+paint in these particular fixtures; they are not engine output, a general raster
+overflow proof, or conformance evidence. Native tests cover geometry outside any
+finite raster sampling window, graphics-state behavior, named-page changes and
+reflow after empty or rejected bindings. Public constructors still need slot
+ownership, shared component traversal and styled/unstyled HTML export semantics.
+
+Page-number values also need an explicit finalization path. In the retained
+three-page probe, `counter(page)` and `counter(pages)` inside a running component
+resolve during its original content construction and remain `Page 0 of 0`.
+The same counters in direct page-margin content correctly produce pages 1–3 of 3.
+Deferred layout alone does not defer counter evaluation. The proposed
+`PageNumbers` value must use finalized native pagination; inserting an ordinary
+generated-content span into a running component would be incorrect.
+
 The local investigation is retained under
 `target/growth/component-page-furniture-20261018/` and
 `target/growth/component-margin-layout-20261019/`, with the deferred-layout work
 under `target/growth/component-running-layout-20261019/`. The installed public release
 is the negative control; a source change alone does not establish that a release
 contains the correction.
+The managed paint checks and page-number authoring probes are retained under
+`target/growth/component-band-authoring-20261019/`.
 
 Native behavior follows the [CSS page-margin box model](https://www.w3.org/TR/css-page-3/#page-margin-boxes)
 and [running-element model](https://www.w3.org/TR/css-gcpm-3/#running-elements).

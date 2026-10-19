@@ -138,6 +138,7 @@ mod native_shape;
 mod page_data;
 mod page_margin;
 mod page_template;
+mod paint_bounds;
 mod parallel;
 mod pdf;
 mod pdf_encodings;
@@ -6813,7 +6814,10 @@ impl FullBleed {
 
             passes += 1;
             let t_story = std::time::Instant::now();
-            let running_layouts = running_layout::RunningLayouts::default();
+            let running_layouts = running_layout::RunningLayouts::new(
+                self.font_registry.clone(),
+                self.pdf_options.clone(),
+            );
             let story = match input {
                 HtmlLayoutInput::Source(html) => {
                     html::html_to_story_with_resolver_and_fonts_and_report_and_target_pages(
@@ -9962,6 +9966,7 @@ fn with_page_margin_boxes(
                         item.kind.css_name(),
                         context.page_number,
                         item.rect,
+                        page_margin_box_container(page_size, margins, item.kind).0,
                         canvas,
                     ) {
                         Ok(value) => element.value = value,

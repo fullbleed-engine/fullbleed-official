@@ -278,6 +278,17 @@ jobs:
       - name: Verify deferred running content uses final slots and current records
         run: python -I tools/smoke_running_layout.py --out target/running-layout
 
+      - name: Verify managed page-margin paint before implicit Form clipping
+        run: python -I tools/smoke_page_margin_paint.py --out target/page-margin-paint
+
+      - name: Retain managed paint diagnostics and independent PDF previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: page-margin-paint-${{ runner.os }}
+          path: target/page-margin-paint/
+          if-no-files-found: error
+
       - name: Retain deferred running-layout PDFs and diagnostics
         if: always()
         uses: actions/upload-artifact@v7

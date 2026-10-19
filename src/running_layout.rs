@@ -6,6 +6,8 @@
 use crate::canvas::{Canvas, Command, META_RUNNING_ELEMENT_PREFIX};
 use crate::debug::json_escape;
 use crate::flowable::Flowable;
+use crate::font::FontRegistry;
+use crate::pdf::PdfOptions;
 use crate::types::{Pt, Rect, Size};
 use std::collections::BTreeSet;
 use std::fmt;
@@ -37,6 +39,13 @@ pub(crate) fn with_record_index(error: crate::FullBleedError, row: usize) -> cra
 pub(crate) struct RunningLayout {
     pub child: Box<dyn Flowable>,
     pub source_ids: Vec<String>,
+    managed: bool,
+    paint: Arc<PaintContext>,
+}
+
+struct PaintContext {
+    fonts: Arc<FontRegistry>,
+    options: PdfOptions,
 }
 
 impl RunningLayout {
@@ -78,6 +87,7 @@ impl RunningLayout {
         slot: &str,
         page: usize,
         available: Rect,
+        reserved: Rect,
         canvas: &mut Canvas,
     ) -> Result<crate::doc_context::RunningElementValue, String> {
         // Even a currently empty band must be laid out again if its bindings
@@ -88,6 +98,20 @@ impl RunningLayout {
         }
         let measured = self.child.wrap(available.width, Pt::from_i32(1_000_000));
         let tolerance = Pt::from_milli_i64(1);
+        if self.managed
+            && (available.x < reserved.x - tolerance
+                || available.y < reserved.y - tolerance
+                || available.x + available.width > reserved.x + reserved.width + tolerance
+                || available.y + available.height > reserved.y + reserved.height + tolerance)
+        {
+            return Err(self.fit_error(
+                page,
+                slot,
+                available,
+                Some(measured),
+                "slot_outside_reserved_margin",
+            ));
+        }
         if measured.width > available.width + tolerance
             || measured.height > available.height + tolerance
         {
@@ -101,7 +125,7 @@ impl RunningLayout {
         }
         let width = available.width;
         let height = measured.height.max(Pt::ZERO);
-        if height <= Pt::ZERO {
+        if height <= Pt::ZERO && !self.managed {
             return Ok(crate::doc_context::RunningElementValue {
                 resource_id: key.to_string(),
                 width,
@@ -109,6 +133,17 @@ impl RunningLayout {
             });
         }
         let mut surface = Canvas::new(Size { width, height });
+        if self.managed {
+            // A Form inherits the caller's graphics state. Make the state used
+            // by the paint checker explicit instead of relying on what body
+            // text or a neighboring margin box happened to leave behind.
+            surface.set_line_width(Pt::from_i32(1));
+            surface.set_line_cap(0);
+            surface.set_line_join(0);
+            surface.set_miter_limit(Pt::from_i32(10));
+            surface.set_opacity(1.0, 1.0);
+            surface.set_text_rendering_mode(0);
+        }
         self.child
             .draw(&mut surface, Pt::ZERO, Pt::ZERO, width, height);
         let mut document = surface.finish();
@@ -120,6 +155,51 @@ impl RunningLayout {
         if commands.iter().any(|command| matches!(command, Command::Meta { key, .. } if key.starts_with(META_RUNNING_ELEMENT_PREFIX))) {
             return Err(self.fit_error(page, slot, available, Some(measured), "nested_running_content"));
         }
+        if self.managed {
+            match crate::paint_bounds::measure(
+                &commands,
+                Size { width, height },
+                &self.paint.fonts,
+                &self.paint.options,
+            ) {
+                Ok(Some(bounds)) if !bounds.fits(width, height) => {
+                    let [left, top, right, bottom] = bounds.page_rect(height);
+                    let mut error =
+                        self.fit_error(page, slot, available, Some(measured), "paint_overflow");
+                    error.pop();
+                    error.push_str(&format!(",\"paint\":{{\"left\":{left},\"top\":{top},\"right\":{right},\"bottom\":{bottom}}}}}"));
+                    return Err(error);
+                }
+                Err(unknown) => {
+                    let mut error = self.fit_error(
+                        page,
+                        slot,
+                        available,
+                        Some(measured),
+                        "paint_bounds_unknown",
+                    );
+                    error.pop();
+                    let forms = unknown
+                        .forms
+                        .iter()
+                        .map(|form| format!("\"{}\"", json_escape(form)))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    error.push_str(&format!(",\"paint_check\":{{\"reason\":\"{}\",\"command\":{},\"forms\":[{forms}]}}}}",unknown.reason,unknown.command));
+                    return Err(error);
+                }
+                _ => {}
+            }
+        }
+        // Managed zero-height layouts were drawn and checked above: positioned
+        // descendants must not disappear through this formerly early return.
+        if height <= Pt::ZERO {
+            return Ok(crate::doc_context::RunningElementValue {
+                resource_id: key.to_string(),
+                width,
+                height,
+            });
+        }
         let resource_id = form_id(key, width, height, &commands);
         canvas.define_form(resource_id.clone(), width, height, commands);
         Ok(crate::doc_context::RunningElementValue {
@@ -130,8 +210,17 @@ impl RunningLayout {
     }
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct RunningLayouts(Arc<Mutex<Vec<Arc<RunningLayout>>>>);
+#[derive(Clone)]
+pub(crate) struct RunningLayouts {
+    layouts: Arc<Mutex<Vec<Arc<RunningLayout>>>>,
+    paint: Arc<PaintContext>,
+}
+
+impl Default for RunningLayouts {
+    fn default() -> Self {
+        Self::new(Arc::new(FontRegistry::new()), PdfOptions::default())
+    }
+}
 
 impl fmt::Debug for RunningLayouts {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -139,29 +228,46 @@ impl fmt::Debug for RunningLayouts {
             .debug_struct("RunningLayouts")
             .field(
                 "count",
-                &self.0.lock().unwrap_or_else(|e| e.into_inner()).len(),
+                &self.layouts.lock().unwrap_or_else(|e| e.into_inner()).len(),
             )
             .finish()
     }
 }
 
 impl RunningLayouts {
-    pub fn register(&self, child: Box<dyn Flowable>, source_id: Option<String>) -> String {
+    pub fn new(fonts: Arc<FontRegistry>, options: PdfOptions) -> Self {
+        Self {
+            layouts: Arc::new(Mutex::new(Vec::new())),
+            paint: Arc::new(PaintContext { fonts, options }),
+        }
+    }
+
+    pub fn register(
+        &self,
+        child: Box<dyn Flowable>,
+        source_id: Option<String>,
+        managed: bool,
+    ) -> String {
         let mut seen = BTreeSet::new();
         let source_ids = source_id
             .into_iter()
             .chain(child.diagnostic_source_ids())
             .filter(|value| !value.is_empty() && seen.insert(value.clone()))
             .collect();
-        let mut layouts = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut layouts = self.layouts.lock().unwrap_or_else(|e| e.into_inner());
         let key = format!("{KEY_PREFIX}{}", layouts.len());
-        layouts.push(Arc::new(RunningLayout { child, source_ids }));
+        layouts.push(Arc::new(RunningLayout {
+            child,
+            source_ids,
+            managed,
+            paint: self.paint.clone(),
+        }));
         key
     }
 
     pub fn get(&self, key: &str) -> Option<Arc<RunningLayout>> {
         let index = key.strip_prefix(KEY_PREFIX)?.parse::<usize>().ok()?;
-        self.0
+        self.layouts
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get(index)
@@ -186,6 +292,9 @@ pub(crate) fn form_id(name: &str, width: Pt, height: Pt, commands: &[Command]) -
     }
     format!("css-running-{hash:016x}")
 }
+
+#[cfg(test)]
+mod paint_tests;
 
 #[cfg(test)]
 mod tests {
