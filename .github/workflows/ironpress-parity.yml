@@ -28,6 +28,8 @@ on:
       - src/flowable.rs
       - src/canvas.rs
       - src/html.rs
+      - src/lib.rs
+      - src/page_margin.rs
       - src/style.rs
       - tools/smoke_filtered_overflow.py
       - tests/test_fullbleed_filtered_overflow.py

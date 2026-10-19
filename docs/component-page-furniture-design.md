@@ -105,20 +105,44 @@ fixture-specific results, not a claim about arbitrary documents or human
 assistive-technology testing. CI evidence for the final source commit must be
 reviewed separately.
 
-### Existing sizing limitation
+### Joint sizing prerequisite
 
 Visual review of the `all-margin-boxes` fixture shows overlapping backgrounds
 and obscured labels when neighboring margin boxes are all populated. The
-current automatic box geometry assigns overlapping regions to some left,
+public automatic box geometry assigns overlapping regions to some left,
 center and right boxes, with a similar problem on the sides. Text extraction
 still finds all 16 labels, so that assertion alone cannot establish visible
-layout correctness. The candidate preserves those existing pixels; its
-artifact correction does not fix sizing. A public `PageBand` API must settle
-slot sizing and fit diagnostics before promising that rich neighboring slots
-will remain visible.
+layout correctness. The earlier artifact-only candidate preserves those pixels.
+
+The next source candidate resolves neighboring boxes together after counters,
+named strings and running elements have been selected for the actual page.
+Automatic slots share the available edge using intrinsic dimensions; explicit
+top and bottom widths align within the page area, including asymmetric margins.
+Explicit side and corner widths preserve their inner edge. `width: auto` can
+reset an inherited width, and invalid negative widths leave a valid declaration
+intact. This is a targeted implementation of the
+[page-margin sizing rules](https://www.w3.org/TR/css-page-3/#variable-dimension),
+not a claim of complete CSS Paged Media support.
+
+[`smoke_page_margin_layout.py`](../tools/smoke_page_margin_layout.py) measures
+painted rectangles in saved PDFs using an independent reader. Its 195 cases
+cover asymmetric margins, all 16 positions, narrow available space, fixed
+overflow, named pages, named strings and growing counters across tagged,
+PDF/UA-1 and PDF/UA-2 output and five emission paths. It also checks record
+boundaries, body tags, deterministic bytes and independent raster output. CI
+and release jobs retain these PDFs and measurements. Qualification results
+belong to the particular built wheel and retained verification reports.
+
+Captured rich running elements still retain their original dimensions; they
+do not reflow into a narrower allocated slot. Explicit oversized CSS widths
+also remain oversized. A public `PageBand` API still needs native fit diagnostics
+and a rich-content sizing contract before promising visible neighboring slots.
+This work does not add margin-box height, min/max size, padding or box-margin
+properties, and does not expose the proposed component constructors.
 
 The local investigation is retained under
-`target/growth/component-page-furniture-20261018/`. The installed public release
+`target/growth/component-page-furniture-20261018/` and
+`target/growth/component-margin-layout-20261019/`. The installed public release
 is the negative control; a source change alone does not establish that a release
 contains the correction.
 

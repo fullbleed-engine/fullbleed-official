@@ -4181,6 +4181,21 @@ pub(crate) enum CssPageMarginContentPart {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum CssPageMarginSize {
+    Auto,
+    Length(Pt),
+}
+
+impl CssPageMarginSize {
+    pub fn definite(self) -> Option<Pt> {
+        match self {
+            Self::Auto => None,
+            Self::Length(value) => Some(value),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CssPageMarginBox {
     pub kind: Option<CssPageMarginBoxKind>,
@@ -4189,7 +4204,7 @@ pub(crate) struct CssPageMarginBox {
     pub content: Option<Vec<CssPageMarginContentPart>>,
     pub color: Option<Color>,
     pub background: Option<(Color, f32)>,
-    pub width: Option<Pt>,
+    pub width: Option<CssPageMarginSize>,
     pub font_name: Option<String>,
     pub font_size: Option<Pt>,
     pub font_weight: Option<u16>,
@@ -8139,7 +8154,16 @@ fn apply_native_page_margin_box_declarations(
             parsed.color = parse_color_string(&declaration.value).map(|(color, _)| color);
         }
         "width" => {
-            parsed.width = parse_absolute_pt_from_str(&declaration.value);
+            let width = if declaration.value.trim().eq_ignore_ascii_case("auto") {
+                Some(CssPageMarginSize::Auto)
+            } else {
+                parse_absolute_pt_from_str(&declaration.value)
+                    .filter(|value| *value >= Pt::ZERO)
+                    .map(CssPageMarginSize::Length)
+            };
+            if width.is_some() {
+                parsed.width = width;
+            }
         }
         "font-family" => {
             parsed.font_name = parse_page_font_name(&declaration.value);
@@ -38959,7 +38983,10 @@ mod tests {
             top_center.background,
             Some((Color::rgb(17.0 / 255.0, 138.0 / 255.0, 178.0 / 255.0), 1.0))
         );
-        assert_eq!(top_center.width, Some(Pt::from_f32(120.0)));
+        assert_eq!(
+            top_center.width,
+            Some(CssPageMarginSize::Length(Pt::from_f32(120.0)))
+        );
         assert_eq!(
             styles.base.background,
             Some((Color::rgb(1.0, 214.0 / 255.0, 214.0 / 255.0), 1.0))

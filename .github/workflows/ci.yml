@@ -261,6 +261,17 @@ jobs:
       - name: Verify page furniture stays outside body reading order
         run: python -I tools/smoke_page_furniture.py --out target/page-furniture
 
+      - name: Verify page-margin sizing and alignment across pages and records
+        run: python -I tools/smoke_page_margin_layout.py --out target/page-margin-layout
+
+      - name: Retain page-margin geometry PDFs, measurements and previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: page-margin-layout-${{ runner.os }}
+          path: target/page-margin-layout/
+          if-no-files-found: error
+
       - name: Retain page furniture PDFs, structure checks and previews
         if: always()
         uses: actions/upload-artifact@v7
