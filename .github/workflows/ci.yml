@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.6.0a7"
+  FULLBLEED_CI_VERSION: "2.6.0a8"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -260,6 +260,17 @@ jobs:
 
       - name: Verify page furniture stays outside body reading order
         run: python -I tools/smoke_page_furniture.py --out target/page-furniture
+
+      - name: Verify running header and footer values across records
+        run: python -I tools/smoke_running_reflow.py --out target/running-reflow
+
+      - name: Retain running record PDFs and independent comparisons
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: running-reflow-${{ runner.os }}
+          path: target/running-reflow/
+          if-no-files-found: error
 
       - name: Verify page-margin sizing and alignment across pages and records
         run: python -I tools/smoke_page_margin_layout.py --out target/page-margin-layout

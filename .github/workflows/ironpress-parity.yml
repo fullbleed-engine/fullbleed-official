@@ -25,15 +25,18 @@ on:
       - tools/ironpress_parity.Dockerfile
       - tools/ironpress.Cargo.lock
       - tests/test_ironpress_parity_runner.py
-      - src/flowable.rs
-      - src/canvas.rs
-      - src/html.rs
-      - src/lib.rs
-      - src/page_margin.rs
-      - src/running_layout.rs
-      - src/doc_context.rs
-      - src/doc_template.rs
-      - src/style.rs
+      - src/**
+      - crates/**
+      - python/**
+      - build_backend/**
+      - .cargo/**
+      - Cargo.toml
+      - Cargo.lock
+      - pyproject.toml
+      - build.rs
+      - rust-toolchain*
+      - tools/data/**
+      - tools/generate_base14_metrics.py
       - tools/smoke_filtered_overflow.py
       - tests/test_fullbleed_filtered_overflow.py
       - tools/smoke_border_image_slices.py

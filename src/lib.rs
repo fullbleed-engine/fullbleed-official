@@ -12154,6 +12154,50 @@ mod tests {
     }
 
     #[test]
+    fn compiled_reflow_updates_a_binding_shared_with_running_header_text() {
+        let engine = FullBleed::builder().build().unwrap();
+        let html =
+            "<html><body><div class='header'>{{person}}</div><p>{{person}}</p></body></html>";
+        let css = "@page {size:300pt 220pt;margin:80pt 20pt 20pt;@top-left {content:element(head)}} body {margin:0;font:10pt Helvetica} p {margin:0} .header {position:running(head)}";
+        let compiled = engine.compile_document(html, css).unwrap();
+        let plan = compiled.compiled_reflow_plan().unwrap();
+        let mut document = plan.template.instantiate();
+        let mut glyphs = CompiledFlowWorkerGlyphs::new();
+        let names = ["Ada", "Beatrice", "Ada"].map(str::to_string);
+        for (row, name) in names.iter().enumerate() {
+            let record = plan
+                .render_compiled_flow_record(row, &mut document, &mut glyphs, &[&names])
+                .unwrap();
+            let headers = record
+                .program
+                .document
+                .pages
+                .iter()
+                .flat_map(|page| {
+                    page.commands.iter().filter_map(|command| match command {
+                        Command::DefineForm {
+                            resource_id,
+                            commands,
+                            ..
+                        } if resource_id.starts_with("css-running-") => Some(
+                            commands
+                                .iter()
+                                .filter_map(|command| match command {
+                                    Command::DrawString { text, .. } => Some(text.as_str()),
+                                    _ => None,
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" "),
+                        ),
+                        _ => None,
+                    })
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(headers, vec![name.clone()]);
+        }
+    }
+
+    #[test]
     fn page_margin_text_is_an_artifact_without_hiding_body_content() {
         let engine = FullBleed::builder()
             .pdf_profile(PdfProfile::Tagged)

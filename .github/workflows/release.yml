@@ -14,19 +14,29 @@ on:
         required: true
         type: boolean
         default: false
+      release_tag:
+        description: "Optional existing annotated tag to rebuild; also supply its release_commit"
+        required: false
+        type: string
+        default: ""
+      release_commit:
+        description: "Exact 40-character commit of release_tag; leaves the tag and package source unchanged"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.release_commit || github.sha }}
   cancel-in-progress: false
 
 jobs:
   pdfvt-preflight:
     uses: ./.github/workflows/pdfvt-release-gate.yml
     with:
-      release_ref: ${{ github.sha }}
+      release_ref: ${{ inputs.release_commit || github.sha }}
 
   validate:
     needs: pdfvt-preflight
@@ -35,9 +45,14 @@ jobs:
     outputs:
       version: ${{ steps.release-version.outputs.version }}
       cargo_version: ${{ steps.release-version.outputs.cargo_version }}
+      source_sha: ${{ steps.release-version.outputs.source_sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_commit || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -51,17 +66,61 @@ jobs:
 
       - name: Resolve and validate release version
         id: release-version
-        shell: bash
+        shell: python
+        env:
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+          REQUESTED_COMMIT: ${{ inputs.release_commit }}
+          WORKFLOW_COMMIT: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.ref }}
+          RELEASE_SOURCE_RECORD: target/release-source.json
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            version="${GITHUB_REF_NAME#v}"
-          else
-            version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
-          fi
-          python tools/check_release_metadata.py --expected-version "${version}" --json
-          echo "version=${version}" >> "${GITHUB_OUTPUT}"
-          cargo_version="$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
-          echo "cargo_version=${cargo_version}" >> "${GITHUB_OUTPUT}"
+          import json, os, pathlib, re, subprocess, sys, tomllib
+
+          def git(*args):
+              return subprocess.check_output(["git", *args], text=True).strip()
+
+          requested_tag = os.environ["REQUESTED_TAG"]
+          requested_commit = os.environ["REQUESTED_COMMIT"]
+          workflow_ref = os.environ["WORKFLOW_REF"]
+          source_sha = git("rev-parse", "HEAD")
+          if bool(requested_tag) != bool(requested_commit):
+              raise SystemExit("Provide release_tag and release_commit together")
+          if requested_commit:
+              if not re.fullmatch(r"[0-9a-f]{40}", requested_commit) or source_sha != requested_commit:
+                  raise SystemExit("Checkout does not match the exact requested release_commit")
+              tag = requested_tag
+          else:
+              if source_sha != os.environ["WORKFLOW_COMMIT"]:
+                  raise SystemExit("Checkout does not match the triggering workflow commit")
+              tag = workflow_ref.removeprefix("refs/tags/") if workflow_ref.startswith("refs/tags/") else ""
+          tag_object = None
+          if tag:
+              if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?", tag):
+                  raise SystemExit("Use an exact vMAJOR.MINOR.PATCH release tag, optionally with a Python prerelease suffix")
+              ref = "refs/tags/" + tag
+              if git("cat-file", "-t", ref) != "tag" or git("rev-parse", ref + "^{}") != source_sha:
+                  raise SystemExit("The annotated release tag does not match the checked-out commit")
+              tag_object = git("rev-parse", ref)
+              version = tag[1:]
+          else:
+              version = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+          subprocess.run([sys.executable, "tools/check_release_metadata.py", "--expected-version", version, "--json"], check=True)
+          cargo_version = tomllib.loads(pathlib.Path("Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
+          record = dict(version=version, release_tag=tag or None, tag_object=tag_object,
+              source_commit=source_sha, source_tree=git("rev-parse", "HEAD^{tree}"),
+              workflow_commit=os.environ["WORKFLOW_COMMIT"], workflow_ref=workflow_ref)
+          record_path = pathlib.Path(os.environ["RELEASE_SOURCE_RECORD"])
+          record_path.parent.mkdir(parents=True, exist_ok=True)
+          record_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={version}\ncargo_version={cargo_version}\nsource_sha={source_sha}\n")
+
+      - name: Retain immutable source and workflow provenance
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-source-provenance
+          path: target/release-source.json
+          if-no-files-found: error
 
       - name: Validate MIT license metadata
         run: python tools/check_license_integrity.py --json
@@ -73,7 +132,7 @@ jobs:
         run: python tools/check_release_worktree.py --json
 
       - name: Install Python test tools
-        run: python -m pip install pytest jsonschema pypdf==6.19.0
+        run: python -m pip install pytest jsonschema pypdf==6.19.0 pypdfium2==5.14.0 pillow==12.3.0
 
       - name: Build and install extension from release source
         shell: bash
@@ -360,6 +419,17 @@ jobs:
       - name: Verify page furniture stays outside body reading order
         run: python -I tools/smoke_page_furniture.py --out target/page-furniture
 
+      - name: Verify running header and footer values across records
+        run: python -I tools/smoke_running_reflow.py --out target/running-reflow
+
+      - name: Retain running record PDFs and independent comparisons
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-running-reflow
+          path: target/running-reflow/
+          if-no-files-found: error
+
       - name: Verify page-margin sizing and alignment across pages and records
         run: python -I tools/smoke_page_margin_layout.py --out target/page-margin-layout
 
@@ -574,6 +644,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+          persist-credentials: false
 
       - name: Setup build Python
         if: matrix.container == '' && runner.os != 'Windows'
@@ -625,6 +698,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -679,6 +755,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -799,6 +878,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+          persist-credentials: false
 
       - name: Download wheel
         uses: actions/download-artifact@v8

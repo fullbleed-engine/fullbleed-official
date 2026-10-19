@@ -5,10 +5,10 @@ parts, theme values, page geometry, and data tables. It is available from this
 source branch's wheel under `fullbleed.ui.experimental`; it is not in the
 PyPI 2.5.26 wheel. Names and contracts may change before stabilization.
 
-The `2.6.0a1` alpha has its own package version. Install it explicitly with
-`python -m pip install --pre "fullbleed==2.6.0a1"` in a virtual environment, or
+The `2.6.0a8` alpha has its own package version. Install it explicitly with
+`python -m pip install --pre "fullbleed==2.6.0a8"` in a virtual environment, or
 [build an unpublished checkout](#run-the-candidate). The
-[alpha runbook](../../docs/release/2.6.0a1-runbook.md) records the release gates.
+[alpha runbook](../../docs/release/2.6.0a8-runbook.md) records the release gates.
 
 The [implementation review](../../docs/component-authoring-design.md) explains
 the design decisions, remaining gaps, and criteria for stabilizing this API.

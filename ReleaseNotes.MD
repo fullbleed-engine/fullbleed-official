@@ -1,3 +1,33 @@
+# Fullbleed Release Notes - 2.6.0a8
+
+This component preview brings the published 2.5.34 running-header and page-furniture
+corrections into the experimental package. Generated margin text and decoration
+remain outside body reading order. Compiled reflow refreshes captured headers and
+footers when record values change, including values shared with body text.
+
+Page-margin boxes resolve sizing and alignment together. Internal deferred
+running content uses the final slot width for each page and record, including
+named page sizes. Its diagnostics identify measured-box fit failures at the
+authoring source. Those checks do not establish visible-ink containment: shadows,
+transforms, positioned descendants and oversized paint can still clip. Public
+`PageBand` and `PageNumbers` constructors are not included.
+
+Components retain owned styles, named parts, literal `class_name` selectors and
+styled/unstyled HTML export. Bootstrap components and exports remain static.
+The release gates recreate Northstar, Common Ground and both accessible guide
+profiles through their component and HTML/CSS authoring paths.
+
+Changed bindings trigger full reflow for running content even when the header is
+static. Streaming output is not atomic. The independent CSS corpus retains its
+known failures and disputed references; neither the preview nor fixture-specific
+PDF/UA checks establish general CSS or accessibility conformance. Human
+assistive-technology usability and dedicated PDF/VT validation remain unverified.
+
+Python uses `2.6.0a8`; Cargo source uses `2.6.0-alpha.8`. See the
+[alpha 8 runbook](docs/release/2.6.0a8-runbook.md) for qualification and public
+verification. This entry describes a candidate until publication finishes.
+Ordinary `pip install fullbleed` continues to select the stable channel.
+
 # Fullbleed Release Notes - 2.6.0a7
 
 This component preview corrects table-caption ownership (issue #98). Each
@@ -168,6 +198,30 @@ The release gate checks that both spellings, the lockfile, wheel metadata and
 installed contracts agree. This alpha distribution targets Python; the Rust
 registry's stable release is managed separately. See the
 [alpha runbook](docs/release/2.6.0a1-runbook.md) for verification and publication.
+
+# Fullbleed Release Notes - 2.5.34
+
+Compiled reflow now refreshes running headers and footers when record values
+change. A binding shared by ordinary body text and a captured running element
+could previously update the body while retaining the preceding record's header.
+This corrects the reproduced behavior in [issue #104](https://github.com/fullbleed-engine/fullbleed-official/issues/104).
+
+Generated page-margin text and decoration now share balanced artifact marking,
+keeping page numbers and repeated navigation outside the body reading order in
+tagged output. This addresses [issue #103](https://github.com/fullbleed-engine/fullbleed-official/issues/103).
+
+Documents with running content reuse compiled layout only for identical binding
+values. Changing body values also triggers reflow when the header itself is
+static, reducing cache reuse. The choice preserves correct record content;
+dependency-aware reuse can be optimized separately.
+
+The stable correction retains existing page-margin geometry. The proposed
+component page-band API remains in development. CI and release jobs retain
+saved-PDF regressions for page furniture and running record values.
+
+See the [2.5.34 runbook](docs/release/2.5.34-runbook.md) for verification scope
+and release gates. Fixture checks do not establish accessibility for arbitrary
+authored documents.
 
 # Fullbleed Release Notes - 2.5.33
 
