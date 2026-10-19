@@ -4,6 +4,10 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## Component prereleases
+
+- `docs/release/2.6.0a6-runbook.md`: component pagination, reflow and source diagnostics.
+
 ## Latest patch releases
 
 - `docs/release/2.5.32-runbook.md`: oversized table cells and compiled reflow output fidelity.
@@ -14,6 +18,14 @@ engine internals.
 - `docs/release/2.5.27-runbook.md`: inline SVG document styling and group compositing.
 - `docs/release/2.5.26-runbook.md`: embedded stylesheets in complete HTML documents.
 - `docs/release/2.5.25-runbook.md`: Python component authoring and installed-output checks.
+
+## Experimental Python component releases
+
+- `docs/release/2.6.0a5-runbook.md`: integrate stable inline spacing and rich-table tagging with component layout checks.
+- `docs/release/2.6.0a4-runbook.md`: isolated group opacity in component saved-PDF previews.
+- `docs/release/2.6.0a3-runbook.md`: integrate stable inset-shadow fixes and authored-card export checks.
+- `docs/release/2.6.0a2-runbook.md`: integrate stable SVG styling and named-part checks.
+- `docs/release/2.6.0a1-runbook.md`: initial opt-in alpha, release policy and required gates.
 
 ## 2.5.10 Documents
 

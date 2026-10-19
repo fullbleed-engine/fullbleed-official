@@ -114,6 +114,7 @@ struct CounterState {
     target_texts: Arc<HashMap<String, String>>,
     target_pages: Arc<HashMap<String, usize>>,
     table_semantics: Arc<crate::table_semantics::HtmlTableIndex>,
+    running_layouts: Option<crate::running_layout::RunningLayouts>,
 }
 
 #[derive(Debug, Clone)]
@@ -1066,6 +1067,7 @@ pub fn html_to_story_with_resolver_and_fonts_and_report(
         perf,
         doc_id,
         None,
+        None,
     )
 }
 
@@ -1080,6 +1082,7 @@ pub(crate) fn html_to_story_with_resolver_and_fonts_and_report_and_target_pages(
     perf: Option<&crate::perf::PerfLogger>,
     doc_id: Option<usize>,
     target_pages: Option<Arc<HashMap<String, usize>>>,
+    running_layouts: Option<crate::running_layout::RunningLayouts>,
 ) -> Vec<Box<dyn Flowable>> {
     let t_parse = std::time::Instant::now();
     let document = parse_html(html);
@@ -1111,6 +1114,7 @@ pub(crate) fn html_to_story_with_resolver_and_fonts_and_report_and_target_pages(
         perf,
         doc_id,
         target_pages,
+        running_layouts,
     )
 }
 
@@ -1126,6 +1130,7 @@ pub(crate) fn html_document_to_story_with_resolver_and_fonts_and_report_and_targ
     perf: Option<&crate::perf::PerfLogger>,
     doc_id: Option<usize>,
     target_pages: Option<Arc<HashMap<String, usize>>>,
+    running_layouts: Option<crate::running_layout::RunningLayouts>,
 ) -> Vec<Box<dyn Flowable>> {
     // ComputedStyle owns its wide CSS state on the heap, including these
     // document-level styles retained during recursive DOM compilation.
@@ -1137,6 +1142,7 @@ pub(crate) fn html_document_to_story_with_resolver_and_fonts_and_report_and_targ
         document_target_texts(document),
         target_pages.unwrap_or_else(|| Arc::new(HashMap::new())),
     );
+    counters.running_layouts = running_layouts;
 
     let mut root_style = base_style.clone();
     if let Ok(html_el) = document.select_first("html") {
@@ -2504,6 +2510,27 @@ fn node_to_flowables_in_scope(
             }
 
             if matches!(style.display, DisplayMode::None) && screen_reader_text.is_none() {
+                // A finalized PageNumbers slot still needs its authored hidden
+                // style. No running occurrence is emitted, but falling back to
+                // page-context text would make a hidden value visible again.
+                if info
+                    .attrs
+                    .get(crate::running_layout::LAYOUT_ATTRIBUTE)
+                    .map(String::as_str)
+                    == Some("band")
+                    && style.running_name.is_some()
+                {
+                    if let (Some(registry), Some(source)) =
+                        (&counters.running_layouts, info.attrs.get("data-fb-id"))
+                    {
+                        registry.register(
+                            Box::new(Spacer::new_pt(Pt::ZERO)),
+                            Some(source.clone()),
+                            true,
+                            style.clone(),
+                        );
+                    }
+                }
                 return Vec::new();
             }
             if style_can_mutate_counters(&style) {
@@ -2608,9 +2635,9 @@ fn node_to_flowables_in_scope(
             let transparent_inline = screen_reader_text.is_none()
                     && matches!(style.display, DisplayMode::Inline)
                     && !matches!(info.tag.as_str(), "img" | "svg" | "br")
-                    // Grid items are blockified even when their specified
+                    // Flex/grid items are blockified even when their specified
                     // outer display type is inline.
-                    && !matches!(parent_style.display, DisplayMode::Grid | DisplayMode::InlineGrid)
+                    && !parent_is_flex
                     // Positioned inline boxes need the normal wrapper path so the
                     // absolute/relative flowable survives into the parent's layout.
                     // Returning the children directly here silently discarded
@@ -2863,6 +2890,35 @@ fn node_to_flowables_in_scope(
                             "h6" => "H6",
                             _ => "P",
                         };
+
+                        // The element's declared formatting context takes
+                        // precedence over the single-paragraph fast path.
+                        // Blockified children must remain separate flex/grid
+                        // items rather than becoming vertically stacked runs.
+                        if matches!(
+                            style.display,
+                            DisplayMode::Flex
+                                | DisplayMode::InlineFlex
+                                | DisplayMode::Grid
+                                | DisplayMode::InlineGrid
+                        ) {
+                            return flex_container_flowables(
+                                node,
+                                resolver,
+                                &style,
+                                ancestors,
+                                counters,
+                                font_registry.clone(),
+                                asset_bundle.clone(),
+                                report.as_deref_mut(),
+                                svg_form,
+                                svg_raster_fallback,
+                                perf,
+                                doc_id,
+                                &before_items,
+                                &after_items,
+                            );
+                        }
 
                         if inline_children_only(node, resolver, &style, ancestors)
                             && !has_structured_pseudo
@@ -3979,6 +4035,9 @@ fn node_to_flowables_in_scope(
                             }
                             let container_options = ContainerCompilationOptions {
                                 suppress_single_used_column_rule: suppress_unused_multicol_rule,
+                                flow_gap: (info.attrs.get("data-fb-flow").map(String::as_str)
+                                    == Some("true"))
+                                .then_some(style.row_gap),
                                 ..ContainerCompilationOptions::default()
                             };
                             if text.is_empty() {
@@ -4112,6 +4171,12 @@ fn node_to_flowables_in_scope(
                                     ContainerCompilationOptions {
                                         suppress_single_used_column_rule:
                                             suppress_unused_multicol_rule,
+                                        flow_gap: (info
+                                            .attrs
+                                            .get("data-fb-flow")
+                                            .map(String::as_str)
+                                            == Some("true"))
+                                        .then_some(style.row_gap),
                                         ..ContainerCompilationOptions::default()
                                     },
                                 )
@@ -4122,6 +4187,12 @@ fn node_to_flowables_in_scope(
                                     ContainerCompilationOptions {
                                         suppress_single_used_column_rule:
                                             suppress_unused_multicol_rule,
+                                        flow_gap: (info
+                                            .attrs
+                                            .get("data-fb-flow")
+                                            .map(String::as_str)
+                                            == Some("true"))
+                                        .then_some(style.row_gap),
                                         ..ContainerCompilationOptions::default()
                                     },
                                 )
@@ -4131,6 +4202,29 @@ fn node_to_flowables_in_scope(
                     _ => (|| {
                         if is_table_container_display(style.display) {
                             table_container_flowables(
+                                node,
+                                resolver,
+                                &style,
+                                ancestors,
+                                counters,
+                                font_registry.clone(),
+                                asset_bundle.clone(),
+                                report.as_deref_mut(),
+                                svg_form,
+                                svg_raster_fallback,
+                                perf,
+                                doc_id,
+                                &before_items,
+                                &after_items,
+                            )
+                        } else if matches!(
+                            style.display,
+                            DisplayMode::Flex
+                                | DisplayMode::InlineFlex
+                                | DisplayMode::Grid
+                                | DisplayMode::InlineGrid
+                        ) {
+                            flex_container_flowables(
                                 node,
                                 resolver,
                                 &style,
@@ -4161,7 +4255,16 @@ fn node_to_flowables_in_scope(
                                 perf,
                                 doc_id,
                             );
-                            inject_pseudo_items(children, &before_items, &after_items)
+                            let children =
+                                inject_pseudo_items(children, &before_items, &after_items);
+                            if parent_is_flex {
+                                // Inline tags without a dedicated compiler branch
+                                // still own a box when they are flex/grid items.
+                                // Keep their margins, padding and sizing here.
+                                container_flowables(children, &style)
+                            } else {
+                                children
+                            }
                         }
                     })(),
                 }
@@ -4180,7 +4283,9 @@ fn node_to_flowables_in_scope(
             // Use a tiny spacer to ensure the flowable is drawable; zero-height carriers can
             // be skipped in layout paths and lose metadata emission.
             if flowables.is_empty() && !node_meta.is_empty() {
-                let carrier = Spacer::new_pt(Pt::from_f32(0.01)).with_pagination(style.pagination);
+                let carrier = Spacer::new_pt(Pt::from_f32(0.01))
+                    .with_pagination(style.pagination)
+                    .with_metadata_only();
                 flowables.push(LayoutItem::Block {
                     flowable: Box::new(carrier) as Box<dyn Flowable>,
                     flex_grow: style.flex_grow,
@@ -4204,8 +4309,24 @@ fn node_to_flowables_in_scope(
             }
             let named_strings = named_string_values_for_node(node, &style);
             if let Some(running_name) = style.running_name.as_ref() {
-                flowables =
-                    wrap_running_element(flowables, &style, running_name.clone(), named_strings);
+                let deferred = node.as_element().and_then(|element| {
+                    let attributes = element.attributes.borrow();
+                    let mode = attributes.get(crate::running_layout::LAYOUT_ATTRIBUTE);
+                    matches!(mode, Some("margin" | "band")).then(|| {
+                        (
+                            counters.running_layouts.clone(),
+                            attributes.get("data-fb-id").map(str::to_owned),
+                            mode == Some("band"),
+                        )
+                    })
+                });
+                flowables = wrap_running_element(
+                    flowables,
+                    &style,
+                    running_name.clone(),
+                    named_strings,
+                    deferred,
+                );
             } else if !named_strings.is_empty() {
                 flowables = wrap_named_string_occurrence(flowables, named_strings);
             }
@@ -11624,6 +11745,7 @@ fn container_flowables(children: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<
 struct ContainerCompilationOptions {
     suppress_single_used_column_rule: bool,
     list_numbering: Option<&'static str>,
+    flow_gap: Option<LengthSpec>,
     table_semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
     emit_tag_group: bool,
 }
@@ -11633,6 +11755,7 @@ impl Default for ContainerCompilationOptions {
         Self {
             suppress_single_used_column_rule: false,
             list_numbering: None,
+            flow_gap: None,
             table_semantics: None,
             emit_tag_group: true,
         }
@@ -11645,6 +11768,52 @@ fn container_flowables_with_options(
     options: ContainerCompilationOptions,
 ) -> Vec<LayoutItem> {
     container_flowables_with_role_options(children, style, None, options)
+}
+
+/// Rebuild a managed generated-text slot with its captured CSS after native
+/// page values are known. Reuse the ordinary line/container compilers so class
+/// selectors, fonts, padding, backgrounds and transforms travel together.
+pub(crate) fn finalized_margin_text(
+    text: String,
+    style: &ComputedStyle,
+    fonts: Arc<FontRegistry>,
+) -> Box<dyn Flowable> {
+    if matches!(style.display, DisplayMode::None) {
+        return Box::new(Spacer::new_pt(Pt::ZERO));
+    }
+    let text = apply_text_transform(&text, style.text_transform);
+    let text_style = text_style_for_flow_text(style);
+    let round_baseline = css_direct_text_prefers_nearest_baseline_snap(&text_style, Some(&fonts));
+    let owns_overflow = text_style.text_shadows.is_empty();
+    let paragraph = Paragraph::new(text)
+        .with_style(text_style)
+        .with_align(text_align_from_style(style))
+        .with_last_align(text_align_last_from_style(style))
+        .with_whitespace(preserve_whitespace(style.white_space), no_wrap(style))
+        .with_break_spaces(matches!(style.white_space, WhiteSpaceMode::BreakSpaces))
+        .with_pagination(style.pagination)
+        .with_font_registry(Some(fonts));
+    let children = vec![LayoutItem::Block {
+        flowable: Box::new(
+            CssLineBoxFlowable::new(Box::new(paragraph))
+                .with_round_baseline(round_baseline)
+                .with_parent_positioned_top_overflow(owns_overflow),
+        ),
+        flex_grow: 0.0,
+        flex_shrink: 1.0,
+        width_spec: None,
+        order: 0,
+    }];
+    container_flowable_with_role_options(
+        children,
+        style,
+        None,
+        ContainerCompilationOptions {
+            emit_tag_group: false,
+            ..ContainerCompilationOptions::default()
+        },
+    )
+    .unwrap_or_else(|| Box::new(Spacer::new_pt(Pt::ZERO)))
 }
 
 fn establishes_abs_containing_block(style: &ComputedStyle) -> bool {
@@ -11911,6 +12080,7 @@ fn container_flowable_with_role_options(
     let mut container = ContainerFlowable::new_pt(flowables, style.font_size, style.root_font_size)
         .with_table_semantics(options.table_semantics)
         .with_tag_group_emission(options.emit_tag_group)
+        .with_flow_gap(options.flow_gap)
         .with_inline_bidi_transparency(matches!(style.display, DisplayMode::Inline))
         .with_establishes_abs_containing_block(establishes_abs_containing_block(style))
         .with_establishes_stacking_context(establishes_stacking_context(style))
@@ -12323,6 +12493,11 @@ fn wrap_running_element(
     style: &ComputedStyle,
     name: Arc<str>,
     named_strings: Vec<(String, String)>,
+    deferred: Option<(
+        Option<crate::running_layout::RunningLayouts>,
+        Option<String>,
+        bool,
+    )>,
 ) -> Vec<LayoutItem> {
     if flowables.is_empty() {
         return Vec::new();
@@ -12341,9 +12516,15 @@ fn wrap_running_element(
             .with_self_visible(style.visibility.paints()),
         )
     };
-    let marker = RunningElementFlowable::new(child, name)
+    let deferred_key = deferred.and_then(|(registry, source, managed)| {
+        registry.map(|registry| registry.register(child.clone(), source, managed, style.clone()))
+    });
+    let mut marker = RunningElementFlowable::new(child, name)
         .with_named_strings(named_strings)
         .with_pagination(style.pagination);
+    if let Some(key) = deferred_key {
+        marker = marker.with_deferred_layout(key);
+    }
     vec![LayoutItem::Block {
         flowable: Box::new(marker),
         flex_grow: 0.0,
@@ -13575,6 +13756,13 @@ fn flex_container_flowables(
             .and_then(|element| match element.name.local.as_ref() {
                 "figure" => Some("Figure"),
                 "figcaption" => Some("Caption"),
+                "p" => Some("P"),
+                "h1" => Some("H1"),
+                "h2" => Some("H2"),
+                "h3" => Some("H3"),
+                "h4" => Some("H4"),
+                "h5" => Some("H5"),
+                "h6" => Some("H6"),
                 _ => None,
             }) {
         let container = container.with_tag_role(role);

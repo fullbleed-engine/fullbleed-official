@@ -16,6 +16,7 @@ import shutil
 import fullbleed
 from pypdf import PdfReader
 
+from demo import preview_path
 from invoice import load_invoice, render_invoice
 
 
@@ -113,7 +114,7 @@ def main() -> int:
         str(out / "fastapi.pdf"), str(out / "preview"), 110, "invoice"
     )
     assert len(previews) == 1 and Path(previews[0]).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-    saved_preview = Path(__file__).resolve().parent / "static/invoice.png"
+    saved_preview = preview_path()
     if args.update_preview:
         shutil.copyfile(previews[0], saved_preview)
     assert Path(previews[0]).read_bytes() == saved_preview.read_bytes(), "Saved preview is stale; rerun with --update-preview."
@@ -130,6 +131,8 @@ def main() -> int:
         "font_and_license_source_hashes": "passed",
         "fastapi_openapi_pdf_type": "passed",
         "preview": str(previews[0]),
+        "saved_preview": saved_preview.name,
+        "preview_sha256": hashlib.sha256(Path(previews[0]).read_bytes()).hexdigest(),
         "scope": "Test clients and actual local HTTP servers, independent PDF text, headers, font embedding, saved preview, and matching parallel responses; no throughput, hosted-deployment, or standards-conformance claim.",
     }
     (out / "verification.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

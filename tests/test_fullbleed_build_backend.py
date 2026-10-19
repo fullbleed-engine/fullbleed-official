@@ -64,6 +64,16 @@ def test_pyproject_selects_in_tree_backend_with_no_python_requirements(backend) 
     assert "maturin" not in configuration.get("tool", {})
 
 
+@pytest.mark.parametrize("version", ["2.6.0a1", "2.6.0b2", "2.6.0rc12"])
+def test_prerelease_wheel_and_metadata_use_the_same_canonical_python_version(backend, monkeypatch, version):
+    configuration = backend._project()
+    configuration["project"]["version"] = version
+    monkeypatch.setattr(backend, "_project", lambda: configuration)
+    assert backend._dist_info_name() == f"fullbleed-{version}.dist-info"
+    assert backend._wheel_filename("cp310-abi3-win_amd64") == f"fullbleed-{version}-cp310-abi3-win_amd64.whl"
+    assert f"\nVersion: {version}\n" in backend._metadata_bytes().decode("utf-8")
+
+
 def test_python_310_toml_fallback_reads_complete_project_configuration(backend) -> None:
     source = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     parsed = backend._fallback_toml_loads(source)

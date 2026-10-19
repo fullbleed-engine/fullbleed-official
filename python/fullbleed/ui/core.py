@@ -290,6 +290,11 @@ def _flatten_children(children: Iterable[Any]) -> list[Any]:
             return
         if isinstance(child, DocumentArtifact):
             raise TypeError("Document artifacts cannot be children; use @Document only on the outer component")
+        if getattr(type(child), "__fullbleed_authoring_node__", False):
+            raise TypeError(
+                "Experimental component nodes need an explicit adapter in fullbleed.ui: "
+                "use fullbleed.ui.experimental.to_legacy(node, theme=...) before passing them as children."
+            )
         if isinstance(child, (Mapping, Set, bytes, bytearray)) or callable(child):
             raise TypeError(
                 f"Unsupported component child: {type(child).__name__}. "

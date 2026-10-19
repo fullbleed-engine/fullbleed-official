@@ -10,6 +10,12 @@ evaluates these functions directly to produce static print documents. There is
 no browser, virtual DOM, hook lifecycle, or JavaScript runtime involved.
 The complete workflow below is available in Fullbleed 2.5.25.
 
+For the next authoring iteration, see the experimental
+[Bootstrap kit and HTML export guide](component-bootstrap.md). That work adds
+component-owned Bootstrap CSS, content slots, checked utilities and explicit
+styled/unstyled HTML export in `fullbleed.ui.experimental`; the guide below
+documents the stable API.
+
 ## A component is a function
 
 ```python
@@ -276,9 +282,17 @@ ARIA and data booleans emit `"true"` or `"false"`. Invalid names, cycles and
 children on void elements raise errors. Format these inputs explicitly if they
 were previously intentional text.
 
-Python is the reference authoring experience. [JavaScript/TypeScript components](https://docs.fullbleed.dev/guides/javascript-components/)
-are published in npm package 0.6.0, with ordinary functions and optional JSX/TSX.
+This guide covers Python. [JavaScript/TypeScript components](https://docs.fullbleed.dev/guides/javascript-components/)
+are published in npm package 0.7.0, with ordinary functions, optional JSX/TSX,
+and static HTML export with styles included or removed. The downloadable
+component project remains pinned to 0.6.0.
 [C# components](https://docs.fullbleed.dev/guides/csharp-components/) are available
 in FullBleed.DotNet 0.2.0, with typed methods, LINQ children and immutable styles.
 Rust accepts HTML/CSS. The JavaScript and C# layers do not include Python's
 semantic validator or promise complete API parity.
+
+The separate [experimental authoring proposal](component-authoring-design.md)
+explores component-owned styles and named parts. Its source-branch prototype has
+an [incremental migration adapter](../examples/component_recipes/README.md#adopt-components-in-an-existing-document)
+for trying a new component inside an existing document. It is not part of the
+published 2.5.25 API, and these existing imports remain supported.

@@ -203,6 +203,20 @@ EXAMPLES = [
         ),
     },
     {
+        "id": "component_authoring_experimental_python",
+        "intent": "Opt into the experimental Python component kit and export static styled or unstyled HTML without constructing a PDF engine.",
+        "interface": "python",
+        "code": (
+            "from fullbleed.ui.experimental import Document, style\n"
+            "from fullbleed.ui.experimental import bootstrap as bs\n"
+            "card = bs.Card('Your order has passed inspection.', title='Ready to ship',\n"
+            "               footer=bs.Badge('Approved', variant='success'))\n"
+            "document = Document(card.with_parts(title=style(color='#205b47')), title='Order summary')\n"
+            "styled_html = document.to_html(include_styles=True)\n"
+            "plain_html = document.to_html(include_styles=False)"
+        ),
+    },
+    {
         "id": "compiled_fixed_bindings_python",
         "intent": "Compile once and render distinct fixed-geometry records.",
         "interface": "python",
@@ -233,6 +247,11 @@ EXAMPLES = [
 
 
 KNOWN_LIMITATIONS = [
+    {
+        "id": "experimental_python_components",
+        "summary": "The fullbleed.ui.experimental API may change. Bootstrap components and HTML exports use authored static states; no Bootstrap JavaScript is included, and component inventory coverage does not establish complete CSS/browser or accessibility parity.",
+        "agent_action": "Opt into the experimental namespace explicitly, inspect the installed examples, and validate the resulting document. Use fullbleed.ui for the established component API; themes, fonts and assets remain explicit application choices.",
+    },
     {
         "id": "watch_scope",
         "summary": "Render watch mode polls explicit local input files and optional recursive watch paths. It does not run a Python data generator or discover every file referenced inside HTML/CSS or JSON.",
@@ -1269,6 +1288,8 @@ def render_llms_txt(contract: Mapping[str, Any]) -> str:
             "## Installed feature summary",
             "",
             f"- Compiled documents: {str(bool(engine.get('compiled_document'))).lower()}.",
+            f"- Compiled layout previews: {str(bool(engine.get('compiled_document_image_pages'))).lower()}.",
+            f"- Compiled pagination diagnostics: {str(bool(engine.get('compiled_document_pagination_trace'))).lower()}.",
             f"- Static embedded HTML stylesheets: {str(bool(engine.get('embedded_stylesheets'))).lower()}.",
             f"- Compiled reflow bindings: {str(bool(engine.get('compiled_reflow_bindings'))).lower()}.",
             "- Compiled reflow compression modes: "

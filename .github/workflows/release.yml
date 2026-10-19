@@ -44,6 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.release-version.outputs.version }}
+      cargo_version: ${{ steps.release-version.outputs.cargo_version }}
       source_sha: ${{ steps.release-version.outputs.source_sha }}
     steps:
       - name: Checkout
@@ -102,8 +103,9 @@ jobs:
               tag_object = git("rev-parse", ref)
               version = tag[1:]
           else:
-              version = tomllib.loads(pathlib.Path("Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
+              version = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
           subprocess.run([sys.executable, "tools/check_release_metadata.py", "--expected-version", version, "--json"], check=True)
+          cargo_version = tomllib.loads(pathlib.Path("Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
           record = dict(version=version, release_tag=tag or None, tag_object=tag_object,
               source_commit=source_sha, source_tree=git("rev-parse", "HEAD^{tree}"),
               workflow_commit=os.environ["WORKFLOW_COMMIT"], workflow_ref=workflow_ref)
@@ -111,7 +113,7 @@ jobs:
           record_path.parent.mkdir(parents=True, exist_ok=True)
           record_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"version={version}\nsource_sha={source_sha}\n")
+              output.write(f"version={version}\ncargo_version={cargo_version}\nsource_sha={source_sha}\n")
 
       - name: Retain immutable source and workflow provenance
         uses: actions/upload-artifact@v7
@@ -201,6 +203,31 @@ jobs:
         with:
           name: release-border-image-slices
           path: target/border-image-slices
+          if-no-files-found: warn
+
+      - name: Verify experimental components from the release wheel
+        shell: bash
+        run: |
+          python -m pip install mypy==2.4.0
+          python tools/generate_component_stubs.py --check
+          python -I tools/smoke_component_quickstart.py --expected-version "${{ steps.release-version.outputs.version }}" --out target/release-components/quickstart
+          python -I tools/smoke_component_recipes.py --out target/release-components/recipes
+          python -I tools/smoke_component_parts.py --out target/release-components/parts
+          python -I tools/smoke_component_svg.py --out target/release-components/svg
+          python -I tools/smoke_component_inset_shadows.py --out target/release-components/inset-shadows
+          python -I tools/smoke_component_fonts.py --out target/release-components/fonts
+          python -I tools/smoke_component_flex.py --out target/release-components/flex
+          python -I tools/smoke_component_bootstrap.py --out target/release-components/bootstrap
+          python -I tools/smoke_component_typing.py --out target/release-components/typing.json
+          npm install --ignore-scripts --no-package-lock --no-save --no-audit --no-fund --prefix target/component-editor-tools pyright@1.1.414
+          python -I tools/smoke_component_editor.py --pyright-root target/component-editor-tools/node_modules/pyright --out target/release-components/editor.json
+
+      - name: Retain component release evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-components
+          path: target/release-components/
           if-no-files-found: warn
 
       - name: Verify independent font synthesis in installed release output
@@ -363,7 +390,7 @@ jobs:
           RUSTUP_TOOLCHAIN: "1.85.0"
         run: |
           python tools/smoke_crates_consumer.py \
-            --expected-version "${{ steps.release-version.outputs.version }}" \
+            --expected-version "${{ steps.release-version.outputs.cargo_version }}" \
             --json
 
       - name: Upload Cargo package evidence
@@ -395,7 +422,59 @@ jobs:
       - name: Verify running header and footer values across records
         run: python -I tools/smoke_running_reflow.py --out target/running-reflow
 
-      - name: Retain page furniture PDFs and structure checks
+      - name: Retain running record PDFs and independent comparisons
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-running-reflow
+          path: target/running-reflow/
+          if-no-files-found: error
+
+      - name: Verify page-margin sizing and alignment across pages and records
+        run: python -I tools/smoke_page_margin_layout.py --out target/page-margin-layout
+
+      - name: Verify deferred running content uses final slots and current records
+        run: python -I tools/smoke_running_layout.py --out target/running-layout
+
+      - name: Verify managed page-margin paint before implicit Form clipping
+        run: python -I tools/smoke_page_margin_paint.py --out target/page-margin-paint
+
+      - name: Verify component page bands, HTML exports and record page values
+        run: python -I tools/smoke_component_page_bands.py --out target/component-page-bands
+
+      - name: Retain component page-band PDFs, source and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-component-page-bands
+          path: target/component-page-bands/
+          if-no-files-found: error
+
+      - name: Retain managed paint diagnostics and independent PDF previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-page-margin-paint
+          path: target/page-margin-paint/
+          if-no-files-found: error
+
+      - name: Retain deferred running-layout PDFs and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-running-layout
+          path: target/running-layout/
+          if-no-files-found: error
+
+      - name: Retain page-margin geometry PDFs, measurements and previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-page-margin-layout
+          path: target/page-margin-layout/
+          if-no-files-found: error
+
+      - name: Retain page furniture PDFs, structure checks and previews
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -403,12 +482,15 @@ jobs:
           path: target/page-furniture/
           if-no-files-found: error
 
-      - name: Retain running record PDFs and independent comparisons
+      - name: Verify authored tables through PDF and both static HTML exports
+        run: python -I tools/smoke_component_tables.py --out target/component-tables
+
+      - name: Retain component table PDFs, exports and independent previews
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: release-running-reflow
-          path: target/running-reflow/
+          name: release-component-tables
+          path: target/component-tables/
           if-no-files-found: error
 
       - name: Verify oversized table cells stay visible and retain logical structure

@@ -1,14 +1,14 @@
 {
   "schema": "fullbleed.golden_suite.v1",
-  "generated_at_utc": "2026-10-18T00:03:40.971563+00:00",
+  "generated_at_utc": "2026-10-17T05:59:38.379101+00:00",
   "cases": {
     "acme_invoice": {
       "case_id": "acme_invoice",
       "report": "examples/acme_invoice/report.py",
       "pdf": {
         "path": "examples/acme_invoice/output/acme_sample_invoice.pdf",
-        "bytes": 93269,
-        "sha256": "7b377aae9b837e5c1244b9629ae2663b479ecb6408829dee863c5258bb78211d"
+        "bytes": 93274,
+        "sha256": "012f2104d921da617b2cf4b1363e665c1e13b62671e6323cb99f10bab2370011"
       },
       "png": {
         "count": 1,
@@ -16,15 +16,15 @@
           {
             "name": "acme_sample_invoice_page1.png",
             "path": "examples/acme_invoice/output/acme_sample_invoice_page1.png",
-            "bytes": 164764,
-            "sha256": "da0925f51cadd6b89b6805459b717fa3b550db0c48e6ffea3bf446cb51d0d89c"
+            "bytes": 163021,
+            "sha256": "9ac0fe6ea62b94fa5a8073386535a51dc17d243cb3c5ed8b9e10966dccf66fe8"
           }
         ]
       },
       "validation": {
         "path": "examples/acme_invoice/output/acme_sample_invoice_component_mount_validation.json",
         "kind": "component_mount",
-        "sha256": "b2fcf027bf403f6d9273021ab0bb441f2cc9f5b05fd2f5a7a7a3ac61658787bb"
+        "sha256": "33e1163806ba4361a74cf566339b5cc2c7fd46991ae75fa58ee84c7a1d6b6c88"
       },
       "css_layers": {
         "path": "examples/acme_invoice/output/acme_sample_invoice_css_layers.json",
@@ -71,8 +71,8 @@
       "report": "examples/coastal_menu/report.py",
       "pdf": {
         "path": "examples/coastal_menu/output/coastal_menu.pdf",
-        "bytes": 3736,
-        "sha256": "5b1feefb2c3178ce7c4121b138cd982318558a51b068bfc314828d728cd0187c"
+        "bytes": 15783,
+        "sha256": "d87ab925b0cbe6e44643705125909a3589b7309d21900a97e648bb7b987c0f8f"
       },
       "png": {
         "count": 1,
@@ -80,15 +80,15 @@
           {
             "name": "coastal_menu_page1.png",
             "path": "examples/coastal_menu/output/coastal_menu_page1.png",
-            "bytes": 239695,
-            "sha256": "caf2cabac0c34db771d5a1725c7e0989aca0096e7f361e4f18047a628d4d6979"
+            "bytes": 244749,
+            "sha256": "69b3b2ecd23e8f114fda279e4ce5ee7ea2e4b1aa1c8ccc6482b5948a83893484"
           }
         ]
       },
       "validation": {
         "path": "examples/coastal_menu/output/coastal_menu_validation.json",
         "kind": "coastal_validation",
-        "sha256": "45ea2dae8bd82956c442e837f24555f934b687df111c89a37d5badf7ba24e77e"
+        "sha256": "68274a6429aec4e851ef978ab3197920f4352a9b2d8f7b5f5af93979a1e28842"
       },
       "css_layers": null
     }

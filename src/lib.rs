@@ -136,7 +136,9 @@ mod math;
 mod metrics;
 mod native_shape;
 mod page_data;
+mod page_margin;
 mod page_template;
+mod paint_bounds;
 mod parallel;
 mod pdf;
 mod pdf_encodings;
@@ -155,10 +157,13 @@ mod python;
 mod python_abi;
 mod raster;
 mod raster_native;
+mod running_layout;
 mod sfnt;
 mod sfnt_cff;
 mod sfnt_outline;
 mod spill;
+#[cfg(test)]
+mod split_diagnostic_tests;
 mod style;
 mod svg;
 #[cfg(test)]
@@ -203,8 +208,8 @@ pub use finalize::{
 };
 pub use flowable::{
     AbsolutePositionedFlowable, BreakAfter, BreakBefore, BreakInside, ContainerFlowable, EdgeSizes,
-    Flowable, ImageFlowable, LengthSpec, Pagination, Paragraph, Spacer, SplitContext, SvgFlowable,
-    TableFlowable, TextStyle,
+    Flowable, ImageFlowable, LengthSpec, Pagination, Paragraph, Spacer, SplitContext, SplitFailure,
+    SvgFlowable, TableFlowable, TextStyle,
 };
 use font::FontRegistry;
 #[cfg(feature = "python")]
@@ -506,7 +511,7 @@ impl CompiledFlowRecordProgram {
         let mut patches = Vec::new();
         let mut patched_values = vec![false; values.len()];
         let mut layout_dependent_values = vec![false; values.len()];
-        let mut running_content_requires_reflow = false;
+        let mut running_layout_requires_reflow = false;
         for (page_index, page) in document.pages.iter().enumerate() {
             let mut font_name = Arc::<str>::from("Helvetica");
             let mut font_size = Pt::from_f32(12.0);
@@ -544,9 +549,10 @@ impl CompiledFlowRecordProgram {
                         pending_constraint = CompiledTextConstraint::parse(value);
                     }
                     Command::Meta { key, .. }
-                        if key.starts_with(canvas::META_RUNNING_ELEMENT_PREFIX) =>
+                        if key == running_layout::REFLOW_GUARD_META
+                            || key.starts_with(canvas::META_RUNNING_ELEMENT_PREFIX) =>
                     {
-                        running_content_requires_reflow = true;
+                        running_layout_requires_reflow = true;
                     }
                     Command::DrawString { x, text, .. } => {
                         let constraint = pending_constraint.take();
@@ -669,10 +675,11 @@ impl CompiledFlowRecordProgram {
             // Every painted occurrence must support rebinding before reuse.
             *patched &= !layout_dependent;
         }
-        if running_content_requires_reflow {
-            // Body text patches do not establish the values inside captured
-            // running Forms. Reuse only identical bindings until those
-            // dependencies can be proven independently.
+        if running_layout_requires_reflow {
+            // A binding can appear both in body text and in a captured margin
+            // form. Page-local patches do not establish the form's content,
+            // final slot geometry, or fit. Reuse only identical bindings until
+            // those dependencies can be proven independently.
             patched_values.fill(false);
         }
         let mut page_patch_counts = vec![0usize; document.pages.len()];
@@ -1030,7 +1037,7 @@ impl CompiledReflowPlan {
             }
             Err(error) => {
                 entry.ready.notify_all();
-                Err(error)
+                Err(running_layout::with_record_index(error, row))
             }
         }
     }
@@ -1195,6 +1202,27 @@ impl CompiledDocument {
             self.debug.clone(),
             self.perf.clone(),
         )?)
+    }
+
+    /// Preview the compiled template without parsing or laying out the input again.
+    ///
+    /// Uses the layout rasterizer, with the same semantics as
+    /// [`FullBleed::render_image_pages`]. These previews are not a rasterization
+    /// of the finalized PDF. Bindings rendered separately do not modify this
+    /// immutable template or its previews.
+    pub fn render_image_pages(&self, dpi: u32) -> Result<Vec<Vec<u8>>, FullBleedError> {
+        let start = std::time::Instant::now();
+        let pages = raster::document_to_png_pages(
+            &self.document,
+            dpi,
+            Some(self.font_registry.as_ref()),
+            self.pdf_options.shape_text,
+        )?;
+        if let Some(logger) = self.perf.as_deref() {
+            logger.log_span_ms("raster", Some(0), start.elapsed().as_secs_f64() * 1000.0);
+            logger.log_counts("raster", Some(0), &[("pages", pages.len() as u64)]);
+        }
+        Ok(pages)
     }
 
     /// Serialize the template to a writer and return the number of bytes written.
@@ -3709,17 +3737,6 @@ impl FullBleed {
             asset_bundle: self.asset_bundle.clone(),
             render_context_cache: Mutex::new(RenderContextCache::new()),
         }
-    }
-
-    #[cfg(feature = "python")]
-    pub(crate) fn measure_text_width_for_trace(
-        &self,
-        font_name: &str,
-        font_size: Pt,
-        text: &str,
-    ) -> Pt {
-        self.font_registry
-            .measure_text_width(font_name, font_size, text)
     }
 
     #[cfg(feature = "python")]
@@ -6797,6 +6814,10 @@ impl FullBleed {
 
             passes += 1;
             let t_story = std::time::Instant::now();
+            let running_layouts = running_layout::RunningLayouts::new(
+                self.font_registry.clone(),
+                self.pdf_options.clone(),
+            );
             let story = match input {
                 HtmlLayoutInput::Source(html) => {
                     html::html_to_story_with_resolver_and_fonts_and_report_and_target_pages(
@@ -6810,6 +6831,7 @@ impl FullBleed {
                         self.perf.as_deref(),
                         Some(doc_id),
                         uses_target_counters.then(|| target_pages.clone()),
+                        Some(running_layouts.clone()),
                     )
                 }
                 HtmlLayoutInput::Parsed(document) => {
@@ -6824,12 +6846,14 @@ impl FullBleed {
                         self.perf.as_deref(),
                         Some(doc_id),
                         uses_target_counters.then(|| target_pages.clone()),
+                        Some(running_layouts.clone()),
                     )
                 }
             };
             story_ms += t_story.elapsed().as_secs_f64() * 1000.0;
 
-            let mut doc = DocTemplate::new(page_templates.clone());
+            let mut doc =
+                DocTemplate::new(page_templates.clone()).with_running_layouts(running_layouts);
             if let Some(logger) = self.debug.clone() {
                 doc = doc.with_debug(logger, Some(doc_id));
             }
@@ -9612,191 +9636,196 @@ fn build_css_page_template(
     template
 }
 
-fn page_margin_box_rect(
+fn page_margin_box_container(
     page_size: Size,
     margins: Margins,
     kind: style::CssPageMarginBoxKind,
-    width_override: Option<Pt>,
 ) -> (Rect, flowable::TextAlign) {
     use flowable::TextAlign;
     use style::CssPageMarginBoxKind::*;
 
     let content_width = (page_size.width - margins.left - margins.right).max(Pt::ZERO);
     let content_height = (page_size.height - margins.top - margins.bottom).max(Pt::ZERO);
-    let half_width = content_width / 2;
-    let half_height = content_height / 2;
-    let (mut rect, align) = match kind {
-        TopLeftCorner => (
-            Rect {
-                x: Pt::ZERO,
-                y: Pt::ZERO,
-                width: margins.left,
-                height: margins.top,
-            },
-            TextAlign::Right,
-        ),
-        TopLeft => (
-            Rect {
-                x: margins.left,
-                y: Pt::ZERO,
-                width: half_width,
-                height: margins.top,
-            },
-            TextAlign::Left,
-        ),
-        TopCenter => (
-            Rect {
-                x: margins.left,
-                y: Pt::ZERO,
-                width: content_width,
-                height: margins.top,
-            },
-            TextAlign::Center,
-        ),
-        TopRight => (
-            Rect {
-                x: margins.left + half_width,
-                y: Pt::ZERO,
-                width: half_width,
-                height: margins.top,
-            },
-            TextAlign::Right,
-        ),
-        TopRightCorner => (
-            Rect {
-                x: page_size.width - margins.right,
-                y: Pt::ZERO,
-                width: margins.right,
-                height: margins.top,
-            },
-            TextAlign::Left,
-        ),
-        BottomLeftCorner => (
-            Rect {
-                x: Pt::ZERO,
-                y: page_size.height - margins.bottom,
-                width: margins.left,
-                height: margins.bottom,
-            },
-            TextAlign::Right,
-        ),
-        BottomLeft => (
-            Rect {
-                x: margins.left,
-                y: page_size.height - margins.bottom,
-                width: half_width,
-                height: margins.bottom,
-            },
-            TextAlign::Left,
-        ),
-        BottomCenter => (
-            Rect {
-                x: margins.left,
-                y: page_size.height - margins.bottom,
-                width: content_width,
-                height: margins.bottom,
-            },
-            TextAlign::Center,
-        ),
-        BottomRight => (
-            Rect {
-                x: margins.left + half_width,
-                y: page_size.height - margins.bottom,
-                width: half_width,
-                height: margins.bottom,
-            },
-            TextAlign::Right,
-        ),
-        BottomRightCorner => (
-            Rect {
-                x: page_size.width - margins.right,
-                y: page_size.height - margins.bottom,
-                width: margins.right,
-                height: margins.bottom,
-            },
-            TextAlign::Left,
-        ),
-        LeftTop => (
-            Rect {
-                x: Pt::ZERO,
-                y: margins.top,
-                width: margins.left,
-                height: half_height,
-            },
-            TextAlign::Center,
-        ),
-        LeftMiddle => (
-            Rect {
-                x: Pt::ZERO,
-                y: margins.top,
-                width: margins.left,
-                height: content_height,
-            },
-            TextAlign::Center,
-        ),
-        LeftBottom => (
-            Rect {
-                x: Pt::ZERO,
-                y: margins.top + half_height,
-                width: margins.left,
-                height: half_height,
-            },
-            TextAlign::Center,
-        ),
-        RightTop => (
-            Rect {
-                x: page_size.width - margins.right,
-                y: margins.top,
-                width: margins.right,
-                height: half_height,
-            },
-            TextAlign::Center,
-        ),
-        RightMiddle => (
-            Rect {
-                x: page_size.width - margins.right,
-                y: margins.top,
-                width: margins.right,
-                height: content_height,
-            },
-            TextAlign::Center,
-        ),
-        RightBottom => (
-            Rect {
-                x: page_size.width - margins.right,
-                y: margins.top + half_height,
-                width: margins.right,
-                height: half_height,
-            },
-            TextAlign::Center,
-        ),
+    let rect = match kind {
+        TopLeft | TopCenter | TopRight => Rect {
+            x: margins.left,
+            y: Pt::ZERO,
+            width: content_width,
+            height: margins.top,
+        },
+        BottomLeft | BottomCenter | BottomRight => Rect {
+            x: margins.left,
+            y: page_size.height - margins.bottom,
+            width: content_width,
+            height: margins.bottom,
+        },
+        LeftTop | LeftMiddle | LeftBottom => Rect {
+            x: Pt::ZERO,
+            y: margins.top,
+            width: margins.left,
+            height: content_height,
+        },
+        RightTop | RightMiddle | RightBottom => Rect {
+            x: page_size.width - margins.right,
+            y: margins.top,
+            width: margins.right,
+            height: content_height,
+        },
+        TopLeftCorner => Rect {
+            x: Pt::ZERO,
+            y: Pt::ZERO,
+            width: margins.left,
+            height: margins.top,
+        },
+        TopRightCorner => Rect {
+            x: page_size.width - margins.right,
+            y: Pt::ZERO,
+            width: margins.right,
+            height: margins.top,
+        },
+        BottomLeftCorner => Rect {
+            x: Pt::ZERO,
+            y: page_size.height - margins.bottom,
+            width: margins.left,
+            height: margins.bottom,
+        },
+        BottomRightCorner => Rect {
+            x: page_size.width - margins.right,
+            y: page_size.height - margins.bottom,
+            width: margins.right,
+            height: margins.bottom,
+        },
     };
-    if let Some(width) = width_override {
-        let width = width.max(Pt::ZERO).min(page_size.width);
-        match kind {
-            TopLeft | BottomLeft => rect.width = width,
-            TopCenter | BottomCenter => {
-                rect.x = (page_size.width - width) / 2;
-                rect.width = width;
-            }
-            TopRight | BottomRight => {
-                rect.x = page_size.width - width;
-                rect.width = width;
-            }
-            _ => {}
-        }
-    }
+    let align = match kind {
+        TopLeft | BottomLeft | TopRightCorner | BottomRightCorner => TextAlign::Left,
+        TopRight | BottomRight | TopLeftCorner | BottomLeftCorner => TextAlign::Right,
+        _ => TextAlign::Center,
+    };
     (rect.quantized(), align)
 }
 
+struct ResolvedMarginRunning {
+    value: doc_context::RunningElementValue,
+    layout: Option<Arc<running_layout::RunningLayout>>,
+}
+
+struct ResolvedPageMarginBox {
+    kind: style::CssPageMarginBoxKind,
+    rect: Rect,
+    align: flowable::TextAlign,
+    width: Option<Pt>,
+    background: Option<(Color, f32)>,
+    paragraph: Option<Paragraph>,
+    running: Vec<ResolvedMarginRunning>,
+}
+
+impl ResolvedPageMarginBox {
+    fn axis_size(&self, horizontal: bool) -> page_margin::AxisSize {
+        let (mut minimum, mut maximum) = (Pt::ZERO, Pt::ZERO);
+        if let Some(paragraph) = &self.paragraph {
+            if horizontal {
+                minimum = paragraph
+                    .flex_min_content_width(self.rect.width)
+                    .unwrap_or(Pt::ZERO);
+                maximum = paragraph
+                    .flex_max_content_width(self.rect.width)
+                    .unwrap_or(minimum);
+            } else {
+                minimum = paragraph.wrap(self.rect.width, self.rect.height).height;
+                maximum = minimum;
+            }
+        }
+        for element in &self.running {
+            let (low, high) = if let Some(layout) = &element.layout {
+                if horizontal {
+                    let intrinsic = layout.child.intrinsic_width();
+                    let low = layout
+                        .child
+                        .flex_min_content_width(self.rect.width)
+                        .or(intrinsic)
+                        .unwrap_or(Pt::ZERO);
+                    let high = layout
+                        .child
+                        .flex_max_content_width(self.rect.width)
+                        .or(intrinsic)
+                        .unwrap_or(self.rect.width);
+                    (low, high)
+                } else {
+                    let height = layout
+                        .child
+                        .wrap(self.rect.width, Pt::from_i32(1_000_000))
+                        .height;
+                    (height, height)
+                }
+            } else {
+                let extent = if horizontal {
+                    element.value.width
+                } else {
+                    element.value.height
+                };
+                (extent, extent)
+            };
+            minimum = minimum.max(low);
+            maximum = maximum.max(high);
+        }
+        page_margin::AxisSize::new(if horizontal { self.width } else { None }, minimum, maximum)
+    }
+}
+
+fn layout_page_margin_boxes(
+    boxes: &mut [ResolvedPageMarginBox],
+    page_size: Size,
+    margins: Margins,
+) {
+    use style::CssPageMarginBoxKind::*;
+    let available_width = (page_size.width - margins.left - margins.right).max(Pt::ZERO);
+    let available_height = (page_size.height - margins.top - margins.bottom).max(Pt::ZERO);
+    for (horizontal, kinds) in [
+        (true, [TopLeft, TopCenter, TopRight]),
+        (true, [BottomLeft, BottomCenter, BottomRight]),
+        (false, [LeftTop, LeftMiddle, LeftBottom]),
+        (false, [RightTop, RightMiddle, RightBottom]),
+    ] {
+        let indices = kinds.map(|kind| boxes.iter().position(|item| item.kind == kind));
+        let available = if horizontal {
+            available_width
+        } else {
+            available_height
+        };
+        let sizes = page_margin::resolve_axis(
+            available,
+            indices.map(|index| index.map(|i| boxes[i].axis_size(horizontal))),
+        );
+        for (position, index) in indices.into_iter().enumerate() {
+            let Some(index) = index else { continue };
+            let size = sizes[position];
+            let offset = match position {
+                0 => Pt::ZERO,
+                1 => (available - size) / 2,
+                _ => available - size,
+            };
+            let rect = &mut boxes[index].rect;
+            if horizontal {
+                rect.x = margins.left + offset;
+                rect.width = size;
+            } else {
+                rect.y = margins.top + offset;
+                rect.height = size;
+            }
+            *rect = rect.quantized();
+        }
+    }
+}
+
 fn with_page_margin_boxes(
-    mut template: PageTemplate,
+    template: PageTemplate,
     page_size: Size,
     margins: Margins,
     setup: style::CssPageSetup,
     font_registry: Arc<FontRegistry>,
     root_text: PageRootTextContext,
 ) -> PageTemplate {
+    let mut definitions = Vec::new();
     for margin_box in &setup.margin_boxes {
         let Some(kind) = margin_box.kind else {
             continue;
@@ -9807,10 +9836,7 @@ fn with_page_margin_boxes(
         if parts.is_empty() {
             continue;
         }
-        let (rect, align) = page_margin_box_rect(page_size, margins, kind, margin_box.width);
-        if rect.width <= Pt::ZERO || rect.height <= Pt::ZERO {
-            continue;
-        }
+        let (rect, align) = page_margin_box_container(page_size, margins, kind);
         let font_size = margin_box
             .font_size
             .or(setup.font_size)
@@ -9850,49 +9876,48 @@ fn with_page_margin_boxes(
         }
         text_style.css_pixel_snap_metrics = true;
 
-        let background = margin_box.background;
-        let auto_width = margin_box.width.is_none();
-        let registry = font_registry.clone();
-        template = template.append_on_page_finalize(move |canvas, context| {
-            let mut content_rect = rect;
-            if auto_width {
-                for part in &parts {
-                    let style::CssPageMarginContentPart::RunningElement { name, position } = part
-                    else {
-                        continue;
-                    };
-                    let Some(element) = context.running_element(name, position) else {
-                        continue;
-                    };
-                    if element.width > content_rect.width {
-                        content_rect =
-                            page_margin_box_rect(page_size, margins, kind, Some(element.width)).0;
+        definitions.push((
+            kind,
+            rect,
+            align,
+            parts,
+            text_style,
+            margin_box
+                .width
+                .and_then(style::CssPageMarginSize::definite),
+            margin_box.background,
+            margin_box.managed_source.clone(),
+        ));
+    }
+    if definitions.is_empty() {
+        return template;
+    }
+    template.append_on_page_finalize(move |canvas, context| {
+        let mut boxes = Vec::with_capacity(definitions.len());
+        for (kind, rect, align, parts, text_style, width, background, managed_source) in
+            &definitions
+        {
+            let empty_container = rect.width <= Pt::ZERO || rect.height <= Pt::ZERO;
+            let mut rect = *rect;
+            if let Some(width) = width {
+                use style::CssPageMarginBoxKind::*;
+                match kind {
+                    // With the currently supported zero box margins, an
+                    // overconstrained fixed dimension keeps its inner edge
+                    // at the page area and lets the outer edge overflow.
+                    LeftTop | LeftMiddle | LeftBottom | TopLeftCorner | BottomLeftCorner => {
+                        rect.x = margins.left - *width;
+                        rect.width = *width;
                     }
-                }
-            }
-            canvas.save_state();
-            // Page furniture is repeated navigation, not document reading-order
-            // content. Include generated text, running elements and decoration
-            // in the same balanced artifact scope after pagination is finalized.
-            canvas.begin_artifact(None);
-            if let Some((color, alpha)) = background {
-                if alpha > 0.0 {
-                    canvas.save_state();
-                    canvas.set_fill_color(color);
-                    if alpha < 1.0 {
-                        canvas.set_opacity(alpha, alpha);
+                    RightTop | RightMiddle | RightBottom | TopRightCorner | BottomRightCorner => {
+                        rect.width = *width;
                     }
-                    canvas.draw_rect(
-                        content_rect.x,
-                        content_rect.y,
-                        content_rect.width,
-                        content_rect.height,
-                    );
-                    canvas.restore_state();
+                    _ => {}
                 }
             }
             let mut text = String::new();
-            for part in &parts {
+            let mut running = Vec::new();
+            for part in parts {
                 match part {
                     style::CssPageMarginContentPart::Text(value) => text.push_str(value),
                     style::CssPageMarginContentPart::PageCounter => {
@@ -9908,34 +9933,138 @@ fn with_page_margin_boxes(
                     }
                     style::CssPageMarginContentPart::RunningElement { name, position } => {
                         if let Some(element) = context.running_element(name, position) {
-                            let x = match align {
-                                flowable::TextAlign::Left | flowable::TextAlign::Justify => {
-                                    content_rect.x
-                                }
-                                flowable::TextAlign::Center => {
-                                    content_rect.x + (content_rect.width - element.width) / 2
-                                }
-                                flowable::TextAlign::Right => {
-                                    content_rect.x + content_rect.width - element.width
-                                }
-                            };
-                            let y = content_rect.y + (content_rect.height - element.height) / 2;
-                            canvas.draw_form(
-                                x,
-                                y,
-                                element.width,
-                                element.height,
-                                element.resource_id.clone(),
-                            );
+                            running.push(ResolvedMarginRunning {
+                                value: element.clone(),
+                                layout: context.running_layout(&element.resource_id),
+                            });
                         }
                     }
                 }
             }
-            if !text.is_empty() {
-                let paragraph = Paragraph::new(text)
-                    .with_style(text_style.clone())
-                    .with_align(align)
-                    .with_font_registry(Some(registry.clone()));
+            let mut paragraph = None;
+            if let Some(source) = managed_source {
+                let child: Box<dyn Flowable> =
+                    if let Some(style) = context.margin_authored_style(source) {
+                        html::finalized_margin_text(text, &style, font_registry.clone())
+                    } else {
+                        Box::new(
+                            Paragraph::new(text)
+                                .with_style(text_style.clone())
+                                .with_align(*align)
+                                .with_font_registry(Some(font_registry.clone())),
+                        )
+                    };
+                let layout = context.managed_margin_layout(child, source.clone());
+                if !running.is_empty() {
+                    canvas.meta(
+                        running_layout::FIT_ERROR_META,
+                        layout.fit_error(
+                            context.page_number,
+                            kind.css_name(),
+                            rect,
+                            None,
+                            "managed_generated_content_with_running_element",
+                        ),
+                    );
+                    return;
+                }
+                running.push(ResolvedMarginRunning {
+                    value: doc_context::RunningElementValue {
+                        resource_id: format!(
+                            "fb-margin-{}-{}",
+                            kind.css_name(),
+                            context.page_number
+                        ),
+                        width: Pt::ZERO,
+                        height: Pt::ZERO,
+                    },
+                    layout: Some(Arc::new(layout)),
+                });
+            } else if !text.is_empty() {
+                paragraph = Some(
+                    Paragraph::new(text)
+                        .with_style(text_style.clone())
+                        .with_align(*align)
+                        .with_font_registry(Some(font_registry.clone())),
+                );
+            }
+            if empty_container
+                && managed_source.is_none()
+                && !running.iter().any(|element| element.layout.is_some())
+            {
+                continue;
+            }
+            boxes.push(ResolvedPageMarginBox {
+                kind: *kind,
+                rect,
+                align: *align,
+                width: *width,
+                background: *background,
+                paragraph,
+                running,
+            });
+        }
+        layout_page_margin_boxes(&mut boxes, page_size, margins);
+        for item in &mut boxes {
+            for element in &mut item.running {
+                if let Some(layout) = element.layout.take() {
+                    match layout.materialize(
+                        &element.value.resource_id,
+                        item.kind.css_name(),
+                        context.page_number,
+                        item.rect,
+                        page_margin_box_container(page_size, margins, item.kind).0,
+                        canvas,
+                    ) {
+                        Ok(value) => element.value = value,
+                        Err(error) => {
+                            canvas.meta(running_layout::FIT_ERROR_META, error);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        for item in boxes {
+            let content_rect = item.rect;
+            canvas.save_state();
+            // Page furniture stays outside document reading order. Keep all
+            // generated paint in one balanced scope after joint layout.
+            canvas.begin_artifact(None);
+            if let Some((color, alpha)) = item.background {
+                if alpha > 0.0 {
+                    canvas.save_state();
+                    canvas.set_fill_color(color);
+                    if alpha < 1.0 {
+                        canvas.set_opacity(alpha, alpha);
+                    }
+                    canvas.draw_rect(
+                        content_rect.x,
+                        content_rect.y,
+                        content_rect.width,
+                        content_rect.height,
+                    );
+                    canvas.restore_state();
+                }
+            }
+            for running in item.running {
+                let element = running.value;
+                if element.width <= Pt::ZERO || element.height <= Pt::ZERO {
+                    continue;
+                }
+                let x = match item.align {
+                    flowable::TextAlign::Left | flowable::TextAlign::Justify => content_rect.x,
+                    flowable::TextAlign::Center => {
+                        content_rect.x + (content_rect.width - element.width) / 2
+                    }
+                    flowable::TextAlign::Right => {
+                        content_rect.x + content_rect.width - element.width
+                    }
+                };
+                let y = content_rect.y + (content_rect.height - element.height) / 2;
+                canvas.draw_form(x, y, element.width, element.height, element.resource_id);
+            }
+            if let Some(paragraph) = item.paragraph {
                 let text_size = paragraph.wrap(content_rect.width, content_rect.height);
                 // CSS page-margin boxes use `vertical-align: middle` by
                 // default. Oversized line boxes therefore overflow equally
@@ -9952,9 +10081,8 @@ fn with_page_margin_boxes(
             }
             canvas.end_marked_content();
             canvas.restore_state();
-        });
-    }
-    template
+        }
+    })
 }
 
 fn with_page_background(
@@ -12165,6 +12293,257 @@ mod tests {
         }
     }
 
+    fn page_margin_background_rects(page: &Page) -> Vec<Rect> {
+        let expected = Color::rgb(217.0 / 255.0, 237.0 / 255.0, 227.0 / 255.0);
+        page_margin_background_rects_for_color(page, expected)
+    }
+
+    fn page_margin_background_rects_for_color(page: &Page, expected: Color) -> Vec<Rect> {
+        let mut fill = Color::BLACK;
+        let mut stack = Vec::new();
+        page.commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::SaveState => {
+                    stack.push(fill);
+                    None
+                }
+                Command::RestoreState => {
+                    if let Some(value) = stack.pop() {
+                        fill = value;
+                    }
+                    None
+                }
+                Command::SetFillColor(color) => {
+                    fill = *color;
+                    None
+                }
+                Command::DrawRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                    ..
+                } if fill == expected => Some(Rect {
+                    x: *x,
+                    y: *y,
+                    width: *width,
+                    height: *height,
+                }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn page_margin_explicit_widths_align_inside_asymmetric_margins() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let css = "@page { size: 320pt 240pt; margin: 40pt 48pt 40pt 24pt;
+            @top-left {content:'L';width:60pt;background:#d9ede3}
+            @top-center {content:'C';width:60pt;background:#d9ede3}
+            @top-right {content:'R';width:60pt;background:#d9ede3}
+            @bottom-left {content:'L';width:60pt;background:#d9ede3}
+            @bottom-center {content:'C';width:60pt;background:#d9ede3}
+            @bottom-right {content:'R';width:60pt;background:#d9ede3}}
+            html,body {font:10pt/12pt Courier;margin:0}";
+        let document = engine
+            .render_to_document("<p>BODY</p>", css)
+            .expect("render");
+        let rects = page_margin_background_rects(&document.pages[0]);
+        assert_eq!(rects.len(), 6);
+        assert_eq!(
+            rects.iter().map(|r| r.x.to_milli_i64()).collect::<Vec<_>>(),
+            [24_000, 118_000, 212_000, 24_000, 118_000, 212_000]
+        );
+        assert!(rects.iter().all(|r| r.width == Pt::from_i32(60)));
+    }
+
+    #[test]
+    fn page_margin_fixed_widths_keep_side_and_corner_inner_edges_aligned() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let rules = [
+            ("left-top", 60),
+            ("left-middle", 60),
+            ("left-bottom", 60),
+            ("top-left-corner", 60),
+            ("bottom-left-corner", 60),
+            ("right-top", 12),
+            ("right-middle", 12),
+            ("right-bottom", 12),
+            ("top-right-corner", 12),
+            ("bottom-right-corner", 12),
+        ]
+        .iter()
+        .map(|(kind, width)| format!("@{kind} {{content:'X';width:{width}pt;background:#d9ede3}}"))
+        .collect::<String>();
+        let css = format!(
+            "@page {{size:320pt 240pt;margin:40pt 48pt 40pt 24pt;{rules}}}
+             html,body {{font:10pt/12pt Courier;margin:0}}"
+        );
+        let document = engine
+            .render_to_document("<p>BODY</p>", &css)
+            .expect("render");
+        let rects = page_margin_background_rects(&document.pages[0]);
+        assert_eq!(rects.len(), 10);
+        for (items, x, width) in [(&rects[..5], -36, 60), (&rects[5..], 272, 12)] {
+            assert!(
+                items
+                    .iter()
+                    .all(|r| r.x == Pt::from_i32(x) && r.width == Pt::from_i32(width))
+            );
+            assert_eq!(items[0].y, Pt::from_i32(40));
+            assert_eq!(items[2].y + items[2].height, Pt::from_i32(200));
+            for adjacent in items[..3].windows(2) {
+                assert_eq!(adjacent[0].y + adjacent[0].height, adjacent[1].y);
+            }
+            assert_eq!((items[3].y, items[3].height), (Pt::ZERO, Pt::from_i32(40)));
+            assert_eq!(
+                (items[4].y, items[4].height),
+                (Pt::from_i32(200), Pt::from_i32(40))
+            );
+        }
+    }
+
+    #[test]
+    fn page_margin_auto_backgrounds_partition_each_page_edge() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let kinds = [
+            "top-left",
+            "top-center",
+            "top-right",
+            "bottom-left",
+            "bottom-center",
+            "bottom-right",
+            "left-top",
+            "left-middle",
+            "left-bottom",
+            "right-top",
+            "right-middle",
+            "right-bottom",
+        ];
+        let rules = kinds
+            .iter()
+            .map(|kind| format!("@{kind} {{content:'X';background:#d9ede3}}"))
+            .collect::<String>();
+        let css = format!(
+            "@page {{size:320pt 240pt;margin:40pt 48pt 40pt 24pt;{rules}}}
+            html,body {{font:10pt/12pt Courier;margin:0}}"
+        );
+        let document = engine
+            .render_to_document("<p>BODY</p>", &css)
+            .expect("render");
+        let rects = page_margin_background_rects(&document.pages[0]);
+        assert_eq!(rects.len(), 12);
+        for (group, items) in rects.chunks_exact(3).enumerate() {
+            let horizontal = group < 2;
+            let intervals: Vec<_> = items
+                .iter()
+                .map(|r| {
+                    if horizontal {
+                        (r.x, r.width)
+                    } else {
+                        (r.y, r.height)
+                    }
+                })
+                .collect();
+            assert_eq!(
+                intervals[0].0,
+                Pt::from_i32(if horizontal { 24 } else { 40 })
+            );
+            assert_eq!(
+                intervals[2].0 + intervals[2].1,
+                Pt::from_i32(if horizontal { 272 } else { 200 })
+            );
+            assert!(intervals.iter().all(|(_, size)| *size > Pt::ZERO));
+            for adjacent in intervals.windows(2) {
+                assert_eq!(adjacent[0].0 + adjacent[0].1, adjacent[1].0, "edge {group}");
+            }
+        }
+    }
+
+    #[test]
+    fn page_margin_auto_uses_content_widths_instead_of_equal_halves() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<p>BODY</p>",
+                "@page {size:320pt 240pt;margin:40pt 48pt 40pt 24pt;
+                @top-left {content:'X';background:#d9ede3}
+                @top-right {content:'XXX';background:#d9ede3}}
+             html,body {font:10pt/12pt Courier;margin:0}",
+            )
+            .expect("render");
+        let rects = page_margin_background_rects(&document.pages[0]);
+        assert_eq!(rects.len(), 2);
+        assert_eq!(
+            (rects[0].width, rects[1].width),
+            (Pt::from_i32(62), Pt::from_i32(186))
+        );
+    }
+
+    #[test]
+    fn page_margin_auto_resets_an_inherited_width_and_ignores_negative_width() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<p>ONE</p><p>TWO</p>",
+                "@page {size:320pt 240pt;margin:40pt 48pt 40pt 24pt;
+                @top-left {content:'HEADER';width:60pt;background:#d9ede3}}
+             @page:first {@top-left {width:auto;width:-20pt}}
+             html,body {font:10pt/12pt Courier;margin:0} p+p {break-before:page}",
+            )
+            .expect("render");
+        assert_eq!(document.pages.len(), 2);
+        assert_eq!(
+            page_margin_background_rects(&document.pages[0])[0].width,
+            Pt::from_i32(248)
+        );
+        assert_eq!(
+            page_margin_background_rects(&document.pages[1])[0].width,
+            Pt::from_i32(60)
+        );
+    }
+
+    #[test]
+    fn page_margin_running_forms_use_the_same_joint_slot_geometry() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<div class='left'>L</div><div class='right'>R</div><p>BODY</p>",
+                "@page {size:320pt 240pt;margin:40pt 48pt 40pt 24pt;
+                @top-left {content:element(left);background:#d9ede3}
+                @top-right {content:element(right);background:#d9ede3}}
+             html,body {font:10pt/12pt Courier;margin:0}
+             .left {position:running(left);width:40pt}
+             .right {position:running(right);width:80pt}",
+            )
+            .expect("render");
+        let rects = page_margin_background_rects(&document.pages[0]);
+        assert_eq!(rects.len(), 2);
+        assert_eq!(rects[0].x + rects[0].width, rects[1].x);
+        assert_eq!(rects[1].x + rects[1].width, Pt::from_i32(272));
+        let forms: Vec<_> = document.pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawForm {
+                    x,
+                    width,
+                    resource_id,
+                    ..
+                } if resource_id.starts_with("css-running-") => Some((*x, *width)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            forms,
+            [
+                (Pt::from_i32(24), Pt::from_i32(40)),
+                (Pt::from_i32(192), Pt::from_i32(80))
+            ]
+        );
+    }
+
     #[test]
     fn page_counter_programs_finalize_after_pagination() {
         let engine = FullBleed::builder().build().expect("engine");
@@ -12425,8 +12804,27 @@ mod tests {
                 Command::DrawRect { x, width, .. } if fill == green => Some((*x, *width)),
                 _ => None,
             })
-            .expect("expanded running-element margin background");
-        assert_eq!(expanded_green_rect, (Pt::ZERO, Pt::from_f32(150.0)));
+            .expect("jointly allocated running-element margin background");
+        let blue = page_margin_background_rects_for_color(
+            &document.pages[0],
+            Color::rgb(29.0 / 255.0, 78.0 / 255.0, 216.0 / 255.0),
+        );
+        assert_eq!(blue.len(), 1);
+        assert_eq!(blue[0].x, Pt::ZERO);
+        assert!(blue[0].width > Pt::ZERO);
+        assert_eq!(blue[0].width, expanded_green_rect.0);
+        assert_eq!(
+            expanded_green_rect.0 + expanded_green_rect.1,
+            Pt::from_f32(150.0)
+        );
+        assert!(
+            document.pages[0]
+                .commands
+                .iter()
+                .any(|command| matches!(command,
+            Command::DrawForm { x, width, resource_id, .. }
+                if resource_id == &selected && *x == Pt::ZERO && *width == Pt::from_f32(150.0)))
+        );
     }
 
     #[test]
@@ -12557,17 +12955,15 @@ mod tests {
             bottom: Pt::from_f32(18.0),
             left: Pt::from_f32(18.0),
         };
-        let (_, left_corner_align) = page_margin_box_rect(
+        let (_, left_corner_align) = page_margin_box_container(
             page_size,
             margins,
             style::CssPageMarginBoxKind::TopLeftCorner,
-            None,
         );
-        let (_, right_corner_align) = page_margin_box_rect(
+        let (_, right_corner_align) = page_margin_box_container(
             page_size,
             margins,
             style::CssPageMarginBoxKind::TopRightCorner,
-            None,
         );
         assert_eq!(left_corner_align, TextAlign::Right);
         assert_eq!(right_corner_align, TextAlign::Left);
@@ -14453,6 +14849,151 @@ mod tests {
     }
 
     #[test]
+    fn inline_flex_children_preserve_their_box_and_font_metrics() {
+        let engine = FullBleed::builder()
+            .register_font_file(repo_font_path("Inter-Variable.ttf"))
+            .build()
+            .expect("engine with Inter");
+        for display in ["flex", "inline-flex"] {
+            for tag in ["span", "strong", "a"] {
+                let html = format!(
+                    "<div class='row'><{tag} class='brand' href='https://example.invalid/order'>Northstar Studio</{tag}><div>Orders</div></div>"
+                );
+                let css = format!(
+                    "@page {{ size:400pt 120pt; margin:20pt; }} body {{ margin:0; font:10pt Inter; }} .row {{ display:{display}; width:360pt; align-items:center; }} .brand {{ font:15pt Inter; white-space:nowrap; margin-right:12pt; }}"
+                );
+                let document = engine.render_to_document(&html, &css).expect("render");
+                let positions = document.pages[0]
+                    .commands
+                    .iter()
+                    .filter_map(|command| match command {
+                        Command::DrawString { text, x, .. }
+                            if text == "Northstar Studio" || text == "Orders" =>
+                        {
+                            Some((text.as_str(), *x))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                let brand = positions
+                    .iter()
+                    .find(|(text, _)| *text == "Northstar Studio")
+                    .expect("brand")
+                    .1;
+                let link = positions
+                    .iter()
+                    .find(|(text, _)| *text == "Orders")
+                    .expect("link")
+                    .1;
+                // The vendored font's unkerned hmtx advance is 15844/2048 em.
+                // A direct flex item retains that complete run and its margin.
+                let expected = Pt::from_f32(15.0).mul_ratio(15844, 2048) + Pt::from_f32(12.0);
+                assert!(
+                    (link - brand - expected).to_f32().abs() < 0.1,
+                    "{display} {tag}: {positions:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inline_flex_children_keep_authored_width_padding_and_margins() {
+        let engine = FullBleed::builder().build().expect("engine");
+        for display in ["flex", "inline-flex"] {
+            let html = "<div class='row'><span class='item'>First</span><div>Second</div></div>";
+            let css = format!(
+                "@page {{ size:300pt 100pt; margin:0; }} body {{ margin:0; }} .row {{ display:{display}; width:300pt; }} .item {{ box-sizing:content-box; width:80pt; padding:0 6pt; margin:0 12pt; }}"
+            );
+            let document = engine.render_to_document(html, &css).expect("render");
+            let positions = document.pages[0]
+                .commands
+                .iter()
+                .filter_map(|command| match command {
+                    Command::DrawString { text, x, .. } if text == "First" || text == "Second" => {
+                        Some((text.as_str(), *x))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                positions[0],
+                ("First", Pt::from_f32(18.0)),
+                "{display}: {positions:?}"
+            );
+            assert_eq!(positions[1].0, "Second");
+            assert!(
+                (positions[1].1.to_f32() - 116.0).abs() < 0.01,
+                "{display}: {positions:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn inline_flex_semantic_text_containers_keep_item_boxes() {
+        let engine = FullBleed::builder()
+            .register_font_file(repo_font_path("Inter-Variable.ttf"))
+            .build()
+            .expect("engine with Inter");
+        for display in ["flex", "inline-flex", "grid", "inline-grid"] {
+            for tag in [
+                "p", "h1", "h2", "h3", "h4", "h5", "h6", "a", "strong", "label",
+            ] {
+                let html = format!(
+                    "<{tag} class='row'><span class='mark'>I</span><span>Value</span></{tag}>"
+                );
+                let css = format!(
+                    "@page {{size:300pt 100pt;margin:0}} body {{margin:0}} .row {{display:{display};width:280pt;margin:0;padding:0;font:10pt Inter;grid-template-columns:18pt 1fr}} .mark {{width:12pt;margin-right:6pt}}"
+                );
+                let document = engine.render_to_document(&html, &css).expect("render");
+                let positions = document.pages[0]
+                    .commands
+                    .iter()
+                    .filter_map(|command| match command {
+                        Command::DrawString { text, x, y, .. }
+                            if text == "I" || text == "Value" =>
+                        {
+                            Some((text.as_str(), *x, *y))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(positions.len(), 2, "{tag} {display}: {positions:?}");
+                assert_eq!(positions[0].0, "I");
+                assert_eq!(positions[1].0, "Value");
+                assert!(
+                    (positions[1].1 - positions[0].1 - Pt::from_f32(18.0))
+                        .to_f32()
+                        .abs()
+                        < 0.1,
+                    "{tag} {display}: {positions:?}"
+                );
+                assert_eq!(
+                    positions[0].2, positions[1].2,
+                    "{tag} {display}: {positions:?}"
+                );
+                let semantic_role = match tag {
+                    "p" => Some("P"),
+                    "h1" => Some("H1"),
+                    "h2" => Some("H2"),
+                    "h3" => Some("H3"),
+                    "h4" => Some("H4"),
+                    "h5" => Some("H5"),
+                    "h6" => Some("H6"),
+                    _ => None,
+                };
+                if let Some(expected) = semantic_role {
+                    assert!(
+                        document.pages[0].commands.iter().any(|command| {
+                            matches!(command, Command::BeginTag { role, .. } if role == expected)
+                        }),
+                        "{tag} {display} lost its semantic role"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn definite_flex_item_width_caps_its_automatic_minimum() {
         let html =
             "<html><body><div class='row'><div class='item'>123456789</div></div></body></html>";
@@ -15551,6 +16092,33 @@ mod tests {
             compiled.render_many_to_buffer(0),
             Err(FullBleedError::EmptyDocumentSet)
         ));
+    }
+
+    #[test]
+    fn compiled_preview_owns_the_template_after_engine_drop() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let html = "<p>Compiled {{label}}</p><p style='break-before: page'>Second page</p>";
+        let css = "@page { size: 180pt 120pt; margin: 12pt; } p { color: #345678; }";
+        let expected = engine
+            .render_image_pages(html, css, 48)
+            .expect("ordinary preview");
+        let compiled = engine.compile_document(html, css).expect("compile");
+        drop(engine);
+        assert_eq!(compiled.page_count(), 2);
+        compiled
+            .render_bindings_to_buffer(&HashMap::from([(
+                "label".to_string(),
+                vec!["changed".to_string()],
+            )]))
+            .expect("binding output");
+        assert_eq!(
+            compiled.render_image_pages(48).expect("owned preview"),
+            expected
+        );
+        assert_eq!(
+            compiled.render_image_pages(48).expect("repeated preview"),
+            expected
+        );
     }
 
     #[test]

@@ -97,6 +97,18 @@ def test_a11y_contract_reports_duplicate_ids_and_missing_idrefs() -> None:
     assert "IDREF_MISSING" in codes
 
 
+def test_semantic_walk_preserves_paths_for_reused_nodes_and_rejects_cycles() -> None:
+    shared = el("p", "Shared", id="repeat")
+    report = A11yContract().validate(el("main", shared, "Text", shared), mode=None)
+    duplicate = next(diag for diag in report["diagnostics"] if diag["code"] == "ID_DUPLICATE")
+    assert duplicate["first_seen_path"] == "/main[1]/p[1]"
+    assert duplicate["path"] == "/main[1]/p[2]"
+    cyclic = el("main")
+    cyclic.children.append(cyclic)
+    with pytest.raises(ValueError, match="Cyclic component"):
+        A11yContract().validate(cyclic, mode=None)
+
+
 def test_to_html_raise_mode_fails_on_missing_image_alt() -> None:
     @Document(title="A11y", bootstrap=False)
     def app() -> object:

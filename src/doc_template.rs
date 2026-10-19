@@ -55,7 +55,10 @@ fn resolve_page_generated_values<T: Clone>(
     resolved
 }
 
-fn collect_page_generated_content(pages: &[crate::canvas::Page]) -> Vec<PageGeneratedContent> {
+fn collect_page_generated_content(
+    pages: &[crate::canvas::Page],
+    running_layouts: &crate::running_layout::RunningLayouts,
+) -> Vec<PageGeneratedContent> {
     let mut form_sizes = HashMap::<String, (Pt, Pt)>::new();
     for page in pages {
         for command in &page.commands {
@@ -90,14 +93,18 @@ fn collect_page_generated_content(pages: &[crate::canvas::Page]) -> Vec<PageGene
                 continue;
             };
             if let Some(name) = key.strip_prefix(META_RUNNING_ELEMENT_PREFIX) {
-                if let Some((width, height)) = form_sizes.get(value) {
+                let size = form_sizes
+                    .get(value)
+                    .copied()
+                    .or_else(|| running_layouts.get(value).map(|_| (Pt::ZERO, Pt::ZERO)));
+                if let Some((width, height)) = size {
                     running
                         .entry(name.to_string())
                         .or_default()
                         .push(RunningElementValue {
                             resource_id: value.clone(),
-                            width: *width,
-                            height: *height,
+                            width,
+                            height,
                         });
                 }
             } else if let Some(name) = key.strip_prefix(META_NAMED_STRING_PREFIX) {
@@ -127,9 +134,89 @@ fn trace_b64(value: &str) -> String {
     crate::base64::encode_url_safe_no_pad(value.as_bytes())
 }
 
-fn owner_trace_fields(owner_meta: &[(String, String)]) -> String {
+#[cfg(test)]
+mod provenance_tests {
+    use super::*;
+    use crate::flowable::{ContainerFlowable, MetaFlowable, Spacer, SplitContext};
+
+    fn authored(source: &str, child: Box<dyn Flowable>) -> Box<dyn Flowable> {
+        Box::new(MetaFlowable::new(
+            child,
+            vec![("fb.owner.source_id".to_string(), source.to_string())],
+        ))
+    }
+
+    #[test]
+    fn fragment_provenance_tracks_remaining_authored_roots_after_split() {
+        let first = authored("first", authored("nested", Box::new(Spacer::new(12.0))));
+        let second = authored("second", Box::new(Spacer::new(12.0)));
+        let anonymous = MetaFlowable::new(
+            Box::new(ContainerFlowable::new(vec![first, second], 12.0, 12.0)),
+            vec![("fb.reading.layout".to_string(), "block".to_string())],
+        );
+        assert_eq!(anonymous.diagnostic_source_ids(), ["first", "second"]);
+        let (head, tail) = anonymous
+            .split_with_context(
+                Pt::from_f32(100.0),
+                Pt::from_f32(12.0),
+                SplitContext::at_fragment_start(),
+            )
+            .expect("The anonymous container should split between its authored children");
+        assert_eq!(head.diagnostic_source_ids(), ["first"]);
+        assert_eq!(tail.diagnostic_source_ids(), ["second"]);
+    }
+
+    #[test]
+    fn fragment_provenance_preserves_arbitrary_ids_and_deduplicates_in_order() {
+        let source = "first,|=\"\n\u{00e9}";
+        let anonymous = ContainerFlowable::new(
+            vec![
+                authored(source, Box::new(Spacer::new(12.0))),
+                authored("second", Box::new(Spacer::new(12.0))),
+                authored(source, Box::new(Spacer::new(12.0))),
+            ],
+            12.0,
+            12.0,
+        );
+        let provenance = TraceProvenance::for_flowable(&anonymous);
+        assert_eq!(provenance.source_ids, [source, "second"]);
+        let packet = owner_trace_fields(&provenance);
+        let encoded = packet
+            .strip_prefix("|source_ids_b64=")
+            .expect("Only source IDs were authored");
+        let decoded: Vec<String> = encoded
+            .split(',')
+            .map(|value| {
+                String::from_utf8(crate::base64::decode_url_safe_no_pad(value).unwrap()).unwrap()
+            })
+            .collect();
+        assert_eq!(decoded, [source, "second"]);
+    }
+}
+
+struct TraceProvenance {
+    metadata: Vec<(String, String)>,
+    source_ids: Vec<String>,
+}
+
+impl TraceProvenance {
+    fn for_flowable(flowable: &dyn Flowable) -> Self {
+        let mut seen = BTreeSet::new();
+        Self {
+            metadata: flowable.diagnostic_metadata(),
+            source_ids: flowable
+                .diagnostic_source_ids()
+                .into_iter()
+                .filter(|source| !source.is_empty() && seen.insert(source.clone()))
+                .collect(),
+        }
+    }
+}
+
+fn owner_trace_fields(owner_meta: &TraceProvenance) -> String {
     let get = |key: &str| {
         owner_meta
+            .metadata
             .iter()
             .find_map(|(candidate, value)| (candidate == key).then(|| value.as_str()))
     };
@@ -147,6 +234,15 @@ fn owner_trace_fields(owner_meta: &[(String, String)]) -> String {
             fields.push(format!("{field}={}", trace_b64(value)));
         }
     }
+    if !owner_meta.source_ids.is_empty() {
+        // URL-safe base64 cannot contain commas or the trace field separators.
+        let encoded = owner_meta
+            .source_ids
+            .iter()
+            .map(|value| trace_b64(value))
+            .collect::<Vec<_>>();
+        fields.push(format!("source_ids_b64={}", encoded.join(",")));
+    }
     if fields.is_empty() {
         String::new()
     } else {
@@ -159,12 +255,13 @@ fn emit_pagination_layout_event(
     source_order: usize,
     segment_index: usize,
     flowable_name: &str,
-    owner_meta: &[(String, String)],
+    owner_meta: &TraceProvenance,
     frame_index: usize,
     is_last_frame: bool,
     placed_on_page_before: bool,
     trace: AddTrace,
     overflow_severity: Option<&str>,
+    split_failure: Option<&crate::flowable::SplitFailure>,
 ) {
     let placed = trace.placed_rect.unwrap_or(crate::types::Rect {
         x: Pt::ZERO,
@@ -198,6 +295,23 @@ fn emit_pagination_layout_event(
         placed.height.to_milli_i64(),
         owner_trace_fields(owner_meta),
     );
+    let value = if let Some(failure) = split_failure {
+        let mut seen = BTreeSet::new();
+        let sources = failure
+            .source_ids
+            .iter()
+            .filter(|source| !source.is_empty() && seen.insert(source.as_str()))
+            .map(|source| trace_b64(source))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{value}|split_failure_reason_b64={}|split_failure_sources_b64={}",
+            trace_b64(failure.reason),
+            sources
+        )
+    } else {
+        value
+    };
     canvas.meta(META_PAGINATION_EVENT_KEY, value);
 }
 
@@ -211,7 +325,7 @@ fn emit_pagination_transition_event(
     to_frame_index: usize,
     reason: &str,
     flowable_name: Option<&str>,
-    owner_meta: &[(String, String)],
+    owner_meta: &TraceProvenance,
     source_order: Option<usize>,
     segment_index: Option<usize>,
 ) {
@@ -258,6 +372,7 @@ pub struct DocTemplate {
     story: Vec<Box<dyn Flowable>>,
     debug: Option<Arc<DebugLogger>>,
     debug_doc_id: Option<usize>,
+    running_layouts: crate::running_layout::RunningLayouts,
 }
 
 impl DocTemplate {
@@ -267,6 +382,7 @@ impl DocTemplate {
             story: Vec::new(),
             debug: None,
             debug_doc_id: None,
+            running_layouts: crate::running_layout::RunningLayouts::default(),
         }
     }
 
@@ -278,6 +394,14 @@ impl DocTemplate {
 
     pub fn add_flowable(&mut self, flowable: Box<dyn Flowable>) {
         self.story.push(flowable);
+    }
+
+    pub(crate) fn with_running_layouts(
+        mut self,
+        running_layouts: crate::running_layout::RunningLayouts,
+    ) -> Self {
+        self.running_layouts = running_layouts;
+        self
     }
 
     pub fn build(self) -> Result<Document, FullBleedError> {
@@ -501,7 +625,7 @@ impl DocTemplate {
             let mut suppress_break_before = false;
             loop {
                 let current_name = current.debug_name().to_string();
-                let current_owner_meta = current.diagnostic_metadata();
+                let current_owner_meta = TraceProvenance::for_flowable(current.as_ref());
                 let pagination = current.pagination();
                 let ends_with_vertical_fragmentainer = current.ends_with_vertical_fragmentainer();
                 let mut named_page_advanced = false;
@@ -659,6 +783,7 @@ impl DocTemplate {
 
                 let frame = &mut frames[frame_index];
                 let add_result = frame.add(current, &mut canvas);
+                let split_failure = frame.take_split_failure();
                 let deferred_footnotes = frame.take_deferred_footnotes();
                 match add_result {
                     AddResult::Placed(trace) => {
@@ -673,6 +798,7 @@ impl DocTemplate {
                             placed_on_page,
                             trace,
                             None,
+                            split_failure.as_ref(),
                         );
                         placed_on_page = true;
                         page_flowables += 1;
@@ -737,6 +863,7 @@ impl DocTemplate {
                             placed_on_page,
                             trace,
                             None,
+                            split_failure.as_ref(),
                         );
                         emit_pagination_transition_event(
                             &mut canvas,
@@ -786,6 +913,7 @@ impl DocTemplate {
                             placed_on_page,
                             trace,
                             Some(overflow_severity),
+                            split_failure.as_ref(),
                         );
                         emit_pagination_transition_event(
                             &mut canvas,
@@ -826,7 +954,8 @@ impl DocTemplate {
 
         let mut document = canvas.finish_without_show();
         let total_pages = document.pages.len();
-        let generated_content = collect_page_generated_content(&document.pages);
+        let generated_content =
+            collect_page_generated_content(&document.pages, &self.running_layouts);
         let mut page_counter = 0i32;
         for (index, page) in document.pages.iter_mut().enumerate() {
             let template_name = page.commands.iter().find_map(|command| match command {
@@ -874,12 +1003,35 @@ impl DocTemplate {
                         .get(index)
                         .map(|content| content.named_strings.clone())
                         .unwrap_or_default(),
+                    self.running_layouts.clone(),
                 ),
             );
             let mut overlay_document = overlay.finish();
             let Some(overlay_page) = overlay_document.pages.pop() else {
                 continue;
             };
+            if overlay_page.commands.is_empty() {
+                // A deferred selection may resolve to no paint. Do not add
+                // graphics-state operators to an otherwise unchanged page.
+                continue;
+            }
+            if let Some(error) = overlay_page
+                .commands
+                .iter()
+                .find_map(|command| match command {
+                    Command::Meta { key, value }
+                        if key == crate::running_layout::FIT_ERROR_META =>
+                    {
+                        Some(value)
+                    }
+                    _ => None,
+                })
+            {
+                return Err(FullBleedError::UnplaceableFlowable(format!(
+                    "{}{error}",
+                    crate::running_layout::FIT_ERROR_PREFIX
+                )));
+            }
             let overlay_command_count = overlay_page.commands.len();
             let mut finalized_commands = Vec::with_capacity(
                 page.commands

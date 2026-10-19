@@ -179,6 +179,81 @@ pub(crate) fn parse_declaration_block(input: &str) -> Result<DeclarationBlock> {
     parse_declarations(input, 0, &mut budget)
 }
 
+/// Inspect authored page geometry without evaluating selectors, media or layout.
+/// Consumers that own paper settings can reject competing declarations while
+/// still accepting page furniture. Strings, comments and margin-box declarations
+/// must not be mistaken for declarations on the page itself.
+pub(crate) fn stylesheet_page_geometry(input: &str) -> Result<Vec<(String, String, usize)>> {
+    let sheet = parse_stylesheet(input)?;
+    let mut found = Vec::new();
+    let mut pending: Vec<_> = sheet.rules.iter().rev().collect();
+    while let Some(rule) = pending.pop() {
+        let Rule::At(rule) = rule else { continue };
+        let name = parse_identifier(&rule.name).unwrap_or_else(|| rule.name.clone());
+        if name.eq_ignore_ascii_case("page") {
+            let decoded;
+            let block = match &rule.block {
+                Some(AtRuleBlock::Declarations(block)) => Some(block),
+                Some(AtRuleBlock::Raw(text)) => {
+                    decoded = parse_declaration_block(text)?;
+                    Some(&decoded)
+                }
+                _ => None,
+            };
+            if let Some(block) = block {
+                for declaration in &block.declarations {
+                    let property = parse_identifier(&declaration.name)
+                        .unwrap_or_else(|| declaration.name.clone())
+                        .to_ascii_lowercase();
+                    if matches!(property.as_str(), "size" | "page-orientation" | "margin")
+                        || property.starts_with("margin-")
+                    {
+                        found.push((rule.prelude.clone(), property, rule.source_range.start));
+                    }
+                }
+            }
+        }
+        if let Some(AtRuleBlock::Rules(nested)) = &rule.block {
+            pending.extend(nested.iter().rev());
+        }
+    }
+    Ok(found)
+}
+
+/// Inspect nested margin rules without treating strings or comments as rules.
+/// The declaration AST deliberately omits nested at-rules, so parse the exact
+/// bounded source of each page block using the same tokenizer and budgets.
+pub(crate) fn stylesheet_page_margins(input: &str) -> Result<Vec<(String, String, usize)>> {
+    let sheet = parse_stylesheet(input)?;
+    let mut found = Vec::new();
+    let mut pending: Vec<_> = sheet.rules.iter().rev().collect();
+    let mut budget = Budget::default();
+    while let Some(rule) = pending.pop() {
+        let Rule::At(rule) = rule else { continue };
+        let name = parse_identifier(&rule.name).unwrap_or_else(|| rule.name.clone());
+        if name.eq_ignore_ascii_case("page") {
+            let source = &input[rule.source_range.clone()];
+            if let Some((open, b'{')) = scan_to_rule_delimiter(source, 0, rule.source_range.start)?
+            {
+                let (body, _) = extract_block(source, open, rule.source_range.start)?;
+                let offset = rule.source_range.start + open + 1;
+                for nested in parse_rule_list(body, offset, 1, &mut budget)? {
+                    if let Rule::At(nested) = nested {
+                        let name = parse_identifier(&nested.name)
+                            .unwrap_or(nested.name)
+                            .to_ascii_lowercase();
+                        found.push((rule.prelude.clone(), name, nested.source_range.start));
+                    }
+                }
+            }
+        }
+        if let Some(AtRuleBlock::Rules(nested)) = &rule.block {
+            pending.extend(nested.iter().rev());
+        }
+    }
+    Ok(found)
+}
+
 fn ensure_input_bound(input: &str) -> Result<()> {
     if input.len() > MAX_CSS_BYTES {
         return Err(Error::new(
@@ -1302,6 +1377,58 @@ mod tests {
         assert!(parse_stylesheet("a { color: red").is_err());
         assert!(parse_stylesheet("/* never closed").is_err());
         assert!(parse_declaration_block("content: \"never closed").is_err());
+    }
+
+    #[test]
+    fn authored_page_geometry_uses_syntax_and_retains_rule_order_and_locations() {
+        let css = r#"/* @page { size:A3 } */
+            p::before { content:"@page { margin:0 }"; margin:2pt }
+            @page { @top-left { content:"Title"; margin:3pt } color:blue }
+            @media print { @page :first { margin-top:12mm; size:A5 } }
+            @layer paper { @page report { page-orientation:rotate-left } }
+            @\70 age { m\61 rgin:0 }
+        "#;
+        let found = stylesheet_page_geometry(css).unwrap();
+        assert_eq!(found.len(), 4);
+        assert_eq!(
+            found[0],
+            (
+                ":first".into(),
+                "margin-top".into(),
+                css.find("@page :first").unwrap()
+            )
+        );
+        assert_eq!(found[1].1, "size");
+        assert_eq!(found[2].0, "report");
+        assert_eq!(found[2].1, "page-orientation");
+        assert_eq!(found[3].1, "margin");
+        assert!(stylesheet_page_geometry("@media print { .notice { color:red }").is_err());
+    }
+
+    #[test]
+    fn authored_page_margins_ignore_quoted_rules_and_keep_nested_rule_locations() {
+        let css = r#"/* @page { @top-left {content:'fake'} } */
+            p::before { content:"@page { @bottom-right { content:'fake' } }" }
+            @media print { @page report:first {color:red;
+                @top-left {content:"real"} @bottom-right {content:counter(page)}
+            } }
+            @\70 age { @top\2d center {content:"escaped"} }
+        "#;
+        let found = stylesheet_page_margins(css).unwrap();
+        assert_eq!(found.len(), 3);
+        assert_eq!(
+            (&found[0].0[..], &found[0].1[..]),
+            ("report:first", "top-left")
+        );
+        assert_eq!(
+            (&found[1].0[..], &found[1].1[..]),
+            ("report:first", "bottom-right")
+        );
+        assert_eq!(found[2].1, "top-center");
+        for (_, _, offset) in found {
+            assert!(css[offset..].starts_with('@'));
+        }
+        assert!(stylesheet_page_margins("@page { @top-left {content:'broken'}").is_err());
     }
 
     #[test]

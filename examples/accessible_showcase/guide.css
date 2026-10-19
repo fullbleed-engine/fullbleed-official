@@ -1,0 +1,38 @@
+/* The same authored class names work in PDF and static HTML exports. */
+@font-face { font-family: Inter; src: url('fonts/Inter-Variable.ttf'); }
+@font-face { font-family: 'DM Serif Display'; src: url('fonts/DMSerifDisplay-Regular.ttf'); }
+html, body { margin: 0; padding: 0; }
+body { font-family: Inter; font-size: 10.5pt; line-height: 1.5; color: #17382e; }
+h1, h2, h3, p, ul { margin: 0; }
+h1, h2, h3 { font-weight: 400; }
+h1, h2 { font-family: 'DM Serif Display'; }
+h2 { font-size: 22pt; line-height: 1.15; margin-bottom: 11pt; }
+h3 { font-size: 11pt; font-weight: 700; line-height: 1.35; margin-bottom: 7pt; }
+strong { font-weight: 700; }
+.sheet { position: relative; width: 210mm; height: 296.9mm; padding: 15mm 17mm 17mm; background: #f8f5ec; break-after: page; }
+.sheet:last-child { break-after: auto; }
+.brand { font-family: 'DM Serif Display'; font-size: 21pt; line-height: 1.1; border-bottom: 1pt solid #17382e; padding-bottom: 10pt; margin-bottom: 21pt; }
+.eyebrow { font-size: 9pt; font-weight: 600; letter-spacing: .8pt; text-transform: uppercase; margin-bottom: 10pt; }
+.cover-title { font-size: 46pt; line-height: 1.03; max-width: 460pt; margin-bottom: 14pt; }
+.intro { font-size: 12pt; line-height: 1.55; max-width: 460pt; }
+.garden { display: block; width: 176mm; height: 53mm; margin: 14pt 0 18pt; }
+.programs { gap: 14pt; margin-bottom: 19pt; }
+.program-card { border-top: 1.5pt solid #a23e24; padding-top: 8pt; }
+.program-card p { font-size: 10pt; line-height: 1.5; }
+.welcome { padding: 14pt 17pt; background: #e3eadc; }
+.welcome h2 { font-size: 19pt; margin-bottom: 6pt; }
+.details .eyebrow { padding-top: 2pt; border-bottom: 1pt solid #17382e; padding-bottom: 12pt; margin-bottom: 24pt; }
+.page-title { font-size: 35pt; line-height: 1.08; margin-bottom: 13pt; }
+.schedule { margin: 16pt 0 20pt; font-size: 10pt; }
+.schedule caption { font-size: 9pt; color: #3c5548; padding-bottom: 10pt; }
+.schedule th { padding: 10pt 8pt; font-size: 9pt; color: #f8f5ec; background: #17382e; border-bottom: 1pt solid #17382e; }
+.schedule td { padding: 10pt 8pt; line-height: 1.5; border-bottom: .6pt solid #738577; }
+.schedule tbody tr:nth-child(even) { background: #e9eddf; }
+.visit { gap: 24pt; margin-bottom: 18pt; }
+ul { padding-left: 13pt; }
+li { padding-left: 2pt; margin-bottom: 6pt; }
+.closing { padding: 14pt 17pt; background: #17382e; color: #f8f5ec; margin-bottom: 18pt; }
+.closing h2 { font-size: 23pt; margin-bottom: 8pt; }
+.about h2 { font-size: 17pt; margin-bottom: 7pt; }
+.about p { font-size: 9pt; line-height: 1.5; margin-bottom: 8pt; }
+a { color: #17382e; text-decoration: underline; text-underline-offset: 2pt; }

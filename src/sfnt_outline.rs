@@ -83,6 +83,15 @@ impl Transform {
 }
 
 impl Face<'_> {
+    /// Absence of an outline is not itself evidence of an empty glyph: parsing
+    /// may have failed. Only a bounded empty TrueType program is proven here.
+    pub(crate) fn glyph_has_empty_truetype_program(&self, glyph: GlyphId) -> bool {
+        self.has_true_type_outlines()
+            && glyph_data_including_empty(self, glyph).is_some_and(|data| {
+                data.is_empty() || (data.len() >= 10 && read_i16(data, 0) == Some(0))
+            })
+    }
+
     pub(crate) fn outline_glyph(
         &self,
         glyph: GlyphId,
@@ -120,6 +129,11 @@ fn parse_true_type_glyph(
 }
 
 fn glyph_data<'a>(face: &'a Face<'a>, glyph: GlyphId) -> Option<&'a [u8]> {
+    let data = glyph_data_including_empty(face, glyph)?;
+    (!data.is_empty()).then_some(data)
+}
+
+fn glyph_data_including_empty<'a>(face: &'a Face<'a>, glyph: GlyphId) -> Option<&'a [u8]> {
     if glyph.0 >= face.number_of_glyphs() {
         return None;
     }
@@ -141,7 +155,7 @@ fn glyph_data<'a>(face: &'a Face<'a>, glyph: GlyphId) -> Option<&'a [u8]> {
     };
     let start = offset_at(index)?;
     let end = offset_at(index.checked_add(1)?)?;
-    if start >= end {
+    if start > end {
         return None;
     }
     checked_slice(glyf, start, end.checked_sub(start)?)

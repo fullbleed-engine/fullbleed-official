@@ -36,6 +36,7 @@ pub struct DocContext {
     pub template_name: String,
     running_elements: HashMap<String, GeneratedContentValues<RunningElementValue>>,
     named_strings: HashMap<String, GeneratedContentValues<String>>,
+    running_layouts: crate::running_layout::RunningLayouts,
 }
 
 impl DocContext {
@@ -47,6 +48,7 @@ impl DocContext {
             template_name: template_name.into(),
             running_elements: HashMap::new(),
             named_strings: HashMap::new(),
+            running_layouts: crate::running_layout::RunningLayouts::default(),
         }
     }
 
@@ -57,6 +59,7 @@ impl DocContext {
         template_name: impl Into<String>,
         running_elements: HashMap<String, GeneratedContentValues<RunningElementValue>>,
         named_strings: HashMap<String, GeneratedContentValues<String>>,
+        running_layouts: crate::running_layout::RunningLayouts,
     ) -> Self {
         Self {
             page_number,
@@ -65,6 +68,7 @@ impl DocContext {
             template_name: template_name.into(),
             running_elements,
             named_strings,
+            running_layouts,
         }
     }
 
@@ -85,5 +89,27 @@ impl DocContext {
             .get(name)?
             .select(position)
             .map(String::as_str)
+    }
+
+    pub(crate) fn running_layout(
+        &self,
+        key: &str,
+    ) -> Option<std::sync::Arc<crate::running_layout::RunningLayout>> {
+        self.running_layouts.get(key)
+    }
+
+    pub(crate) fn managed_margin_layout(
+        &self,
+        child: Box<dyn crate::flowable::Flowable>,
+        source: String,
+    ) -> crate::running_layout::RunningLayout {
+        self.running_layouts.managed(child, source)
+    }
+
+    pub(crate) fn margin_authored_style(
+        &self,
+        source: &str,
+    ) -> Option<crate::style::ComputedStyle> {
+        self.running_layouts.authored_style(source)
     }
 }

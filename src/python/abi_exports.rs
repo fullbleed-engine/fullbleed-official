@@ -284,6 +284,20 @@ fn dispatch_free_function(
             expect_arity(payload, 1)?;
             concat_css(argument(payload, 0)?).and_then(IntoPyValue::into_py_value)
         }
+        "_stylesheet_page_geometry" => {
+            expect_arity(payload, 1)?;
+            let css: String = argument(payload, 0)?;
+            crate::css_native::stylesheet_page_geometry(&css)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?
+                .into_py_value()
+        }
+        "_stylesheet_page_margins" => {
+            expect_arity(payload, 1)?;
+            let css: String = argument(payload, 0)?;
+            crate::css_native::stylesheet_page_margins(&css)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?
+                .into_py_value()
+        }
         "finalize_stamp_pdf" => {
             expect_arity(payload, 6)?;
             let template: String = argument(payload, 0)?;
@@ -979,6 +993,26 @@ fn dispatch_compiled(
                 write_hash_file(&path, &sha256_hex(&bytes))?;
             }
             Ok(PyBytes::new(py, &bytes).unbind().into_any())
+        }
+        "CompiledDocument.render_image_pages" => {
+            expect_arity(payload, 1)?;
+            let dpi: u32 = argument(payload, 0)?;
+            let pages = py
+                .allow_threads(|| compiled.render_image_pages(dpi))
+                .map_err(to_py_err)?;
+            let out = PyList::empty(py);
+            for page in pages {
+                out.append(PyBytes::new(py, &page))?;
+            }
+            Ok(out.unbind().into_any())
+        }
+        "CompiledDocument.export_render_time_pagination_trace" => {
+            expect_arity(payload, 0)?;
+            build_render_time_pagination_trace_py(
+                py,
+                &compiled.document,
+                compiled.font_registry.as_ref(),
+            )
         }
         "CompiledDocument.render_pdf_to_file" => {
             expect_arity(payload, 2)?;

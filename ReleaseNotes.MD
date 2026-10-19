@@ -1,3 +1,204 @@
+# Fullbleed Release Notes - 2.6.0a8
+
+This component preview brings the published 2.5.34 running-header and page-furniture
+corrections into the experimental package. Generated margin text and decoration
+remain outside body reading order. Compiled reflow refreshes captured headers and
+footers when record values change, including values shared with body text.
+
+Page-margin boxes resolve sizing and alignment together. Internal deferred
+running content uses the final slot width for each page and record, including
+named page sizes. Its diagnostics identify measured-box fit failures at the
+authoring source. Those checks do not establish visible-ink containment: shadows,
+transforms, positioned descendants and oversized paint can still clip. Public
+`PageBand` and `PageNumbers` constructors are not included.
+
+Components retain owned styles, named parts, literal `class_name` selectors and
+styled/unstyled HTML export. Bootstrap components and exports remain static.
+The release gates recreate Northstar, Common Ground and both accessible guide
+profiles through their component and HTML/CSS authoring paths.
+
+Changed bindings trigger full reflow for running content even when the header is
+static. Streaming output is not atomic. The independent CSS corpus retains its
+known failures and disputed references; neither the preview nor fixture-specific
+PDF/UA checks establish general CSS or accessibility conformance. Human
+assistive-technology usability and dedicated PDF/VT validation remain unverified.
+
+Python uses `2.6.0a8`; Cargo source uses `2.6.0-alpha.8`. See the
+[alpha 8 runbook](docs/release/2.6.0a8-runbook.md) for qualification and public
+verification. This entry describes a candidate until publication finishes.
+Ordinary `pip install fullbleed` continues to select the stable channel.
+
+# Fullbleed Release Notes - 2.6.0a7
+
+This component preview corrects table-caption ownership (issue #98). Each
+nonempty visible caption belongs directly to its logical Table and contains
+paragraph content. Top and bottom captions retain their reading order across
+page breaks; nested tables and batch records retain separate owners. Empty or
+hidden captions preserve their layout without creating empty caption tags.
+
+The Common Ground accessible showcase now accepts `--pdf-profile pdfua1` or
+`--pdf-profile pdfua2` for rendering and verification. Both the component and
+exported HTML/CSS paths use that profile. Its independent PDF reader also
+rejects duplicate or detached captions, alongside the existing marked-content
+and reading-order checks.
+
+Caption placement and visible document content are preserved, while tagged PDF
+structure changes. The release gates compare saved output with the qualified
+caption candidate and retain independent validation evidence. See the
+[alpha 7 runbook](docs/release/2.6.0a7-runbook.md).
+
+The component API remains experimental. Bootstrap components and HTML exports
+remain static. The authored specimen's machine checks do not establish human
+assistive-technology usability or conformance for arbitrary documents. Stable
+2.5.32 remains the default installation; this is an opt-in prerelease.
+
+# Fullbleed Release Notes - 2.6.0a6
+
+This experimental component release integrates the 2.5.32 native pagination and
+compiled-reflow corrections. Rich table cells with default baseline alignment
+can continue paragraphs and lists across pages while keeping logical cells,
+column geometry and ending decoration. Replayed and changed batches retain the
+correct visible recipients, font resources and table column widths.
+
+The component runtime retains source-aware fragmentation diagnostics. Supported
+continuations and rounded list fragments use the corrected geometry; unsupported
+alignment, row spans and monolithic content retain precise authoring-source
+failures where the engine cannot continue them. Both direct HTML/CSS and authored
+component exports are included in the release gates.
+
+The Python component API remains experimental and static. No Bootstrap JavaScript
+is included. PDF/UA-2 caption containment remains a known limitation (issue #98).
+See the [alpha 6 runbook](docs/release/2.6.0a6-runbook.md) for qualification and the
+paired/accessible showcase requirements.
+
+# Fullbleed Release Notes - 2.6.0a5
+
+This Python component candidate integrates stable 2.5.30 inline-spacing and
+2.5.31 rich-table tagging corrections. Rich cells retain their TH/TD structure
+while nested paragraphs, styled spans, lists, figures and tables own their
+content. Plain cells retain their existing text owner. Same-font colored spans
+and generated content also use the corrected logical line box at unit line height.
+
+The merge preserves the alpha's logical oversized-cell fragmentation, authored
+layout diagnostics and semantic flex/grid behavior. Components, owned styles,
+named parts and static Bootstrap/HTML export keep their existing API. The
+paired Northstar/Common Ground examples and accessible guide require their own
+installed-output, independent-reader and source-kit verification.
+
+Python uses `2.6.0a5`; Cargo source uses `2.6.0-alpha.5`. Follow the
+[alpha 5 runbook](docs/release/2.6.0a5-runbook.md). This entry describes a candidate
+until its full source, public-package and guide-delivery gates pass. Existing
+caption-containment failures must remain visible; no general accessibility,
+CSS, Bootstrap or browser-conformance claim is made. The dedicated PDF/VT
+validator remains unconfigured.
+
+---
+
+# Fullbleed Release Notes - 2.6.0a4
+
+This Python component alpha includes the stable 2.5.29 correction for isolated
+transparency groups in saved-PDF PNG previews. Previously the PDF could contain
+the correct overlapping SVG shapes while its saved-PDF preview appeared too dark.
+The reader now composites an isolated group before applying its opacity.
+
+The SVG gates also check repeated saved-PDF previews. Component coverage follows
+named-part opacity through direct documents, styled HTML exports and unstyled
+exports with host CSS. Existing expected colors and tolerances remain in place.
+
+The component API, Bootstrap kit and static HTML export behavior remain the same.
+Python uses `2.6.0a4`; Cargo source uses `2.6.0-alpha.4`. See the
+[alpha 4 runbook](docs/release/2.6.0a4-runbook.md) for the required source,
+installed-wheel, component, independent-reader and public-distribution checks.
+This entry describes a candidate until those publication gates finish.
+
+This change is scoped to isolated groups emitted by Fullbleed. It does not
+establish complete Bootstrap, browser, CSS, external-PDF or standards conformance.
+The dedicated PDF/VT validator remains unconfigured.
+
+---
+
+# Fullbleed Release Notes - 2.6.0a3
+
+This Python component alpha integrates the released 2.5.28 inset-shadow fixes.
+Signed spread, large offsets and translated rounded holes now use the corrected
+geometry; table cells share that behavior. Zero-blur shadows stay vector, clear
+edges avoid faint clipping fringes, and native previews preserve off-page blur
+support before applying the destination clip.
+
+Explicit font choices now replace an earlier variable-based font declaration.
+This fixes Bootstrap cards ignoring a document's `Theme` font and also covers
+class rules, root/part overrides, inline declarations and font shorthands.
+Installed-wheel checks inspect the embedded font program and both static HTML
+export modes. Documents that previously received the wrong font can reflow.
+
+Direct inline children of flex containers now retain their own layout boxes.
+This preserves authored font metrics, dimensions, margins and padding, including
+the space between Bootstrap navbar labels and between toast header labels.
+Paragraphs, headings and generic text elements also honor their declared flex or
+grid layout while retaining paragraph and heading tags in the rendered document.
+
+The experimental component API keeps its owned styles, literal `class_name`
+selectors, named parts and `to_html(include_styles=True/False)` exports. Bootstrap
+components remain static in PDFs and HTML. See the
+[alpha 3 runbook](docs/release/2.6.0a3-runbook.md) for qualification of the component
+and engine behavior together. Python uses `2.6.0a3`; Cargo source uses
+`2.6.0-alpha.3`. This is a candidate until the publication gates finish.
+
+The stable source retains 1,620 PASS, 24 FAIL and 18 REFERENCE-DISPUTED cases.
+The alpha's own full-corpus result must be retained separately; neither component
+coverage nor focused output checks establish complete CSS or accessibility parity.
+
+---
+
+# Fullbleed Release Notes - 2.6.0a2
+
+This opt-in Python alpha brings the qualified 2.5.27 inline SVG cascade and
+isolated-opacity fixes into the experimental component branch. Document class
+rules, inherited paint and `currentColor` reach supported inline SVG descendants.
+SVG assets loaded separately retain their own styling context.
+
+The static Bootstrap 5.0.0 kit, component-owned styles, named parts and
+styled/unstyled HTML exports retain their existing API. Components remain static
+in both PDF and HTML; no Bootstrap JavaScript is added. The 2.6.0a1 and earlier
+preview downloads stay immutable.
+
+Python uses `2.6.0a2`; Cargo uses `2.6.0-alpha.2`. The
+[alpha update runbook](docs/release/2.6.0a2-runbook.md) records the required
+installed-package, component, SVG and independent corpus qualification. This
+entry describes the candidate; registry publication requires the release gates.
+
+---
+
+# Fullbleed Release Notes - 2.6.0a1
+
+This opt-in Python alpha introduces `fullbleed.ui.experimental`: function
+components with immutable content and styles, explicit page geometry, reusable
+themes, column-based tables and authored diagnostics. The Bootstrap 5.0.0 kit
+supplies all 23 component families plus layout, content, forms and utilities.
+Components carry the pinned stylesheet and export static HTML with
+`to_html(include_styles=True/False)`. PDF controls retain printed values and
+selected states. No Bootstrap JavaScript, browser engine or required Python
+dependency is added.
+
+Custom components preserve ordinary Python signatures. Root styles and exposed
+parts are immutable overrides. Required parts must have targets; optional parts
+permit conditional content, and `forward_parts()` deliberately exposes selected
+child parts through a parent without adding elements or exposing private parts.
+The guide explains `class_name`, default versus explicit styles, eager data
+capture, migration from the stable authoring API and the earlier GitHub previews.
+
+The API remains experimental. The stable `fullbleed.ui` surface stays available;
+this does not establish cross-language parity, complete Bootstrap CSS/browser
+parity, PDF accessibility conformance or independent author usability. Existing
+native CSS and PDF/VT validation limits remain documented. HTML-only export
+still requires the installed Fullbleed distribution.
+
+Python uses `2.6.0a1`; Cargo uses the corresponding SemVer `2.6.0-alpha.1`.
+The release gate checks that both spellings, the lockfile, wheel metadata and
+installed contracts agree. This alpha distribution targets Python; the Rust
+registry's stable release is managed separately. See the
+[alpha runbook](docs/release/2.6.0a1-runbook.md) for verification and publication.
+
 # Fullbleed Release Notes - 2.5.34
 
 Compiled reflow now refreshes running headers and footers when record values

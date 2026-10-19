@@ -110,15 +110,19 @@ def _clone_element(node: Element, **patch_props: Any) -> Element:
 
 
 def _text_content(node: Any) -> str:
-    if node is None or isinstance(node, bool):
-        return ""
-    if isinstance(node, str):
-        return node
-    if isinstance(node, Element):
-        return "".join(_text_content(child) for child in node.children)
-    if isinstance(node, (list, tuple)):
-        return "".join(_text_content(child) for child in node)
-    return str(node)
+    parts: list[str] = []
+    pending = [node]
+    while pending:
+        item = pending.pop()
+        if item is None or isinstance(item, bool):
+            continue
+        if isinstance(item, Element):
+            pending.extend(reversed(item.children))
+        elif isinstance(item, (list, tuple)):
+            pending.extend(reversed(item))
+        else:
+            parts.append(str(item))
+    return "".join(parts)
 
 
 def _prop_get(props: dict[str, Any], *names: str) -> Any:
@@ -175,29 +179,41 @@ def _walk_elements(node_or_document: Any) -> tuple[list[tuple[Element, str]], di
     nodes: list[tuple[Element, str]] = []
     active: set[int] = set()
 
-    def visit(node: Any, path: str) -> None:
+    if isinstance(root, Element):
+        pending = [(root, f"/{_normalize_tag(root.tag)}[1]", False)]
+    else:
+        pending = [(item, "/fragment", False) for item in reversed(_flatten_children([root]))]
+    while pending:
+        node, path, leaving = pending.pop()
         if isinstance(node, Element):
+            if leaving:
+                active.remove(id(node))
+                continue
             if id(node) in active:
                 raise ValueError("Cyclic component element tree")
             active.add(id(node))
             nodes.append((node, path))
-            idx = 0
-            try:
-                for child in _flatten_children(node.children):
-                    if isinstance(child, Element):
-                        idx += 1
-                        visit(child, f"{path}/{_normalize_tag(child.tag)}[{idx}]")
-            finally:
-                active.remove(id(node))
-        elif isinstance(node, (list, tuple)):
-            for item in node:
-                visit(item, path)
-
-    if isinstance(root, Element):
-        visit(root, f"/{_normalize_tag(root.tag)}[1]")
-    else:
-        visit(_flatten_children([root]), "/fragment")
+            pending.append((node, path, True))
+            children = [child for child in _flatten_children(node.children) if isinstance(child, Element)]
+            pending.extend((child, f"{path}/{_normalize_tag(child.tag)}[{idx}]", False)
+                           for idx, child in reversed(list(enumerate(children, 1))))
     return nodes, meta
+
+
+def _apply_validation_mode(report: dict[str, Any]) -> dict[str, Any]:
+    """Publish an existing report after an adapter has attached source context."""
+    if report["mode"] == "warn":
+        for diag in report["diagnostics"]:
+            source_path = (diag.get("source") or {}).get("path")
+            location = " -> ".join(source_path) if source_path else diag["path"]
+            warnings.warn(
+                f"[{diag['severity']}] {diag['code']}: {diag['message']} ({location})",
+                A11yWarning,
+                stacklevel=3,
+            )
+    if report["mode"] == "raise" and report["error_count"]:
+        raise A11yValidationError("Accessibility validation failed", report)
+    return report
 
 
 class A11yContract:
@@ -368,16 +384,7 @@ class A11yContract:
             "diagnostics": diagnostics,
         }
 
-        if normalized_mode == "warn":
-            for diag in diagnostics:
-                warnings.warn(
-                    f"[{diag['severity']}] {diag['code']}: {diag['message']} ({diag['path']})",
-                    A11yWarning,
-                    stacklevel=2,
-                )
-        if normalized_mode == "raise" and errors:
-            raise A11yValidationError("Accessibility validation failed", report)
-        return report
+        return _apply_validation_mode(report)
 
     def _validate_image_semantics(self, node: Element, path: str) -> list[dict[str, Any]]:
         props = node.props

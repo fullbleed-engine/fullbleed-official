@@ -1,7 +1,7 @@
 # Python 3.14 container runtime, including transitive dependencies.
 # Keep the framework pins shared with the local FastAPI example.
 -r requirements-fastapi.txt
-fullbleed==2.5.11
+fullbleed==2.5.31
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1

@@ -696,6 +696,12 @@ impl FontRegistry {
         })
     }
 
+    pub(crate) fn glyph_program_is_empty(&self, name: &str, glyph_id: u16) -> bool {
+        self.resolve(name)
+            .and_then(|font| SfntFace::parse(&font.data, 0).ok())
+            .is_some_and(|face| face.glyph_has_empty_truetype_program(GlyphId(glyph_id)))
+    }
+
     pub(crate) fn positioned_glyph_outlines(
         &self,
         name: &str,

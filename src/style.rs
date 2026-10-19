@@ -4158,6 +4158,29 @@ pub(crate) enum CssPageMarginBoxKind {
     RightBottom,
 }
 
+impl CssPageMarginBoxKind {
+    pub fn css_name(self) -> &'static str {
+        match self {
+            Self::TopLeftCorner => "top-left-corner",
+            Self::TopLeft => "top-left",
+            Self::TopCenter => "top-center",
+            Self::TopRight => "top-right",
+            Self::TopRightCorner => "top-right-corner",
+            Self::BottomLeftCorner => "bottom-left-corner",
+            Self::BottomLeft => "bottom-left",
+            Self::BottomCenter => "bottom-center",
+            Self::BottomRight => "bottom-right",
+            Self::BottomRightCorner => "bottom-right-corner",
+            Self::LeftTop => "left-top",
+            Self::LeftMiddle => "left-middle",
+            Self::LeftBottom => "left-bottom",
+            Self::RightTop => "right-top",
+            Self::RightMiddle => "right-middle",
+            Self::RightBottom => "right-bottom",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CssPageContentPosition {
     Start,
@@ -4181,6 +4204,21 @@ pub(crate) enum CssPageMarginContentPart {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum CssPageMarginSize {
+    Auto,
+    Length(Pt),
+}
+
+impl CssPageMarginSize {
+    pub fn definite(self) -> Option<Pt> {
+        match self {
+            Self::Auto => None,
+            Self::Length(value) => Some(value),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CssPageMarginBox {
     pub kind: Option<CssPageMarginBoxKind>,
@@ -4189,11 +4227,13 @@ pub(crate) struct CssPageMarginBox {
     pub content: Option<Vec<CssPageMarginContentPart>>,
     pub color: Option<Color>,
     pub background: Option<(Color, f32)>,
-    pub width: Option<Pt>,
+    pub width: Option<CssPageMarginSize>,
     pub font_name: Option<String>,
     pub font_size: Option<Pt>,
     pub font_weight: Option<u16>,
     pub line_height: Option<CssPageLineHeight>,
+    /// Reserved component authoring opt-in; identifies the authored slot.
+    pub managed_source: Option<String>,
 }
 
 impl CssPageMarginBox {
@@ -4214,6 +4254,10 @@ impl CssPageMarginBox {
             font_size: declarations.font_size.or(self.font_size),
             font_weight: declarations.font_weight.or(self.font_weight),
             line_height: declarations.line_height.or(self.line_height),
+            managed_source: declarations
+                .managed_source
+                .clone()
+                .or_else(|| self.managed_source.clone()),
         }
     }
 }
@@ -8132,6 +8176,14 @@ fn apply_native_page_margin_box_declarations(
         "content" => {
             parsed.content = parse_page_margin_box_content(&declaration.value);
         }
+        "-fb-page-band" => {
+            if let Some(values) = crate::css_native::parse_string_or_ident_list(&declaration.value)
+            {
+                if values.len() == 1 && !values[0].is_empty() {
+                    parsed.managed_source = values.into_iter().next();
+                }
+            }
+        }
         "background" | "background-color" => {
             parsed.background = parse_color_string(&declaration.value);
         }
@@ -8139,7 +8191,16 @@ fn apply_native_page_margin_box_declarations(
             parsed.color = parse_color_string(&declaration.value).map(|(color, _)| color);
         }
         "width" => {
-            parsed.width = parse_absolute_pt_from_str(&declaration.value);
+            let width = if declaration.value.trim().eq_ignore_ascii_case("auto") {
+                Some(CssPageMarginSize::Auto)
+            } else {
+                parse_absolute_pt_from_str(&declaration.value)
+                    .filter(|value| *value >= Pt::ZERO)
+                    .map(CssPageMarginSize::Length)
+            };
+            if width.is_some() {
+                parsed.width = width;
+            }
         }
         "font-family" => {
             parsed.font_name = parse_page_font_name(&declaration.value);
@@ -16807,6 +16868,9 @@ fn apply_delta(
         computed.pending_background_color_var = Some(var.clone());
     }
     if let Some(font_name) = &delta.font_name {
+        // A winning concrete declaration must discard a lower-priority var()
+        // expression before pending substitutions run after the cascade.
+        computed.pending_font_name_var = None;
         match font_name {
             FontSpec::Value(stack) => {
                 if !stack.is_empty() {
@@ -38956,7 +39020,10 @@ mod tests {
             top_center.background,
             Some((Color::rgb(17.0 / 255.0, 138.0 / 255.0, 178.0 / 255.0), 1.0))
         );
-        assert_eq!(top_center.width, Some(Pt::from_f32(120.0)));
+        assert_eq!(
+            top_center.width,
+            Some(CssPageMarginSize::Length(Pt::from_f32(120.0)))
+        );
         assert_eq!(
             styles.base.background,
             Some((Color::rgb(1.0, 214.0 / 255.0, 214.0 / 255.0), 1.0))
@@ -44267,6 +44334,75 @@ mod tests {
         assert_eq!(child.font_name.as_ref(), "Liberation Serif");
         assert_eq!(fallback.font_name.as_ref(), "Liberation Serif");
         assert_eq!(initial.font_name.as_ref(), "Helvetica");
+    }
+
+    #[test]
+    fn font_family_cascade_concrete_replaces_pending_variable() {
+        for (css, inline) in [
+            (
+                ".x { --face: Courier; font-family: var(--face); } .x { font-family: Inter; }",
+                None,
+            ),
+            (
+                ".x { font-family: Inter; } div { --face: Courier; font-family: var(--face); }",
+                None,
+            ),
+            (
+                ".x { font-family: Inter !important; } .x { --face: Courier; font-family: var(--face); }",
+                None,
+            ),
+            (
+                ".x { --face: Courier; font-family: var(--face); }",
+                Some("font-family: Inter"),
+            ),
+            (
+                ".x { --face: Courier; font-family: var(--face); } .x { font: 12px Inter; }",
+                None,
+            ),
+        ] {
+            let resolver = StyleResolver::new(css);
+            let root = resolver.default_style();
+            let style = resolver.compute_style(&element("div", None, &["x"]), &root, inline, &[]);
+            assert_eq!(
+                style.font_name.as_ref(),
+                "Inter",
+                "{css}; inline={inline:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn font_family_cascade_keywords_replace_pending_variable() {
+        for (keyword, expected) in [
+            ("inherit", "Liberation Serif"),
+            ("unset", "Liberation Serif"),
+            ("initial", "Helvetica"),
+        ] {
+            let css = format!(
+                ".parent {{ font-family: serif; }} .child {{ --face: Courier; font-family: var(--face); }} .child {{ font-family: {keyword}; }}"
+            );
+            let resolver = StyleResolver::new(&css);
+            let root = resolver.default_style();
+            let parent_info = element("div", None, &["parent"]);
+            let parent = resolver.compute_style(&parent_info, &root, None, &[]);
+            let child = resolver.compute_style(
+                &element("span", None, &["child"]),
+                &parent,
+                None,
+                &[parent_info],
+            );
+            assert_eq!(child.font_name.as_ref(), expected, "{keyword}");
+        }
+    }
+
+    #[test]
+    fn font_family_cascade_later_variable_still_wins() {
+        let resolver = StyleResolver::new(
+            ".x { font-family: Inter; } .x { --face: Courier; font-family: var(--face); }",
+        );
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+        assert_eq!(style.font_name.as_ref(), "Courier");
     }
 
     #[test]

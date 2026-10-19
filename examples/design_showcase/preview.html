@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fullbleed · Local PDF preview</title>
+<style>
+:root{color-scheme:light;--ink:#17372d;--paper:#f6f3eb;--line:#d7d9cf;--muted:#536459;--orange:#b34125}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
+header{padding:22px 5vw 24px;background:#fff;border-bottom:1px solid var(--line)}
+.topline{display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{font-size:21px;font-weight:800;letter-spacing:-.7px}.local{font:11px/1.4 ui-monospace,monospace;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+h1{margin:18px 0 6px;font-size:clamp(25px,3.5vw,40px);font-weight:650;line-height:1.15;letter-spacing:-1.1px}
+.intro{max-width:65ch;color:var(--muted);margin:0}.toolbar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:20px}
+a{color:var(--ink);text-decoration-thickness:1px;text-underline-offset:3px}.button{display:inline-block;padding:10px 15px;border:1px solid var(--ink);border-radius:4px;text-decoration:none;font-weight:600}.primary{color:#fff;background:var(--ink)}
+.button[aria-disabled=true]{opacity:.45;pointer-events:none}.meta{color:var(--muted);font:12px/1.5 ui-monospace,monospace;margin-left:auto}
+main{max-width:1120px;margin:0 auto;padding:25px 5vw 48px}.status{display:flex;gap:10px;align-items:baseline;margin-bottom:8px}.dot{width:8px;height:8px;border-radius:50%;background:#a1782b;flex-shrink:0}.ready .dot{background:#237b4a}.error .dot{background:var(--orange)}
+#status{font-weight:650}#detail{margin:0 0 23px;color:var(--muted);font-size:13px}#error-panel{padding:16px 18px;margin:0 0 24px;border:1px solid #dbb6a7;border-radius:4px;background:#fff4ee;color:#6f281c;overflow-wrap:anywhere}#error-summary{margin:0;font-weight:600}details{margin-top:9px}summary{cursor:pointer;font-size:13px}#error{white-space:pre-wrap;max-height:360px;overflow:auto;font:12px/1.6 ui-monospace,monospace}
+#pages{display:grid;gap:26px}figure{margin:0;min-width:0}figcaption{font:11px/1.6 ui-monospace,monospace;letter-spacing:.04em;text-transform:uppercase;margin-bottom:9px;color:var(--muted)}figure img{display:block;width:100%;height:auto;background:white;border:1px solid #dddcd5;box-shadow:0 7px 24px #17372d12}
+.empty{padding:70px 20px;text-align:center;border:1px dashed var(--line);border-radius:4px;color:var(--muted)}
+footer{max-width:1120px;padding:0 5vw 25px;margin:auto;color:var(--muted);font-size:12px}code{overflow-wrap:anywhere}a:focus-visible{outline:3px solid var(--orange);outline-offset:4px}
+@media(max-width:540px){header{padding:18px 20px 22px}main{padding:22px 20px 35px}footer{padding:0 20px 25px}.meta{width:100%;margin:3px 0 0}.button{font-size:13px;padding:9px 12px}.local{max-width:135px;text-align:right}}
+</style>
+<script src="preview.js" defer></script>
+</head>
+<body>
+<header>
+  <div class="topline"><span class="brand">fullbleed</span><span class="local">Local authoring preview</span></div>
+  <h1 id="title">Your document, as you edit.</h1>
+  <p class="intro" id="intro">Save your source files. Fullbleed rerenders the PDF and refreshes its page previews here.</p>
+  <nav class="toolbar" aria-label="Download current preview">
+    <a class="button primary" id="pdf" aria-disabled="true">Download PDF</a>
+    <a class="button" id="source" aria-disabled="true">Styled HTML</a>
+    <a class="button" id="extra" aria-disabled="true">Unstyled HTML</a>
+    <span class="meta" id="meta">Waiting for the first render</span>
+  </nav>
+</header>
+<main>
+  <div class="status" id="state"><span class="dot" aria-hidden="true"></span><span id="status" role="status">Building preview…</span></div>
+  <p id="detail">The first render loads the engine and registered fonts.</p>
+  <div id="error-panel" hidden><p id="error-summary" role="alert"></p><details><summary>Show traceback</summary><pre id="error"></pre></details></div>
+  <div id="pages"><div class="empty">Your PDF pages will appear here.</div></div>
+</main>
+<footer>These images come from the finalized PDF. This editing preview is not a delivery or standards-validation gate. Run <code>compare_authoring.py</code> to verify both authoring paths.</footer>
+</body>
+</html>

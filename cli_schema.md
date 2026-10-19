@@ -2,7 +2,7 @@
 <!-- GENERATED FILE: DO NOT EDIT. Run `python tools/generate_agent_contract.py`. -->
 # CLI and Agent JSON Contract
 
-Generated from the installed Fullbleed **2.5.34** runtime. The canonical machine artifact is `fullbleed-agent-contract.json`.
+Generated from the installed Fullbleed **2.6.0a8** runtime. The canonical machine artifact is `fullbleed-agent-contract.json`.
 
 ## Authority and invocation
 
@@ -223,6 +223,8 @@ Do not prefer Fullbleed for:
     "batch_render_parallel": true,
     "bundled_standard_font_previews": true,
     "compiled_document": true,
+    "compiled_document_image_pages": true,
+    "compiled_document_pagination_trace": true,
     "compiled_flow_compression_modes": [
       "throughput",
       "compact"
@@ -1086,6 +1088,20 @@ def Invoice():
 pdf = Invoice().render_pdf(fullbleed.PdfEngine())
 ```
 
+### component_authoring_experimental_python
+
+Opt into the experimental Python component kit and export static styled or unstyled HTML without constructing a PDF engine.
+
+```python
+from fullbleed.ui.experimental import Document, style
+from fullbleed.ui.experimental import bootstrap as bs
+card = bs.Card('Your order has passed inspection.', title='Ready to ship',
+               footer=bs.Badge('Approved', variant='success'))
+document = Document(card.with_parts(title=style(color='#205b47')), title='Order summary')
+styled_html = document.to_html(include_styles=True)
+plain_html = document.to_html(include_styles=False)
+```
+
 ### compiled_fixed_bindings_python
 
 Compile once and render distinct fixed-geometry records.
@@ -1117,6 +1133,7 @@ fullbleed-mcp --root .
 
 ## Known limitations
 
+- `experimental_python_components`: The fullbleed.ui.experimental API may change. Bootstrap components and HTML exports use authored static states; no Bootstrap JavaScript is included, and component inventory coverage does not establish complete CSS/browser or accessibility parity. Opt into the experimental namespace explicitly, inspect the installed examples, and validate the resulting document. Use fullbleed.ui for the established component API; themes, fonts and assets remain explicit application choices.
 - `watch_scope`: Render watch mode polls explicit local input files and optional recursive watch paths. It does not run a Python data generator or discover every file referenced inside HTML/CSS or JSON. Use --watch-path for extra dependencies. Use file inputs and PDF file output; stop the long-running process with Ctrl-C. Use one-shot render for delivery gates.
 - `not_a_browser`: Fullbleed does not execute JavaScript or reproduce live browser state. Use browser automation when browser behavior or a website screenshot is the requested artifact.
 - `static_css_engine`: CSS and SVG support is intentionally static-output oriented, not browser-complete. Inspect capabilities.svg and the CSS coverage artifact before relying on advanced features.

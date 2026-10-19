@@ -11,6 +11,7 @@ import subprocess
 import zipfile
 
 import fullbleed
+from demo import preview_path
 from invoice import load_invoice, render_invoice
 
 ROOT = Path(__file__).resolve().parent
@@ -36,6 +37,17 @@ def main():
     def committed(path: Path) -> bytes:
         return subprocess.check_output(["git", "show", source_commit+":"+path.relative_to(REPOSITORY).as_posix()], cwd=REPOSITORY)
     content = {name: committed(ROOT/name) for name in FILES}
+    # The demo selects the installed runtime's reviewed preview. Carry each
+    # committed version-specific sample so a new preview never falls out of the
+    # standalone archive when the engine version advances.
+    prefix = ROOT.relative_to(REPOSITORY).as_posix() + "/"
+    tracked = subprocess.check_output(
+        ["git", "ls-tree", "-r", "--name-only", source_commit, "--", prefix + "static/"],
+        cwd=REPOSITORY, text=True).splitlines()
+    for name in tracked:
+        path = Path(name.removeprefix(prefix))
+        if path.parent == Path("static") and path.name.startswith("invoice-") and path.suffix == ".png":
+            content[path.as_posix()] = committed(ROOT/path)
     for path in sorted((ROOT/"fonts").iterdir()):
         if path.is_file(): content[path.relative_to(ROOT).as_posix()] = committed(path)
     for item in json.loads(content["fonts/sources.json"])["files"]:
@@ -50,7 +62,7 @@ def main():
         str(out/"invoice.pdf"), str(out/"preview"), 110, "invoice")
     assert len(previews) == 1
     png = Path(previews[0]).read_bytes()
-    assert png == content["static/invoice.png"], "Refresh and review the saved preview before packaging."
+    assert png == content[preview_path().relative_to(ROOT).as_posix()], "Refresh and review the saved preview before packaging."
     (out/"invoice.png").write_bytes(png)
     digest = lambda data: hashlib.sha256(data).hexdigest()
     manifest = {"schema": "fullbleed.python-web-starter.v1", "engineVersion": metadata.version("fullbleed"),

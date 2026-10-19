@@ -616,6 +616,54 @@ enum StreamFontKind {
     TrueTypeIdentityH,
 }
 
+// Keep the paint-fit evaluator on the same font-selection path as the writer.
+fn stream_font_selection<'a>(
+    registry: Option<&'a FontRegistry>,
+    options: &PdfOptions,
+    logical_name: &str,
+) -> io::Result<(StreamFontKind, FontEncoding, Option<&'a [u8]>)> {
+    if options.pdf_profile.requires_embedded_fonts() {
+        let Some(registry) = registry else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "{} requires a font registry for embedded font resolution",
+                    options.pdf_profile.as_str(),
+                ),
+            ));
+        };
+        let Some(font) = registry.resolve(logical_name) else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "{} requires embedded fonts; unresolved font '{}'. register an embeddable font asset.",
+                    options.pdf_profile.as_str(),
+                    logical_name,
+                ),
+            ));
+        };
+        return Ok(if options.unicode_support {
+            (
+                StreamFontKind::TrueTypeIdentityH,
+                FontEncoding::IdentityH,
+                Some(font.data.as_slice()),
+            )
+        } else {
+            (StreamFontKind::TrueTypeWinAnsi, FontEncoding::WinAnsi, None)
+        });
+    }
+    if !is_base14_font(logical_name) && options.unicode_support {
+        if let Some(font) = registry.and_then(|registry| registry.resolve(logical_name)) {
+            return Ok((
+                StreamFontKind::TrueTypeIdentityH,
+                FontEncoding::IdentityH,
+                Some(font.data.as_slice()),
+            ));
+        }
+    }
+    Ok((StreamFontKind::Type1, FontEncoding::WinAnsi, None))
+}
+
 struct StreamFont<'a> {
     logical_name: String,
     resource: String,
@@ -2595,13 +2643,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
 
                         let mut w_entries: Vec<String> = Vec::new();
                         for gid in &used_gids {
-                            let width = registry
-                                .glyph_advance_units(&font.name, *gid)
-                                .filter(|(advance, _)| *advance > 0)
-                                .map(|(advance, units_per_em)| {
-                                    format_font_units(i64::from(advance), units_per_em)
-                                })
-                                .unwrap_or_else(|| font.metrics.missing_width.to_string());
+                            let width = format_fixed(cid_glyph_width(registry, font, *gid), 5);
                             let cid = cff_subset
                                 .as_ref()
                                 .and_then(|subset| subset.old_to_new.get(gid))
@@ -5104,51 +5146,8 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let resource = format!("F{}", self.next_font_resource);
         self.next_font_resource += 1;
 
-        let mut kind = StreamFontKind::Type1;
-        let mut encoding = FontEncoding::WinAnsi;
-        let mut font_data = None;
-
-        if self.options.pdf_profile.requires_embedded_fonts() {
-            let Some(registry) = self.registry else {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "{} requires a font registry for embedded font resolution",
-                        self.options.pdf_profile.as_str()
-                    ),
-                ));
-            };
-            let Some(font) = registry.resolve(&logical_name) else {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "{} requires embedded fonts; unresolved font '{}'. register an embeddable font asset.",
-                        self.options.pdf_profile.as_str(),
-                        logical_name,
-                    ),
-                ));
-            };
-            if self.options.unicode_support {
-                kind = StreamFontKind::TrueTypeIdentityH;
-                encoding = FontEncoding::IdentityH;
-                font_data = Some(font.data.as_slice());
-            } else {
-                kind = StreamFontKind::TrueTypeWinAnsi;
-                encoding = FontEncoding::WinAnsi;
-            }
-        } else {
-            // Default to base14 fonts when possible for speed and portability.
-            let base14 = is_base14_font(&logical_name);
-            if !base14 && self.options.unicode_support {
-                if let Some(registry) = self.registry {
-                    if let Some(font) = registry.resolve(&logical_name) {
-                        kind = StreamFontKind::TrueTypeIdentityH;
-                        encoding = FontEncoding::IdentityH;
-                        font_data = Some(font.data.as_slice());
-                    }
-                }
-            }
-        }
+        let (kind, encoding, font_data) =
+            stream_font_selection(self.registry, &self.options, &logical_name)?;
 
         let start_id = self.alloc_ids(match kind {
             StreamFontKind::Type1 => 1,
@@ -6230,6 +6229,118 @@ fn shaped_glyph_unicode_map(
     map
 }
 
+enum TextPaintOp {
+    Glyph(u16),
+    Adjust(i64),
+}
+
+fn visit_shaped_tj(
+    glyphs: &[crate::text_shape::ShapedGlyph],
+    default_advances: &[i32],
+    units_per_em: u16,
+    mut visit: impl FnMut(TextPaintOp),
+) {
+    for (glyph, advance) in glyphs.iter().zip(default_advances) {
+        if glyph.glyph_id == 0 {
+            continue;
+        }
+        if glyph.x_offset != 0 {
+            visit(TextPaintOp::Adjust(font_units_fixed(
+                -i64::from(glyph.x_offset),
+                units_per_em,
+            )));
+        }
+        visit(TextPaintOp::Glyph(glyph.glyph_id));
+        let adjust = i64::from(*advance) - i64::from(glyph.x_advance);
+        if adjust != 0 {
+            visit(TextPaintOp::Adjust(font_units_fixed(adjust, units_per_em)));
+        }
+    }
+}
+
+fn cid_glyph_width(registry: &FontRegistry, font: &crate::font::RegisteredFont, gid: u16) -> i64 {
+    registry
+        .glyph_advance_units(&font.name, gid)
+        .filter(|(advance, _)| *advance > 0)
+        .map(|(advance, units_per_em)| font_units_fixed(i64::from(advance), units_per_em))
+        .unwrap_or_else(|| i64::from(font.metrics.missing_width) * 100_000)
+}
+
+pub(crate) struct TextPaintGlyph {
+    pub gid: u16,
+    pub x: i64,
+}
+
+pub(crate) struct TextPaintPlan {
+    pub font: String,
+    pub glyphs: Vec<TextPaintGlyph>,
+}
+
+/// Actual encoded text positions, including the writer's rounded TJ operations
+/// and /W widths. This deliberately does not substitute ideal shaping advances
+/// or a preview font for an unembedded standard font.
+pub(crate) fn text_paint_plan(
+    registry: &FontRegistry,
+    options: &PdfOptions,
+    name: &str,
+    text: &str,
+) -> Result<TextPaintPlan, &'static str> {
+    let name = name.trim().trim_matches('"').trim_matches('\'');
+    let font = registry.resolve(name).ok_or("unresolved_paint_font")?;
+    let (_, encoding, _) = stream_font_selection(Some(registry), options, &font.name)
+        .map_err(|_| "unresolved_paint_font")?;
+    if encoding != FontEncoding::IdentityH {
+        return Err("unsupported_paint_font_encoding");
+    }
+    let mut plan = TextPaintPlan {
+        font: font.name.clone(),
+        glyphs: Vec::new(),
+    };
+    let mut pen = Some(0_i64);
+    let mut missing = false;
+    let mut visit = |op| {
+        let Some(x) = pen else {
+            return;
+        };
+        match op {
+            TextPaintOp::Adjust(value) => pen = x.checked_sub(value),
+            TextPaintOp::Glyph(gid) => {
+                // CID zero uses the PDF default width and may paint .notdef.
+                // Reject it instead of treating missing text as whitespace.
+                missing |= gid == 0;
+                plan.glyphs.push(TextPaintGlyph { gid, x });
+                pen = x.checked_add(cid_glyph_width(registry, font, gid));
+            }
+        }
+    };
+    if let Some(shaped) = options
+        .shape_text
+        .then(|| shape_text_native(&font.data, text))
+        .flatten()
+    {
+        visit_shaped_tj(
+            &shaped.glyphs,
+            &shaped.default_advances,
+            shaped.units_per_em,
+            &mut visit,
+        );
+    } else {
+        let (_, clean) = crate::text_shape::decode_shape_options(text);
+        for ch in clean.chars() {
+            visit(TextPaintOp::Glyph(
+                registry.map_glyph_id_for_char(&font.name, ch),
+            ));
+        }
+    }
+    if missing {
+        return Err("missing_paint_glyph");
+    }
+    if pen.is_none() {
+        return Err("text_position_overflow");
+    }
+    Ok(plan)
+}
+
 fn shape_text_native(font_data: &[u8], text: &str) -> Option<ShapedText> {
     let (_, clean_text) = crate::text_shape::decode_shape_options(text);
     let face = SfntFace::parse(font_data, 0).ok()?;
@@ -6253,23 +6364,12 @@ fn shape_text_native(font_data: &[u8], text: &str) -> Option<ShapedText> {
 
     // Build a TJ array.
     let mut parts: Vec<String> = Vec::new();
-    for glyph in &shaped.glyphs {
-        let gid = glyph.glyph_id;
-        if gid == 0 {
-            continue;
-        }
-
-        if glyph.x_offset != 0 {
-            parts.push(format_font_units(-i64::from(glyph.x_offset), units_per_em));
-        }
-        parts.push(format!("<{:04X}>", gid));
-
-        let adv_default = i64::from(face.glyph_hor_advance(GlyphId(gid)).unwrap_or(0));
-        let adjust = adv_default - i64::from(glyph.x_advance);
-        if adjust != 0 {
-            parts.push(format_font_units(adjust, units_per_em));
-        }
-    }
+    visit_shaped_tj(&source_glyphs, &default_advances, units_per_em, |op| {
+        parts.push(match op {
+            TextPaintOp::Glyph(gid) => format!("<{gid:04X}>"),
+            TextPaintOp::Adjust(value) => format_fixed(value, 5),
+        });
+    });
 
     if parts.is_empty() {
         return None;
@@ -9563,6 +9663,49 @@ fn synthetic_bold_ratio_millionths(stroke_width: Pt, font_size: Pt) -> u32 {
     ((stroke.saturating_mul(1_000_000) + size / 2) / size).clamp(0, i128::from(u32::MAX)) as u32
 }
 
+pub(crate) fn synthetic_glyph_paint_bounds(
+    registry: &FontRegistry,
+    name: &str,
+    gid: u16,
+    stroke_width: Pt,
+    font_size: Pt,
+) -> Option<[f64; 4]> {
+    if gid == 0 {
+        return None;
+    }
+    let outline = registry.glyph_outline_for_id(name, gid)?;
+    let (_, bbox, _) = glyph_outline_program(
+        &outline,
+        synthetic_bold_ratio_millionths(stroke_width, font_size),
+    );
+    Some(bbox.map(serialized_real))
+}
+
+pub(crate) fn type3_glyph_paint_bounds(
+    registry: &FontRegistry,
+    name: &str,
+    gid: u16,
+) -> Option<[f64; 4]> {
+    if gid == 0 {
+        return None;
+    }
+    let outline = registry.glyph_outline_for_id(name, gid)?;
+    let mut bounds = [
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    ];
+    glyph_outline_program_observed(&outline, 0, |x, y| {
+        let (x, y) = (serialized_real(x), serialized_real(y));
+        bounds[0] = bounds[0].min(x);
+        bounds[1] = bounds[1].min(y);
+        bounds[2] = bounds[2].max(x);
+        bounds[3] = bounds[3].max(y);
+    });
+    bounds[0].is_finite().then_some(bounds)
+}
+
 fn type3_glyph_program(
     outline: &RegisteredGlyphOutline,
     synthetic_bold_millionths: u32,
@@ -9583,6 +9726,14 @@ fn type3_glyph_program(
 fn glyph_outline_program(
     outline: &RegisteredGlyphOutline,
     synthetic_bold_millionths: u32,
+) -> (String, [f32; 4], f32) {
+    glyph_outline_program_observed(outline, synthetic_bold_millionths, |_, _| {})
+}
+
+fn glyph_outline_program_observed(
+    outline: &RegisteredGlyphOutline,
+    synthetic_bold_millionths: u32,
+    mut point: impl FnMut(f32, f32),
 ) -> (String, [f32; 4], f32) {
     let scale = 1000.0 / f32::from(outline.units_per_em.max(1));
     let transform = |x: f32, y: f32| (x * scale, -y * scale);
@@ -9608,11 +9759,13 @@ fn glyph_outline_program(
                 current = transform(x, y);
                 contour_start = current;
                 include(current, &mut bbox);
+                point(current.0, current.1);
                 path.push_str(&format!("{} {} m\n", fmt(current.0), fmt(current.1)));
             }
             GlyphOutlineCommand::LineTo(x, y) => {
                 current = transform(x, y);
                 include(current, &mut bbox);
+                point(current.0, current.1);
                 path.push_str(&format!("{} {} l\n", fmt(current.0), fmt(current.1)));
             }
             GlyphOutlineCommand::QuadTo(cx, cy, x, y) => {
@@ -9628,6 +9781,9 @@ fn glyph_outline_program(
                 );
                 include(control, &mut bbox);
                 include(end, &mut bbox);
+                point(c1.0, c1.1);
+                point(c2.0, c2.1);
+                point(end.0, end.1);
                 path.push_str(&format!(
                     "{} {} {} {} {} {} c\n",
                     fmt(c1.0),
@@ -9646,6 +9802,9 @@ fn glyph_outline_program(
                 include(c1, &mut bbox);
                 include(c2, &mut bbox);
                 include(end, &mut bbox);
+                point(c1.0, c1.1);
+                point(c2.0, c2.1);
+                point(end.0, end.1);
                 path.push_str(&format!(
                     "{} {} {} {} {} {} c\n",
                     fmt(c1.0),
@@ -9712,7 +9871,21 @@ fn fmt(value: f32) -> String {
     format_fixed(millionths, 6)
 }
 
+pub(crate) fn serialized_real(value: f32) -> f64 {
+    // Use the serialization itself, including saturation and decimal rounding.
+    // Only the opt-in paint checker pays for this conversion.
+    fmt(value)
+        .parse()
+        .expect("PDF real formatter emits a finite decimal")
+}
+
 fn format_font_units(units: i64, units_per_em: u16) -> String {
+    format_fixed(font_units_fixed(units, units_per_em), 5)
+}
+
+// Integer units are 1e-5 PDF glyph units, or 1e-8 em. Both the serialized
+// widths/TJ adjustments and paint-fit pen positions use this rounding.
+fn font_units_fixed(units: i64, units_per_em: u16) -> i64 {
     let denominator = i128::from(units_per_em.max(1));
     let numerator = i128::from(units).saturating_mul(100_000_000);
     let rounded = if numerator >= 0 {
@@ -9720,10 +9893,7 @@ fn format_font_units(units: i64, units_per_em: u16) -> String {
     } else {
         (numerator - denominator / 2) / denominator
     };
-    format_fixed(
-        rounded.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64,
-        5,
-    )
+    rounded.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
 }
 
 fn format_milli(milli: i64) -> String {
@@ -9735,8 +9905,8 @@ fn format_fixed(value: i64, decimal_places: usize) -> String {
         return "0".to_string();
     }
     let sign = if value < 0 { "-" } else { "" };
-    let abs = value.abs();
-    let denominator = 10_i64.pow(decimal_places as u32);
+    let abs = value.unsigned_abs();
+    let denominator = 10_u64.pow(decimal_places as u32);
     let int_part = abs / denominator;
     let frac_part = abs % denominator;
     if frac_part == 0 {
