@@ -258,6 +258,17 @@ jobs:
       - name: Verify caption ownership and reading order across pages and records
         run: python -I tools/smoke_table_captions.py --out target/table-captions
 
+      - name: Verify page furniture stays outside body reading order
+        run: python -I tools/smoke_page_furniture.py --out target/page-furniture
+
+      - name: Retain page furniture PDFs, structure checks and previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: page-furniture-${{ runner.os }}
+          path: target/page-furniture/
+          if-no-files-found: error
+
       - name: Verify authored tables through PDF and both static HTML exports
         run: python -I tools/smoke_component_tables.py --out target/component-tables
 

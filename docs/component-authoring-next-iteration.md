@@ -317,6 +317,13 @@ repeated page furniture, with actionable errors for unsupported cases. Adding
 another generic container name would not close those gaps. `row_break="auto"`
 permits splitting; it does not force an otherwise fitting row to split.
 
+The [page-furniture implementation design](component-page-furniture-design.md)
+now records the next authoring contract and a reproduced native prerequisite:
+generated page numbers are unmarked in the public stable and alpha engines.
+Its candidate correction and saved-PDF regression gate precede exposing new
+constructors. Rich-slot sizing, fit diagnostics, record numbering and HTML
+export remain explicit acceptance requirements for that authoring work.
+
 ## Implementation order and acceptance
 
 | Order | Work | Evidence required |

@@ -9871,6 +9871,10 @@ fn with_page_margin_boxes(
                 }
             }
             canvas.save_state();
+            // Page furniture is repeated navigation, not document reading-order
+            // content. Include generated text, running elements and decoration
+            // in the same balanced artifact scope after pagination is finalized.
+            canvas.begin_artifact(None);
             if let Some((color, alpha)) = background {
                 if alpha > 0.0 {
                     canvas.save_state();
@@ -9946,6 +9950,7 @@ fn with_page_margin_boxes(
                     content_rect.height,
                 );
             }
+            canvas.end_marked_content();
             canvas.restore_state();
         });
     }
@@ -12070,6 +12075,50 @@ mod tests {
         assert_eq!(document.pages.len(), 2);
         assert!(page_contains_text(&document.pages[0], "P1"));
         assert!(page_contains_text(&document.pages[1], "P2"));
+    }
+
+    #[test]
+    fn page_margin_text_is_an_artifact_without_hiding_body_content() {
+        let engine = FullBleed::builder()
+            .pdf_profile(PdfProfile::Tagged)
+            .build()
+            .expect("engine");
+        let document = engine
+            .render_to_document(
+                "<main><p>BODY1</p><p>BODY2</p></main>",
+                "@page { size: 180pt 160pt; margin: 24pt; \
+                   @top-left { content: 'HEADER'; background: #d8e8e0; } \
+                   @bottom-right { content: 'PAGE' counter(page) '/' counter(pages); } } \
+                 * { margin: 0; font-size: 10pt; } p + p { break-before: page; }",
+            )
+            .expect("render tagged page furniture");
+        assert_eq!(document.pages.len(), 2);
+        for (index, page) in document.pages.iter().enumerate() {
+            let mut scopes = Vec::new();
+            let mut real = String::new();
+            let mut artifacts = String::new();
+            for command in &page.commands {
+                match command {
+                    Command::BeginArtifact { .. } => scopes.push(true),
+                    Command::BeginOptionalContent { .. } => scopes.push(false),
+                    Command::EndMarkedContent => {
+                        assert!(scopes.pop().is_some(), "unbalanced artifact close");
+                    }
+                    Command::DrawString { text, .. } => {
+                        if scopes.contains(&true) {
+                            artifacts.push_str(text);
+                        } else {
+                            real.push_str(text);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            assert!(scopes.is_empty(), "unclosed artifact scope");
+            assert_eq!(real, format!("BODY{}", index + 1));
+            assert!(artifacts.contains("HEADER"));
+            assert!(artifacts.contains(&format!("PAGE{}/2", index + 1)));
+        }
     }
 
     #[test]
