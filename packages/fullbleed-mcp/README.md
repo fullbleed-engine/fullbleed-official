@@ -12,11 +12,15 @@ fullbleed-mcp --root .
 ```
 
 Fullbleed MCP 0.1.1 requires Fullbleed 2.5.1 or newer. This includes the tool
-schema correction needed by strict MCP clients. To update an existing install:
+schema correction needed by strict MCP clients. To update an existing install,
+upgrade both the engine and the adapter:
 
 ```text
-python -m pip install --upgrade fullbleed-mcp
+python -m pip install --upgrade fullbleed fullbleed-mcp
 ```
+
+Naming both packages matters: upgrading only `fullbleed-mcp` can leave an older
+compatible engine installed.
 
 The initial transport is newline-delimited JSON-RPC over stdio. User-supplied document paths are confined to `--root`. The server does not require credentials, network access, a browser, system fonts, or a system PDF runtime.
 
