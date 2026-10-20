@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Render the PageBand example with Fullbleed 2.6.0a9 or later."""
+"""Render the PageBand example with Fullbleed 2.6.0a11 or later."""
 from __future__ import annotations
 
 import argparse
@@ -45,7 +45,6 @@ body {max-width:540px;margin:0 auto;padding:24px}
 [data-fb-page-band] {margin:12px 0 28px}
 footer[data-fb-page-band] {margin-top:28px}
 @media screen {
-  [data-fb-flow] {display:flex;flex-direction:column}
   main > [data-fb-flow] {margin-bottom:40px}
 }
 </style></head>''', 1)
