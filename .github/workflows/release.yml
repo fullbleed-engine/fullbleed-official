@@ -222,6 +222,15 @@ jobs:
           npm install --ignore-scripts --no-package-lock --no-save --no-audit --no-fund --prefix target/component-editor-tools pyright@1.1.414
           python -I tools/smoke_component_editor.py --pyright-root target/component-editor-tools/node_modules/pyright --out target/release-components/editor.json
 
+      - name: Verify Flow HTML exports in Chromium, Firefox and WebKit
+        run: |
+          python -m pip install playwright==1.63.0
+          python -m playwright install --with-deps chromium firefox webkit
+          python -I tools/smoke_component_flow_html.py --out target/release-components/flow-html --generate-only
+          python -I tools/smoke_component_flow_html.py --out target/release-components/flow-html --check-only --browser chromium
+          python -I tools/smoke_component_flow_html.py --out target/release-components/flow-html --check-only --browser firefox
+          python -I tools/smoke_component_flow_html.py --out target/release-components/flow-html --check-only --browser webkit
+
       - name: Retain component release evidence
         if: always()
         uses: actions/upload-artifact@v7

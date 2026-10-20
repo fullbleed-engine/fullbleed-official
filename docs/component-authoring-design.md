@@ -119,12 +119,21 @@ fragmentation can agree. The source candidate marks a block container with
 `data-fb-flow="true"` and uses `row-gap` for its spacing. This is an explicit
 Fullbleed layout extension beyond the
 [layout contexts in the CSS Gaps working draft](https://drafts.csswg.org/css-gaps-1/#column-row-gap).
-A browser's ordinary block layout will not apply that gap. Exported HTML/CSS
-remains useful for inspection and interchange with the
-same engine; a browser screenshot is not an authoritative preview of `Flow`.
-Ordinary unmarked HTML keeps its existing margin-collapse behavior. `Stack`
-continues to use flex layout. The experimental API should describe this boundary
-openly instead of implying that all three layout models are interchangeable.
+A browser's ordinary block layout will not apply that gap. The HTML target now
+uses a flex column for `Flow`, which supports
+[gaps](https://www.w3.org/TR/css-align-3/#gaps) and
+[independent child margins](https://www.w3.org/TR/css-flexbox-1/#item-margins).
+These are target-specific built-in defaults: reusable recipes, explicit props,
+named-part overrides and document selectors keep their normal precedence.
+The shared child tree is not rewritten. PDF-only `PageBreak` markers are hidden
+in styled HTML so they cannot introduce an extra flex item and an extra gap.
+
+`prepare`, `render_pdf` and `render_image_pages` keep native block pagination.
+Use `compile(target="pdf")` or `emit_artifacts(..., target="pdf")` to retain and
+replay the exact print source. `to_html` and `to_css` export browser HTML; a
+browser screenshot is not a preview of native pagination. Ordinary unmarked
+HTML keeps its existing margin-collapse behavior, and `Stack` continues to use
+flex layout in both targets.
 
 `styled` cannot both transparently forward arbitrary function arguments and
 unconditionally reserve `style` for itself. The current candidate preserves

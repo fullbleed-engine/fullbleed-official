@@ -45,7 +45,7 @@ def main():
     for name, document, pages in (("invoice", Invoice(data), 1), ("report", OperationsReport(report), 5)):
         folder = args.out / name
         folder.mkdir(exist_ok=True)
-        plan = document.compile()
+        plan = document.compile(target="pdf")
         engine = Renderer(**options).engine_for(document)
         expected_pdf, glyphs = engine.render_pdf_with_glyph_report(plan.html, plan.css)
         assert not glyphs
@@ -75,7 +75,7 @@ def main():
 
         (folder / "document.pdf").write_bytes(pdf)
         (folder / "pagination.json").write_text(json.dumps(trace, indent=2) + "\n", encoding="utf-8")
-        document.emit_artifacts(html_path=folder / "document.html", css_path=folder / "document.css")
+        document.emit_artifacts(html_path=folder / "document.html", css_path=folder / "document.css", target="pdf")
         for index, png in enumerate(images, 1):
             (folder / f"page-{index}.png").write_bytes(png)
         reader = PdfReader(BytesIO(pdf))

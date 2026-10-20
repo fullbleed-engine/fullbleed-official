@@ -43,7 +43,7 @@ def main():
         folder = args.out / name
         folder.mkdir(exist_ok=True)
         authored, expected = document(actual, rules), document(control)
-        plan = authored.compile(a11y_mode="raise")
+        plan = authored.compile(a11y_mode="raise", target="pdf")
         rendered = authored.prepare(renderer, a11y_mode="raise")
         pdf, reference = rendered.render_pdf(), expected.render_pdf(renderer, a11y_mode="raise")
         assert pdf == authored.render_pdf(renderer), (name, "repeat output")
@@ -65,7 +65,7 @@ def main():
                         assert image.size == expected_image.size
                         assert ImageChops.difference(image, expected_image).getbbox() is None, (name, index, "control pixels")
                         image.save(folder / ("independent.png" if index == 0 else f"independent-{index + 1}.png"))
-        authored.emit_artifacts(html_path=folder / "document.html", css_path=folder / "document.css")
+        authored.emit_artifacts(html_path=folder / "document.html", css_path=folder / "document.css", target="pdf")
         (folder / "document.pdf").write_bytes(pdf)
         (folder / "control.pdf").write_bytes(reference)
         (folder / "native.png").write_bytes(rendered.render_image_pages(dpi=96)[0])

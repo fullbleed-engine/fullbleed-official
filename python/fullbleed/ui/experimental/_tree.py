@@ -141,6 +141,8 @@ def _required_tokens(children):
             continue
         visited.add(id(node))
         names.update(node._effective_style()._token_names())
+        if node._html_defaults is not None:
+            names.update(node._effective_style(target="html")._token_names())
         pending.extend(node.children)
         if node._print is not None:
             pending.append(node._print)
@@ -163,6 +165,7 @@ class Node:
     declared_parts: tuple[str, ...] | None = None
     optional_parts: tuple[str, ...] = field(default=(), kw_only=True)
     _defaults: Style = field(default=Style(), repr=False, kw_only=True)
+    _html_defaults: Style | None = field(default=None, repr=False, kw_only=True)
     _resources: tuple[Resource, ...] = field(default=(), repr=False, kw_only=True)
     _print: Node | None = field(default=None, repr=False, kw_only=True)
     _forwarded_parts: tuple[tuple[str, str], ...] = field(default=(), repr=False, kw_only=True)
@@ -175,6 +178,8 @@ class Node:
         object.__setattr__(self, "attributes", _attrs(dict(self.attributes)))
         object.__setattr__(self, "style", Style(self.style))
         object.__setattr__(self, "_defaults", Style(self._defaults))
+        if self._html_defaults is not None:
+            object.__setattr__(self, "_html_defaults", Style(self._html_defaults))
         resources = tuple(self._resources)
         if any(not isinstance(resource, Resource) for resource in resources):
             raise AuthoringError("Invalid component resource", code="resource.type")
@@ -198,7 +203,8 @@ class Node:
             if len(self.source) != 2 or not isinstance(self.source[0], str) or not isinstance(self.source[1], int):
                 raise AuthoringError("Source locations require a filename and line number", code="component.source")
             object.__setattr__(self, "source", tuple(self.source))
-        if self.tag is None and (self.attributes or self.style.entries or self._defaults.entries or self.part is not None):
+        if self.tag is None and (self.attributes or self.style.entries or self._defaults.entries
+                                 or self._html_defaults is not None or self.part is not None):
             raise AuthoringError("Virtual nodes cannot carry element styles or attributes", code="style.root")
         if self.tag is not None and self.tag.casefold() in _HTML_VOID_ELEMENTS and self.children:
             raise AuthoringError(f"Void element {self.tag!r} cannot have children", code="element.void")
@@ -276,8 +282,9 @@ class Node:
         return to_html(self, include_styles=include_styles,
                        theme=theme, a11y_mode=a11y_mode)
 
-    def _effective_style(self) -> Style:
-        return Style(self._defaults, self.style)
+    def _effective_style(self, *, target="pdf") -> Style:
+        defaults = self._html_defaults if target == "html" and self._html_defaults is not None else self._defaults
+        return Style(defaults, self.style)
 
     def _for_print(self) -> Node:
         if self._print is None:
@@ -296,13 +303,14 @@ class Node:
                        _defaults=Style(alternative._defaults, self._defaults), name=self.name, source=self.source,
                        part=self.part, _resources=(*self._resources, *alternative._resources))
 
-    def _remaining_defaults(self) -> Style:
+    def _remaining_defaults(self, *, target="pdf") -> Style:
         # An explicit property replaces a recipe property before token resolution.
         # Keep shorthand/longhand interactions for the native cascade to resolve.
         authored = {name for name, _ in self.style.entries}
+        defaults = self._html_defaults if target == "html" and self._html_defaults is not None else self._defaults
         result = object.__new__(Style)
         object.__setattr__(result, "entries", tuple(
-            (name, value) for name, value in self._defaults.entries if name not in authored))
+            (name, value) for name, value in defaults.entries if name not in authored))
         return result
 
     def _with_root_styles(self, *, defaults=None, authored=None) -> Node:
@@ -312,7 +320,8 @@ class Node:
                 raise AuthoringError("Root styling requires one element; give this fragment an explicit container", code="style.root")
             wrappers.append(node)
             node = node.children[0]
-        node = replace(node, _defaults=Style(node._defaults, defaults), style=Style(node.style, authored))
+        node = replace(node, _defaults=Style(node._defaults, defaults), style=Style(node.style, authored),
+                       _html_defaults=Style(node._html_defaults, defaults) if node._html_defaults is not None else None)
         for wrapper in reversed(wrappers):
             node = replace(wrapper, children=(node,))
         return node
@@ -419,6 +428,8 @@ def Flow(*children, gap=None, style=None, class_name=None, attrs=None, part=None
     Fragments contribute siblings while retaining their diagnostic boundaries.
     No gap is inserted at the beginning or end of a page fragment.
     None leaves the gap to reusable styles or the built-in 8 pt default.
+    Styled HTML uses a flex column so browsers also apply gaps and keep child
+    margins independent. PDF rendering retains native block pagination.
     """
     captured = _children(children)
     pending = [(child, ()) for child in reversed(captured)]
@@ -433,8 +444,9 @@ def Flow(*children, gap=None, style=None, class_name=None, attrs=None, part=None
     if "data-fb-flow" in attributes:
         raise AuthoringError("Flow owns the data-fb-flow layout annotation", code="attribute.duplicate")
     attributes["data-fb-flow"] = "true"
-    return _element("div", captured, base=Style(display="block", row_gap=pt(8)),
+    node = _element("div", captured, base=Style(display="block", row_gap=pt(8)),
                     style=Style({"row_gap": gap}, style), class_name=class_name, attrs=attributes, part=part)
+    return replace(node, _html_defaults=Style(display="flex", flex_direction="column", row_gap=pt(8)))
 
 
 def Grid(*children, columns: int | str | None = None, gap=None, style=None, class_name=None, attrs=None, part=None) -> Node:
@@ -457,7 +469,10 @@ def Image(*, src: str, alt: str, style=None, class_name=None, attrs=None, part=N
 
 
 def PageBreak() -> Node:
-    return _element("div", (), style=Style(break_before="page"), attrs={"aria-hidden": True})
+    return replace(
+        _element("div", (), style=Style(break_before="page"), attrs={"aria-hidden": True}),
+        _html_defaults=Style(display="none"),
+    )
 
 
 class ComponentFactory(Protocol[P]):

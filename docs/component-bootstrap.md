@@ -257,9 +257,18 @@ renderer = Renderer(font_files=[str(font)])
 Path("order.pdf").write_bytes(document.render_pdf(renderer))
 ```
 
+In styled HTML, `Flow` becomes a vertical flex container: its gap works in a
+browser, and neighboring child margins add instead of collapsing. Recipes,
+`gap=`, `.with_style(...)`, named parts and `class_name` rules retain their usual
+precedence. No browser stylesheet workaround is needed. `PageBreak` markers
+are hidden in this continuous HTML representation. Unstyled export omits these
+layout rules along with the other styles.
+
 `prepare`, `render_pdf` and `render_image_pages` select the print representation
 automatically. To retain the exact source used for a PDF, call
 `document.emit_artifacts(html_path="order.html", css_path="order.css", target="pdf")`.
+`Flow` retains its native block pagination in that target. Browser layout,
+including fixed-height flex behavior, is not a PDF pagination preview.
 The legacy `to_legacy` bridge rejects components with stylesheet dependencies
 instead of silently dropping their appearance.
 
