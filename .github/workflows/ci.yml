@@ -751,6 +751,7 @@ jobs:
           - "3.12"
           - "3.13"
           - "3.14"
+          - "3.15"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -774,8 +775,8 @@ jobs:
           python -m fullbleed --version
           python -m fullbleed doctor --strict --json
 
-  python-prerelease-compatibility:
-    name: Python Preview (${{ matrix.os }}, 3.15.0rc3)
+  python315-compatibility:
+    name: Python 3.15 (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     needs: python-wheel-smoke
     strategy:
@@ -786,8 +787,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.15.0-rc.3"
-          allow-prereleases: true
+          python-version: "3.15.0"
           architecture: x64
       - uses: actions/download-artifact@v8
         with:
@@ -797,6 +797,10 @@ jobs:
         with:
           name: border-image-slices-${{ runner.os }}
           path: target/python-stable-reference/border-image-slices
+      - uses: actions/download-artifact@v8
+        with:
+          name: filtered-overflow-${{ runner.os }}
+          path: target/python-stable-reference/filtered-overflow
       - uses: actions/download-artifact@v8
         with:
           name: base14-preview-${{ runner.os }}
@@ -813,35 +817,149 @@ jobs:
       - name: Exercise the installed API and CLI in isolation
         shell: bash
         run: |
-          mkdir -p target/python-prerelease
-          python -I tools/smoke_installed_package.py --expected-version "${FULLBLEED_CI_VERSION}" --json > target/python-prerelease/installed-package.json
-          python -I -m fullbleed doctor --strict --json > target/python-prerelease/doctor.json
-          python -I -m fullbleed agent-contract --format json > target/python-prerelease/agent-contract.json
+          mkdir -p target/python315
+          python -I tools/smoke_installed_package.py --expected-version "${FULLBLEED_CI_VERSION}" --json > target/python315/installed-package.json
+          python -I -m fullbleed doctor --strict --json > target/python315/doctor.json
+          python -I -m fullbleed agent-contract --format json > target/python315/agent-contract.json
       - name: Run repository Python tests with the installed native extension
         env:
           FULLBLEED_TEST_INSTALLED_NATIVE: "1"
-        run: python -m pytest tests -q -ra --junitxml target/python-prerelease/python-tests.xml
+        run: python -m pytest tests -q -ra --junitxml target/python315/python-tests.xml
       - name: Generate and check PDFs and previews
         shell: bash
         run: |
-          python -I tools/smoke_border_image_slices.py --pdfium --out target/python-prerelease/border-image-slices
-          python -I tools/smoke_filtered_overflow.py --pdfium --out target/python-prerelease/filtered-overflow
-          python -I tools/smoke_base14_preview.py --out target/python-prerelease/base14-preview
-          python -I tools/smoke_gradient_preview.py --out target/python-prerelease/gradient-preview
+          python -I tools/smoke_border_image_slices.py --pdfium --out target/python315/border-image-slices
+          python -I tools/smoke_filtered_overflow.py --pdfium --out target/python315/filtered-overflow
+          python -I tools/smoke_base14_preview.py --out target/python315/base14-preview
+          python -I tools/smoke_gradient_preview.py --out target/python315/gradient-preview
       - name: Verify exact interpreter and identical output across Python versions
         shell: bash
         run: |
           python -I tools/check_python_compatibility.py \
-            --expected-python 3.15.0rc3 --expected-version "${FULLBLEED_CI_VERSION}" \
-            --reference target/python-stable-reference --out target/python-prerelease \
+            --expected-python 3.15.0 --expected-version "${FULLBLEED_CI_VERSION}" \
+            --reference target/python-stable-reference --out target/python315 \
             --allow-skipped-test tests.test_fullbleed_python_abi.test_stable_abi_module_can_initialize_in_a_subinterpreter
       - name: Retain interpreter, test, PDF, and preview evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: python-prerelease-${{ runner.os }}-3.15.0rc3
-          path: target/python-prerelease
+          name: python315-${{ runner.os }}
+          path: target/python315
           if-no-files-found: error
+          retention-days: 14
+
+  published-python315:
+    name: Published Python 3.15 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            architecture: x64
+          - os: windows-latest
+            architecture: x64
+          - os: macos-26
+            architecture: arm64
+          - os: macos-26-intel
+            architecture: x64
+    env:
+      PUBLISHED_VERSION: "2.5.34"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Checkout the source matching the published stable wheel
+        uses: actions/checkout@v7
+        with:
+          ref: 0e64857b103522fcb626a81c38306e175106fc67 # v2.5.34
+          path: target/published-source
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          architecture: ${{ matrix.architecture }}
+      - name: Download the public stable wheel and install the baseline
+        shell: bash
+        run: |
+          python -m pip download --only-binary=:all: --no-deps "fullbleed==${PUBLISHED_VERSION}" --dest target/python315-published/wheel
+          python -m pip install --force-reinstall --no-index --find-links target/python315-published/wheel "fullbleed==${PUBLISHED_VERSION}" --report target/python315-published/baseline-install.json
+          python -m pip install --only-binary=:all: pypdf==6.19.0 pypdfium2==5.14.0 pillow==12.3.0 fonttools==4.65.0
+          python -I tools/record_python_compatibility_source.py --source target/published-source --version "${PUBLISHED_VERSION}" --commit 0e64857b103522fcb626a81c38306e175106fc67 --wheel-dir target/python315-published/wheel --expected-python 3.10 --out target/python315-published/source.json
+      - name: Render the public wheel on Python 3.10
+        working-directory: target/published-source
+        shell: bash
+        run: |
+          python -I tools/smoke_border_image_slices.py --pdfium --out "$GITHUB_WORKSPACE/target/python315-published/reference/border-image-slices"
+          python -I tools/smoke_filtered_overflow.py --pdfium --out "$GITHUB_WORKSPACE/target/python315-published/reference/filtered-overflow"
+          python -I tools/smoke_base14_preview.py --out "$GITHUB_WORKSPACE/target/python315-published/reference/base14-preview"
+          python -I tools/smoke_gradient_preview.py --out "$GITHUB_WORKSPACE/target/python315-published/reference/gradient-preview"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.15.0"
+          architecture: ${{ matrix.architecture }}
+      - name: Install the identical public wheel on Python 3.15 final
+        shell: bash
+        run: |
+          python -m pip install --force-reinstall --no-index --find-links target/python315-published/wheel "fullbleed==${PUBLISHED_VERSION}" --report target/python315-published/candidate-install.json
+          python -m pip install --only-binary=:all: pytest==9.1.1 jsonschema==4.26.0 pypdf==6.19.0 pypdfium2==5.14.0 pillow==12.3.0 fonttools==4.65.0
+      - name: Exercise the public installed API and CLI in isolation
+        working-directory: target/published-source
+        shell: bash
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/target/python315-published/candidate"
+          python -I tools/smoke_installed_package.py --expected-version "${PUBLISHED_VERSION}" --json > "$GITHUB_WORKSPACE/target/python315-published/candidate/installed-package.json"
+          python -I -m fullbleed doctor --strict --json > "$GITHUB_WORKSPACE/target/python315-published/candidate/doctor.json"
+          python -I -m fullbleed agent-contract --format json > "$GITHUB_WORKSPACE/target/python315-published/candidate/agent-contract.json"
+      - name: Run the published release's complete Python suite
+        working-directory: target/published-source
+        shell: bash
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+        run: python -m pytest tests -q -ra --junitxml "$GITHUB_WORKSPACE/target/python315-published/candidate/python-tests.xml"
+      - name: Render the public wheel on Python 3.15 final
+        working-directory: target/published-source
+        shell: bash
+        run: |
+          python -I tools/smoke_border_image_slices.py --pdfium --out "$GITHUB_WORKSPACE/target/python315-published/candidate/border-image-slices"
+          python -I tools/smoke_filtered_overflow.py --pdfium --out "$GITHUB_WORKSPACE/target/python315-published/candidate/filtered-overflow"
+          python -I tools/smoke_base14_preview.py --out "$GITHUB_WORKSPACE/target/python315-published/candidate/base14-preview"
+          python -I tools/smoke_gradient_preview.py --out "$GITHUB_WORKSPACE/target/python315-published/candidate/gradient-preview"
+      - name: Verify the final interpreter, test results and identical PDF bytes
+        shell: bash
+        run: |
+          python -I tools/check_python_compatibility.py \
+            --expected-python 3.15.0 --expected-version "${PUBLISHED_VERSION}" \
+            --reference target/python315-published/reference --out target/python315-published/candidate \
+            --allow-skipped-test tests.test_fullbleed_python_abi.test_stable_abi_module_can_initialize_in_a_subinterpreter
+      - name: Exercise the Python 3.15 release container with the public wheel
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          docker pull python:3.15-slim
+          docker image inspect python:3.15-slim --format '{{json .RepoDigests}}' > target/python315-published/container-image.json
+          docker run --rm --pull=never --network none \
+            -e FULLBLEED_VERSION="${PUBLISHED_VERSION}" \
+            -v "${PWD}:/io:ro" -w /tmp python:3.15-slim \
+            sh -euxc '
+              python --version
+              python -m pip install --disable-pip-version-check \
+                --no-index --find-links /io/target/python315-published/wheel \
+                "fullbleed==${FULLBLEED_VERSION}"
+              python -I /io/target/published-source/tools/smoke_installed_package.py \
+                --expected-version "${FULLBLEED_VERSION}" --json
+              python -I -m fullbleed doctor --strict --json
+              python -I -m fullbleed compliance --strict --json
+            ' > target/python315-published/container.stdout.txt 2> target/python315-published/container.stderr.txt
+      - name: Retain public package provenance and compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python315-published-${{ matrix.os }}
+          path: |
+            target/python315-published/*.json
+            target/python315-published/*.txt
+            target/python315-published/reference/
+            target/python315-published/candidate/
+          if-no-files-found: error
+          retention-days: 14
 
   standard-font-portability:
     name: Standard font previews match across Windows and Linux

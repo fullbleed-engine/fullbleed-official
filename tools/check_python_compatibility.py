@@ -15,7 +15,12 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
-RENDER_CHECKS = ("border-image-slices", "base14-preview", "gradient-preview")
+RENDER_CHECKS = (
+    "border-image-slices",
+    "filtered-overflow",
+    "base14-preview",
+    "gradient-preview",
+)
 
 
 def compare_renderings(reference: Path, candidate: Path, expected_version: str) -> dict:
