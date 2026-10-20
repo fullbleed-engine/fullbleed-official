@@ -150,7 +150,7 @@ Start in the [HTML/CSS playground](https://docs.fullbleed.dev/playground/) to ed
 
 ### Python
 
-Python 3.10–3.14 on Windows, macOS, or Linux:
+Python 3.10–3.15 on Windows, macOS, or Linux:
 
 ```bash
 python -m pip install fullbleed
@@ -443,14 +443,16 @@ Platform artifact policy:
 - Windows wheels cover x86-64, x86, and ARM64; macOS wheels cover Intel and
   Apple silicon.
 - The CPython stable ABI allows each platform wheel to support Python 3.10
-  through 3.14.
+  through 3.15 on standard-GIL CPython.
 - CI installs and exercises every built wheel on its target architecture,
   using native runners or QEMU as appropriate. The x86-64 manylinux wheel is
   additionally tested on every supported Python version before publication.
 
-Separate Windows and Linux jobs check Python 3.15.0rc3 with the standard GIL,
-including the Python suite and byte-for-byte PDF/preview comparisons against
-Python 3.10. See the [preview coverage and its limits](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a11/docs/python-compatibility.md).
+Python 3.15 final checks exercise both the development wheel and public stable
+release. They run the matching Python suite and compare PDFs and previews byte
+for byte against Python 3.10. Published-wheel checks cover Windows and Linux
+x64 plus Intel and Apple-silicon Macs. See the
+[compatibility evidence and its scope](https://github.com/fullbleed-engine/fullbleed-official/blob/master/docs/python-compatibility.md).
 
 Verify command surface:
 
