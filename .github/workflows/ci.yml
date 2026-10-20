@@ -147,7 +147,9 @@ jobs:
           path: output/css_parity_status.ci.json
 
       - name: Install smoke-test tools
-        run: python -m pip install --upgrade pip pytest
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --only-binary=:all: -r requirements-test.txt
 
       - name: Build wheel from source
         run: python build_backend/fullbleed_build_backend.py wheel --out target/wheels
@@ -174,9 +176,7 @@ jobs:
         run: python -I tools/smoke_gradient_preview.py --out target/gradient-preview
 
       - name: Verify single-copy styled PDF text with an independent reader
-        run: |
-          python -m pip install pypdf==6.19.0
-          python -I tools/smoke_text_extraction.py --out target/text-extraction
+        run: python -I tools/smoke_text_extraction.py --out target/text-extraction
 
       - name: Verify component authoring from the installed wheel
         run: python -I tools/smoke_component_authoring.py --out target/component-authoring
@@ -186,7 +186,7 @@ jobs:
         env:
           FULLBLEED_TEST_INSTALLED_NATIVE: "1"
         run: |
-          python -m pip install pypdfium2==5.14.0 pillow==12.3.0 mypy==2.4.0
+          python -m pip install mypy==2.4.0
           python -m pytest tests/test_fullbleed_ui_experimental.py tests/test_fullbleed_ui_experimental_styles.py tests/test_fullbleed_ui_parts.py tests/test_fullbleed_ui_html_export.py tests/test_fullbleed_ui_bootstrap.py -q --junitxml target/component-recipes/unit-tests.xml
           python -I tools/smoke_component_quickstart.py --expected-version "${{ env.FULLBLEED_CI_VERSION }}" --out target/component-recipes/quickstart
           python -I tools/smoke_component_recipes.py --out target/component-recipes
@@ -245,9 +245,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Verify compact font subsets with independent font and PDF readers
-        run: |
-          python -m pip install pypdf==6.19.0 pypdfium2==5.14.0 fonttools==4.65.0 pillow==12.3.0
-          python -I tools/smoke_font_subsets.py --out target/font-subsets
+        run: python -I tools/smoke_font_subsets.py --out target/font-subsets
 
       - name: Verify independent font synthesis in PDFs and previews
         run: python -I tools/smoke_font_synthesis.py --out target/font-synthesis
@@ -813,7 +811,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --no-index --find-links dist "fullbleed==${FULLBLEED_CI_VERSION}"
-          python -m pip install --only-binary=:all: pytest==9.1.1 jsonschema==4.26.0 pypdf==6.19.0 pypdfium2==5.14.0 pillow==12.3.0 fonttools==4.65.0
+          python -m pip install --only-binary=:all: -r requirements-test.txt
       - name: Exercise the installed API and CLI in isolation
         shell: bash
         run: |

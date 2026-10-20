@@ -1,0 +1,8 @@
+# Development-only tools for the repository's Python tests.
+# Keep these separate from Fullbleed's dependency-free runtime.
+pytest==9.1.1
+jsonschema==4.26.0
+pypdf==6.19.0
+pypdfium2==5.14.0
+pillow==12.3.0
+fonttools==4.65.0
