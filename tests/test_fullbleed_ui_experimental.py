@@ -696,7 +696,9 @@ def test_flow_keeps_block_flow_and_requires_real_blocks():
     assert "row-gap: 14pt;" in _styles(Document(flow))
     assert "margin-top: 24pt;" in _styles(Document(flow))
     assert 'data-fb-flow="true"' in Document(flow).to_html()
-    assert "display: flex" not in _styles(Document(flow))
+    print_source = Document(flow).compile(target="pdf")
+    assert "display: block;" in print_source.css
+    assert "display: flex" not in print_source.css
     with pytest.raises(AuthoringError, match="wrap text"):
         Flow("bare text")
 

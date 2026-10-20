@@ -76,7 +76,7 @@ def main():
     def check(name, document, present, *, size, pages=None, accent=None, repeated_header=None):
         folder = args.out / name
         folder.mkdir(exist_ok=True)
-        plan = document.compile()
+        plan = document.compile(target="pdf")
         engine = renderer.engine_for(document)
         pdf, glyphs = engine.render_pdf_with_glyph_report(plan.html, plan.css)
         assert not glyphs, (name, glyphs)
@@ -95,7 +95,7 @@ def main():
             assert matches == expected_headers, (name, matches)
         (folder / "document.pdf").write_bytes(pdf)
         (folder / "text.txt").write_text(text, encoding="utf-8")
-        document.emit_artifacts(html_path=folder / "document.html", css_path=folder / "document.css")
+        document.emit_artifacts(html_path=folder / "document.html", css_path=folder / "document.css", target="pdf")
         (folder / "sources.json").write_text(json.dumps([asdict(source) for source in plan.sources], indent=2) + "\n", encoding="utf-8")
         previews = document.render_image_pages(renderer, dpi=96)
         assert len(previews) == len(reader.pages)

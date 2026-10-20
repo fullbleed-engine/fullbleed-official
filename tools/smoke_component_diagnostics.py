@@ -83,8 +83,8 @@ def main():
                         document_timestamp="2026-10-15T00:00:00Z")
     if args.case:
         doc, reason, paths, page = failure_cases()[args.case]
-        plan = doc.compile()
-        doc.emit_artifacts(html_path=args.out / "document.html", css_path=args.out / "document.css")
+        plan = doc.compile(target="pdf")
+        doc.emit_artifacts(html_path=args.out / "document.html", css_path=args.out / "document.css", target="pdf")
         (args.out / "sources.json").write_text(json.dumps([asdict(source) for source in plan.sources], indent=2) + "\n")
         try:
             doc.render_pdf(renderer)
@@ -119,7 +119,7 @@ def main():
     ):
         folder = args.out / name
         folder.mkdir(exist_ok=True)
-        plan = doc.compile()
+        plan = doc.compile(target="pdf")
         pdf = doc.render_pdf(renderer)
         assert pdf == doc.render_pdf(renderer), (name, "repeat bytes")
         _, glyphs = renderer.engine_for(doc).render_pdf_with_glyph_report(plan.html, plan.css)
@@ -128,7 +128,7 @@ def main():
         text = "".join("".join(page.extract_text().split()) for page in reader.pages)
         assert all(text.count(marker) == 1 for marker in markers), (name, text)
         (folder / "document.pdf").write_bytes(pdf)
-        doc.emit_artifacts(html_path=folder / "document.html", css_path=folder / "document.css")
+        doc.emit_artifacts(html_path=folder / "document.html", css_path=folder / "document.css", target="pdf")
         with closing(pdfium.PdfDocument(pdf)) as rendered:
             for index in range(len(rendered)):
                 with closing(rendered[index]) as page, closing(page.render(scale=1.5)) as bitmap, closing(page.get_textpage()) as text_page:

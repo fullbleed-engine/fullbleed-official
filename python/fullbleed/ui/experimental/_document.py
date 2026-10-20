@@ -295,7 +295,7 @@ class Document:
             attributes = dict(node.attributes)
             attributes["data-fb-id"] = node_id
             try:
-                declarations = node._remaining_defaults().resolve(self.theme) if include_styles else ""
+                declarations = node._remaining_defaults(target=target).resolve(self.theme) if include_styles else ""
                 explicit = node.style.resolve(self.theme) if include_styles else ""
             except AuthoringError as error:
                 raise AuthoringError(error.message, code=error.code, path=location) from error

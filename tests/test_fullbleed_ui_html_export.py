@@ -4,7 +4,7 @@ from html.parser import HTMLParser
 import pytest
 
 from fullbleed.ui.experimental import (
-    AuthoringError, Document, Paragraph, Theme, component, pt, styled, to_html,
+    AuthoringError, Document, Flow, Fragment, Paragraph, Theme, component, pt, styled, to_html,
     to_legacy, token,
 )
 from fullbleed.ui.experimental._resources import Resource
@@ -149,3 +149,47 @@ def test_fragment_roots_can_be_inserted_into_lists_and_tables_without_weakening_
         Document(item).compile()
     with pytest.raises(AuthoringError, match="needs inline content"):
         Node("p", (item,)).to_html(include_styles=False)
+
+
+def test_flow_exports_browser_spacing_without_changing_print_source_or_children(tmp_path):
+    child = Paragraph("Second").with_style(margin_top=pt(24))
+    flow = Flow(Paragraph("First"), Fragment(child), gap=pt(14), class_name="story")
+    document = Document(flow)
+    before = document.compile(target="pdf")
+    html_source = document.compile(target="html")
+    assert "display: flex;" in html_source.css
+    assert "flex-direction: column;" in html_source.css
+    assert "display: block;" in before.css
+    assert "flex-direction" not in before.css
+    assert html_source.sources == before.sources
+    for exported in (document.to_html(include_styles=True), flow.to_html(include_styles=True)):
+        assert "flex-direction: column;" in exported
+        assert "row-gap: 14pt;" in exported and "margin-top: 24pt;" in exported
+        assert exported.count("<div ") == 1 and exported.count("<p ") == 2
+    document.emit_artifacts(html_path=tmp_path / "story.html", css_path=tmp_path / "story.css")
+    assert (tmp_path / "story.css").read_text(encoding="utf-8") == html_source.css
+    assert document.to_css() == html_source.css
+    plain = Markup(document.to_html(include_styles=False))
+    assert not any(tag == "style" or "style" in attrs for tag, attrs in plain.tags)
+    assert [(tag, attrs["class"]) for tag, attrs in plain.tags if "class" in attrs] == [("div", "story")]
+    assert flow.children[1].children[0] is child
+    assert document.compile(target="pdf") == before
+
+
+@pytest.mark.parametrize("target", ["html", "pdf"])
+def test_flow_target_defaults_preserve_recipe_prop_and_named_part_precedence(target):
+    @component(parts=("root",))
+    def Group(*children, gap=None):
+        return Flow(*children, gap=gap, part="root")
+
+    recipe = styled(Group, row_gap=token("space"), display="grid")
+    themed = Document(recipe(Paragraph("One")), theme=Theme({"space": pt(12)}))
+    assert themed.required_tokens == ("space",)
+    css = themed.compile(target=target).css
+    assert "display: grid;" in css and "row-gap: 12pt;" in css
+    instance = recipe(Paragraph("One"), gap=pt(3)).with_parts(root={"row_gap": pt(7)})
+    doc = Document(instance)
+    assert doc.required_tokens == ()
+    source = doc.compile(target=target)
+    assert "row-gap: 7pt;" in source.html and "row-gap:" not in source.css
+    assert "display: grid;" in source.css

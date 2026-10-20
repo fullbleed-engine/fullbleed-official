@@ -61,14 +61,14 @@ def main():
         pdf = document.render_pdf(renderer)
         reference = Document(content, title=original.title, page=original.page, theme=Theme(expected_values, text=base.text))
         assert pdf == reference.render_pdf(renderer)
-        plan = document.compile()
+        plan = document.compile(target="pdf")
         repeated, glyphs = renderer.engine_for(document).render_pdf_with_glyph_report(plan.html, plan.css)
         assert repeated == pdf and not glyphs
         reader = PdfReader(BytesIO(pdf))
         assert len(reader.pages) == 1
         assert "One kit. Your brand." in reader.pages[0].extract_text()
         (folder / "document.pdf").write_bytes(pdf)
-        document.emit_artifacts(html_path=folder / "document.html", css_path=folder / "document.css")
+        document.emit_artifacts(html_path=folder / "document.html", css_path=folder / "document.css", target="pdf")
         with closing(pdfium.PdfDocument(pdf)) as independent, closing(independent[0]) as page, closing(page.render(scale=1)) as bitmap:
             image = bitmap.to_pil().convert("RGB")
             image.save(folder / "independent-page-1.png")

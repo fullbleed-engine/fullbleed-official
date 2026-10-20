@@ -42,13 +42,13 @@ def main():
         folder = args.out / name
         folder.mkdir(exist_ok=True)
         document = Document(node, title="Component Flow fixture", page=paper, theme=theme)
-        plan = document.compile()
+        plan = document.compile(target="pdf")
         pdf = document.render_pdf(renderer)
         repeated, glyphs = renderer.engine_for(document).render_pdf_with_glyph_report(plan.html, plan.css)
         assert not glyphs, (name, glyphs)
         assert pdf == repeated, (name, "repeat bytes")
         (folder / "document.pdf").write_bytes(pdf)
-        document.emit_artifacts(html_path=folder / "document.html", css_path=folder / "document.css")
+        document.emit_artifacts(html_path=folder / "document.html", css_path=folder / "document.css", target="pdf")
         (folder / "sources.json").write_text(json.dumps([asdict(source) for source in plan.sources], indent=2) + "\n", encoding="utf-8")
         reader = PdfReader(BytesIO(pdf))
         if pages is not None:
