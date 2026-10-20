@@ -46,14 +46,17 @@ Activate with `.venv\Scripts\Activate.ps1` in PowerShell or
 checkout into that environment:
 
 ```bash
-python -m pip install --upgrade pip pytest
+python -m pip install --upgrade pip
+python -m pip install --only-binary=:all: -r requirements-test.txt
 python -m pip install --no-deps --force-reinstall .
 python -m fullbleed doctor --strict --json
 ```
 
 The install builds a wheel through the in-tree build backend. Repeat the install
-after native changes so tests do not load an older extension. The core runtime
-does not require pytest or other development tools.
+after native changes so tests do not load an older extension. The test requirements
+include pytest, JSON Schema validation, and independent PDF, image, and font readers
+used by the suite. CI uses the same requirements file for the current checkout.
+These are development tools; installing Fullbleed itself does not require them.
 
 ## Make and check a change
 
@@ -71,11 +74,27 @@ python -m pytest tests/test_fullbleed_cli_pdf_profiles.py -q
 
 ```bash
 # macOS/Linux shell
-FULLBLEED_TEST_INSTALLED_NATIVE=1 python -m pytest tests/test_fullbleed_cli_pdf_profiles.py -q
+export FULLBLEED_TEST_INSTALLED_NATIVE=1
+python -m pytest tests/test_fullbleed_cli_pdf_profiles.py -q
 ```
 
-Replace the example test path with the tests for your change. Run the full Python
-suite with `python -m pytest -q` while the same environment variable is set.
+Replace the example test path with the tests for your change. For experimental
+component authoring and styling, for example:
+
+```bash
+python -m pytest tests/test_fullbleed_ui_experimental.py tests/test_fullbleed_ui_experimental_styles.py -q
+```
+
+Run the full Python suite in the same activated shell:
+
+```bash
+python -m pytest -q -ra
+```
+
+`-ra` includes skip reasons. Missing test tools can cause collection errors or skip
+independent output checks, so install the complete requirements file above before
+reporting a full-suite result.
+
 For Rust changes, run:
 
 ```bash
