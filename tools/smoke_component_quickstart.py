@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Run the exact component-alpha README and installed agent examples."""
+"""Run the exact component-alpha guide and installed agent examples."""
 from __future__ import annotations
 
 import argparse
@@ -41,7 +41,8 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     assert ROOT / "python" not in Path(fullbleed.__file__).parents, "Install the release wheel first"
     assert metadata.version("fullbleed") == args.expected_version
-    section = (ROOT / "README.md").read_text(encoding="utf-8").split("## Try the Python component alpha\n", 1)[1].split("\n## ", 1)[0]
+    example_source = "docs/component-bootstrap.md"
+    section = (ROOT / example_source).read_text(encoding="utf-8").split("## Your first PDF and HTML exports\n", 1)[1].split("\n## ", 1)[0]
     blocks = re.findall(r"```python\n(.*?)```", section, re.S)
     assert len(blocks) == 1
     script = out / "order.py"
@@ -76,7 +77,10 @@ def main():
     for name, value in (("agent-example.py", example["code"]), ("agent-styled.html", namespace["styled_html"]),
                         ("agent-unstyled.html", namespace["plain_html"])):
         (out / name).write_text(value, encoding="utf-8", newline="\n")
+    # Preserve historical receipt fields for the example moved from the README;
+    # identify its current source explicitly for new consumers.
     report = {"ok": True, "version": args.expected_version, "runtime": str(fullbleed.__file__),
+              "example_source": example_source, "documentation_example_runs_alone": True,
               "readme_example_runs_alone": True, "readme_code_sha256": sha256(blocks[0].encode()).hexdigest(),
               "pdf_sha256": sha256(pdf.read_bytes()).hexdigest(), "pages": 1,
               "styled_and_unstyled_html": True, "bootstrap_javascript": False,

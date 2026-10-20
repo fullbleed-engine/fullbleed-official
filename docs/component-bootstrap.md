@@ -5,16 +5,16 @@ The experimental Python kit covers the 23 component families in **Bootstrap
 utility stylesheet. It uses the repository's existing, unmodified MIT-licensed
 stylesheet. Components carry that dependency; a document includes it once.
 
-This branch prepares the experimental `2.6.0a8` Python surface, under
-`fullbleed.ui.experimental.bootstrap`, including the stable 2.5.28 inset-shadow
-corrections. Once publication is verified, use an explicit alpha install in a
-virtual environment: `python -m pip install --pre "fullbleed==2.6.0a8"`. For an unpublished
-checkout, build with `python build_backend/fullbleed_build_backend.py wheel --out
-dist` and install the printed wheel path. The
-[alpha runbook](release/2.6.0a8-runbook.md) records the gates and publication scope.
-This kit is absent from the stable PyPI 2.5.28 wheel and the older
-`component-preview-f88cced` download. The established `fullbleed.ui` API remains
-available.
+The published **2.6.0a11** alpha provides this kit under
+`fullbleed.ui.experimental.bootstrap`. Install it explicitly in a virtual
+environment: `python -m pip install --pre "fullbleed==2.6.0a11"`.
+Ordinary `pip install fullbleed` selects stable **2.5.34**, which includes the
+established `fullbleed.ui` API. The new kit remains experimental; see the
+[current release decision and stabilization criteria](https://docs.fullbleed.dev/guides/component-status/).
+The [alpha runbook](release/2.6.0a11-runbook.md) records the release gates and scope.
+For an unpublished checkout, build with
+`python build_backend/fullbleed_build_backend.py wheel --out dist` and install
+the printed wheel path.
 
 The [published Bootstrap preview](https://github.com/fullbleed-engine/fullbleed-official/releases/tag/component-preview-41a2cee)
 supports this kit and HTML export. The alpha's newer
@@ -24,6 +24,35 @@ preview downloads are unchanged.
 
 All components are static. There is no Bootstrap JavaScript, browser in the PDF
 renderer, CDN dependency, event lifecycle or automatic network fetch.
+
+## Your first PDF and HTML exports
+
+After installing the alpha, save this as `order.py` and run `python order.py`.
+It writes a PDF and both styled and unstyled HTML using the bundled Inter font:
+
+```python
+from importlib.resources import files
+from pathlib import Path
+from fullbleed.ui.experimental import Document, Renderer, Theme, pt, style
+from fullbleed.ui.experimental import bootstrap as bs
+
+card = bs.Card(
+    bs.Paragraph("Your order has passed its final inspection."),
+    title="Ready to ship",
+    header="ORDER / 1048",
+    footer=bs.Badge("Approved", variant="success"),
+).with_parts(title=style(color="#205b47"))
+
+document = Document(card, title="Order summary", lang="en-US",
+                    theme=Theme(text=style(font_family="Inter", font_size=pt(11))))
+Path("order.html").write_text(document.to_html(include_styles=True), encoding="utf-8", newline="\n")
+Path("order.unstyled.html").write_text(document.to_html(include_styles=False), encoding="utf-8", newline="\n")
+renderer = Renderer(font_files=[str(files("fullbleed_assets").joinpath("fonts/Inter-Variable.ttf"))])
+Path("order.pdf").write_bytes(document.render_pdf(renderer))
+```
+
+This complete example is checked from an installed wheel. The following sections
+explain composition, styling and the static Bootstrap component families.
 
 ## Start with content
 
