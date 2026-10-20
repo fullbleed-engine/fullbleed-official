@@ -1,3 +1,30 @@
+# Fullbleed Release Notes - 2.6.0a10
+
+This component alpha carries solid underlines, overlines, strike-throughs and
+their shadows across interior word spaces. Collapsed spaces at a line boundary
+remain collapsed. Glyph placement and extracted reading text are preserved.
+
+Ancestor decorations continue through a nested element with
+`text-decoration: none`, using their resolved paint settings. Decorations stop
+at atomic inline boundaries (`inline-block`, `inline-table`, `inline-flex`, and
+`inline-grid`); an atomic element can still draw its own decoration. This does
+not implement every combination of simultaneous CSS decoration layers.
+
+The release workflow now retains the 80-case installed-wheel decoration-space
+matrix and independent PDF previews, alongside the existing thickness checks.
+The merged implementation improved four fixtures in the unchanged independent
+CSS corpus: 1,623 pass, 21 fail, and 18 are reference-disputed. Those are scoped
+comparison results, not a passing CSS or browser-conformance claim; the final
+release output must reproduce them before publication.
+
+The experimental component API, static Bootstrap kit, PageBand/PageNumbers and
+styled/unstyled HTML export remain available. Python uses `2.6.0a10`; Cargo source
+uses `2.6.0-alpha.10`. The [alpha 10 runbook](docs/release/2.6.0a10-runbook.md)
+defines qualification and public verification. This entry describes a candidate
+until publication finishes. Ordinary `pip install fullbleed` remains on the
+stable channel. Human assistive-technology usability and dedicated PDF/VT
+validation remain outside this release's verified scope.
+
 # Fullbleed Release Notes - 2.6.0a9
 
 This component alpha adds reusable page headers, footers and finalized page
