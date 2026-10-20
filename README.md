@@ -267,7 +267,7 @@ Profile selection alone does not establish standards conformance. The [release e
 
 ## Get help and contribute
 
-Ask usage questions and share documents in [Discussions](https://github.com/fullbleed-engine/fullbleed-official/discussions). For a reproducible bug or feature proposal, [open an issue](https://github.com/fullbleed-engine/fullbleed-official/issues/new/choose). The [contributor guide](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a11/CONTRIBUTING.md) covers local setup, tests, and where to make changes.
+Ask usage questions and share documents in [Discussions](https://github.com/fullbleed-engine/fullbleed-official/discussions). For a reproducible bug or feature proposal, [open an issue](https://github.com/fullbleed-engine/fullbleed-official/issues/new/choose). The [contributor guide](https://github.com/fullbleed-engine/fullbleed-official/blob/master/CONTRIBUTING.md) covers local setup, tests, and where to make changes.
 
 If Fullbleed is useful to you, [support its maintenance](https://docs.fullbleed.dev/support/) through sponsorship, documentation, or a useful example. Sponsorship is optional; Fullbleed remains MIT licensed and free to use.
 
