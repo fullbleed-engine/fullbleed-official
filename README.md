@@ -29,11 +29,10 @@ Actual Fullbleed output. Open either preview for its PDF, or [explore the design
 | Browser JavaScript | `npm install --save-exact fullbleed@0.7.1` | [PDF components and JSX](https://docs.fullbleed.dev/guides/javascript-components/) · [React starter](https://docs.fullbleed.dev/guides/react-pdf/) · [HTML/CSS starter](https://docs.fullbleed.dev/guides/browser-pdf/) |
 | C# / .NET | `dotnet add package FullBleed.DotNet --version 0.2.0` | [C# components and styles](https://docs.fullbleed.dev/guides/csharp-components/) · [NuGet quickstart](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
-The current JavaScript package is 0.7.1 and wraps engine 2.5.29, including
+The JavaScript package and the downloadable Node.js, browser, React, Vue,
+Next.js and component starters use **0.7.1**, wrapping engine **2.5.29**, with
 [styled and unstyled component HTML export](https://docs.fullbleed.dev/guides/javascript-components/#export-html-with-or-without-styles).
-The downloadable component invoice and React starter retain their tested 0.6.0
-pin; the HTML/CSS Node.js quickstart and JavaScript, Vue and Next.js starters use
-0.5.1. Those starter pins wrap engine 2.5.24. All generate ordinary PDFs and previews. Import
+All generate ordinary PDFs and previews. Import
 `fullbleed` in Node or `fullbleed/browser` in a web app. Node applications can use
 a [bounded render queue](https://docs.fullbleed.dev/guides/node-render-queue/)
 and optional process isolation.
