@@ -4,11 +4,11 @@
 [![PyPI Downloads](https://img.shields.io/pypi/dm/fullbleed)](https://pypistats.org/packages/fullbleed)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Build PDFs with reusable Python, JavaScript and C# components, or HTML/CSS. MIT licensed.**
+**Generate PDFs from HTML/CSS in Python, Rust, JavaScript, and C#. MIT licensed.**
 
 Build invoices, reports, statements, and variable-data print jobs with a deterministic Rust engine. Use the native Rust API, the Python package, or the optional JavaScript and .NET integrations. The Python wheel includes the engine, fonts, and CLI with no required third-party Python packages or system PDF stack. The JavaScript package includes the WebAssembly engine and fonts for Node.js and browser workers; the .NET package includes native libraries for in-process rendering.
 
-[Try PDF components](https://docs.fullbleed.dev/assets/react-demo/) · [Documentation](https://docs.fullbleed.dev/) · [Examples](https://docs.fullbleed.dev/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [crates.io](https://crates.io/crates/fullbleed) · [npm](https://www.npmjs.com/package/fullbleed) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a11/LICENSE)
+[Try the PDF playground](https://docs.fullbleed.dev/playground/) · [Documentation](https://docs.fullbleed.dev/) · [Examples](https://docs.fullbleed.dev/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [crates.io](https://crates.io/crates/fullbleed) · [npm](https://www.npmjs.com/package/fullbleed) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a11/LICENSE)
 
 <p>
   <a href="https://docs.fullbleed.dev/assets/showcase/invoice.pdf"><img src="https://docs.fullbleed.dev/assets/showcase/invoice-1.png" width="48%" alt="Northstar Studio invoice rendered by Fullbleed, with serif typography and forest-green tables"></a>
@@ -17,111 +17,7 @@ Build invoices, reports, statements, and variable-data print jobs with a determi
 
 Actual Fullbleed output. Open either preview for its PDF, or [explore the designed examples with HTML/CSS, data, and font setup](https://docs.fullbleed.dev/examples/).
 
-[Compare both designs in HTML/CSS and Python components](https://docs.fullbleed.dev/guides/showcase-authoring/), with matching page output and a runnable source download (opt-in component alpha).
-
-## Compose documents in Python
-
-Build reusable function components with props, nested children, lists and
-conditional content. Author with named elements and Python style mappings:
-
-```python
-from pathlib import Path
-import fullbleed
-from fullbleed.ui import Document, Heading, Paragraph, Stack, Strong, component
-
-@component
-def Line(label, amount):
-    return Paragraph(Strong(label), ": ", amount)
-
-@Document(title="Invoice", styles={"@page": {"size": "A4", "margin": "18mm"}})
-def Invoice(customer):
-    return Stack(
-        Heading("Invoice for ", customer, level=1),
-        Line("Design", "$120.00"),
-        Line("Review", "$40.00"),
-        gap="12pt",
-    )
-
-Path("invoice.pdf").write_bytes(Invoice("Maple & Finch").render_pdf(fullbleed.PdfEngine()))
-```
-
-This complete workflow is available in 2.5.25. Text is escaped and components
-compile to the same HTML/CSS print engine. Follow the
-[component authoring guide](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a11/docs/component-authoring.md) or run the
-[designed component invoice](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a11/examples/components) with explicit fonts, reusable
-rows, paid/unpaid states and PNG previews.
-
-The [opt-in Python component alpha](https://docs.fullbleed.dev/guides/bootstrap-components-preview/)
-adds components that carry their styles, named customization parts, column-based
-tables, and static Bootstrap 5.0.0 components. Export HTML with styles included or
-removed, or render the same document as a PDF. The guide explains `class_name`
-and includes a runnable kit. This API is experimental; follow its explicit
-prerelease installation instructions.
-
-For JavaScript, [compose documents with functions or JSX/TSX](https://docs.fullbleed.dev/guides/javascript-components/).
-The [React starter](https://docs.fullbleed.dev/guides/react-pdf/) connects typed
-document components to editable data, live PDF previews and downloads. It
-includes the complete component and style source for customization.
-
-## Try the Python component alpha
-
-The **2.6.0a11 prerelease** makes `Flow` spacing work in exported browser HTML
-without a separate layout stylesheet. Compose once, then export styled or
-unstyled HTML and render a PDF with native block pagination. Reusable recipes,
-named parts, explicit styles and `class_name` rules keep their usual precedence.
-The static Bootstrap 5.0.0 kit, `PageBand` headers and footers, and finalized
-`PageNumbers` remain available. This API lives under
-`fullbleed.ui.experimental`; names and behavior may change. Install the alpha
-explicitly in a virtual environment:
-
-```console
-python -m pip install --pre "fullbleed==2.6.0a11"
-```
-
-Save this as `order.py` and run `python order.py`:
-
-```python
-from importlib.resources import files
-from pathlib import Path
-from fullbleed.ui.experimental import Document, Renderer, Theme, pt, style
-from fullbleed.ui.experimental import bootstrap as bs
-
-card = bs.Card(
-    bs.Paragraph("Your order has passed its final inspection."),
-    title="Ready to ship",
-    header="ORDER / 1048",
-    footer=bs.Badge("Approved", variant="success"),
-).with_parts(title=style(color="#205b47"))
-
-document = Document(card, title="Order summary", lang="en-US",
-                    theme=Theme(text=style(font_family="Inter", font_size=pt(11))))
-Path("order.html").write_text(document.to_html(include_styles=True), encoding="utf-8", newline="\n")
-Path("order.unstyled.html").write_text(document.to_html(include_styles=False), encoding="utf-8", newline="\n")
-renderer = Renderer(font_files=[str(files("fullbleed_assets").joinpath("fonts/Inter-Variable.ttf"))])
-Path("order.pdf").write_bytes(document.render_pdf(renderer))
-```
-
-`class_name` adds literal classes; Bootstrap components bring their default
-stylesheet. `.with_style(...)` customizes a root, and `.with_parts(...)` customizes
-advertised internal elements. All Bootstrap components are static, including
-HTML export; no Bootstrap JavaScript is included.
-
-Continue with the [Bootstrap and styling guide](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a11/docs/component-bootstrap.md),
-the [reusable component guide](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a11/examples/component_recipes/README.md), or the
-[report and catalog](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a11/examples/component_bootstrap). The
-[alpha runbook](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a11/docs/release/2.6.0a11-runbook.md) records the release gates and
-limits. For an unpublished checkout, build a wheel using
-`python build_backend/fullbleed_build_backend.py wheel --out dist` and install
-the returned path. Ordinary `pip install fullbleed` selects the stable channel.
-
-Attach [page bands and page numbers](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a11/docs/component-page-bands.md) through
-`Page(header=PageBand(...), footer=PageBand(...))`. The
-[Common Ground field-notes example](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a11/examples/component_page_bands/README.md)
-uses shared brand components, styled page numbers and a table across three pages.
-The API supports per-record numbering, first-page suppression and blank-page
-policy. Fit diagnostics identify content that cannot be proved to stay within
-its reserved margin. HTML exports use one header and footer with explicit page
-placeholders. These constructors require a9; the earlier a8 wheel omits them.
+[Compare both designs in HTML/CSS and Python components](https://docs.fullbleed.dev/guides/showcase-authoring/), with matching page output and runnable source. The component versions use the opt-in 2.6 alpha.
 
 ## Choose your language
 
@@ -217,6 +113,34 @@ Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-start
 ### C# and .NET
 
 Install [`FullBleed.DotNet`](https://www.nuget.org/packages/FullBleed.DotNet/0.2.0) in a .NET 8, 9, or 10 project and follow the [C# quickstart](https://docs.fullbleed.dev/getting-started/dotnet/). Compose documents with ordinary methods, LINQ children and immutable style objects. The [component guide](https://docs.fullbleed.dev/guides/csharp-components/) explains `WithClass`, attached stylesheets and inline overrides and includes a complete invoice download with explicit fonts. Existing HTML/CSS templates remain supported. Native rendering runs inside the .NET process on Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS, without a Python or browser runtime.
+
+<a id="compose-documents-in-python"></a>
+
+## Author with reusable components
+
+Components are another way to author the same print documents. Use ordinary
+functions, children and reusable styles instead of writing HTML strings:
+
+- [Python components and styling](https://docs.fullbleed.dev/guides/python-components/) — the stable `fullbleed.ui` API includes function components, `class_name` and document stylesheets.
+- [JavaScript functions and JSX/TSX](https://docs.fullbleed.dev/guides/javascript-components/) — try the [live invoice](https://docs.fullbleed.dev/assets/react-demo/) or customize the [React starter](https://docs.fullbleed.dev/guides/react-pdf/).
+- [C# components and styles](https://docs.fullbleed.dev/guides/csharp-components/) — compose documents with typed methods, LINQ and immutable styles.
+
+<a id="try-the-python-component-alpha"></a>
+
+### Python release channels
+
+| Channel | Install | Component API |
+| --- | --- | --- |
+| Stable **2.5.34** | `python -m pip install fullbleed` | Existing HTML/CSS rendering and `fullbleed.ui` components |
+| Opt-in alpha **2.6.0a11** | `python -m pip install --pre "fullbleed==2.6.0a11"` | `fullbleed.ui.experimental`: owned styles, named parts, data tables, static Bootstrap helpers, page bands and styled/unstyled HTML export |
+
+The alpha is merged into `master` and available on PyPI. It remains experimental:
+the stable namespace and migration contract, independent-kit integration, and
+independent author feedback still need to be settled. Existing `fullbleed.ui`
+imports remain supported. See the [release-status review and graduation
+criteria](https://docs.fullbleed.dev/guides/component-status/) or
+[run the current preview](https://docs.fullbleed.dev/guides/component-preview-11/).
+The language packages have their own versions and API coverage.
 
 ## Choose your starting point
 
