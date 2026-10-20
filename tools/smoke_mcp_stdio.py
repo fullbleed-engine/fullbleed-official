@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -24,8 +25,18 @@ def _request(request_id: int, method: str, params: dict | None = None) -> dict:
     }
 
 
-def run(executable: str | None = None, *, container_image: str | None = None) -> dict:
-    with tempfile.TemporaryDirectory(prefix="fullbleed-mcp-smoke-") as raw:
+def run(
+    executable: str | None = None, *,
+    container_image: str | None = None,
+    output_dir: Path | None = None,
+) -> dict:
+    if output_dir is None:
+        workspace = tempfile.TemporaryDirectory(prefix="fullbleed-mcp-smoke-")
+    else:
+        output_dir = Path(output_dir).resolve()
+        output_dir.mkdir(parents=True, exist_ok=False)
+        workspace = nullcontext(str(output_dir))
+    with workspace as raw:
         container_name = None
         command = (
             [executable, "--root", raw]
@@ -219,6 +230,8 @@ def run(executable: str | None = None, *, container_image: str | None = None) ->
             "bytes_written": vdp["bytes_written"],
         },
     }
+    if output_dir is not None:
+        result["output_directory"] = str(output_dir)
     if container_image:
         denied = responses[7].get("result", {})
         if not denied.get("isError") or "escapes MCP workspace root" not in json.dumps(denied):
@@ -240,11 +253,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional fullbleed-mcp executable; defaults to the current Python module",
     )
     transport.add_argument(
-        "--container-image", help="Exercise a built MCP Docker image with a temporary workspace",
+        "--container-image", help="Exercise a built MCP Docker image",
+    )
+    parser.add_argument(
+        "--output-dir", type=Path,
+        help="Retain generated documents in a new directory; never overwrite an existing directory",
     )
     parser.add_argument("--json", action="store_true")
     arguments = parser.parse_args(argv)
-    result = run(arguments.executable, container_image=arguments.container_image)
+    result = run(
+        arguments.executable, container_image=arguments.container_image,
+        output_dir=arguments.output_dir,
+    )
     if arguments.json:
         sys.stdout.write(json.dumps(result, ensure_ascii=True) + "\n")
     else:

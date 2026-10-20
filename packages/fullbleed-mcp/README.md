@@ -39,7 +39,7 @@ The separate `fullbleed-mcp` distribution exists for package and MCP Registry di
 
 The optional repository-root `Dockerfile` packages the stdio server for container
 users and MCP directories. It builds the adapter from this repository and installs
-the released Fullbleed 2.5.1 engine from hash-checked Linux wheels. It does not add
+the released engine pinned in `container-requirements.txt` from hash-checked Linux wheels. It does not add
 Docker or other dependencies to the Python package.
 
 From the repository root:
@@ -57,15 +57,22 @@ your current user. Keep `-i` and omit `-t` when connecting an MCP client over st
 The `MCP container` workflow builds the image and exercises initialization, tool
 discovery, previews, inspection, verification, and three-record VDP output. Its
 smoke run disables networking, makes the image read-only, and checks that a tool
-cannot read outside its document workspace. A second check uses the official
+cannot read outside its document workspace. It retains the generated PDFs and
+preview, independently checks their text and page counts, and rejects a blank
+preview. A second check uses the official
 TypeScript MCP SDK to validate tool discovery and structured results against the
 running container. To run these checks locally:
 
 ```text
-python tools/smoke_mcp_stdio.py --container-image fullbleed-mcp:local --json
+python -m pip install -r requirements-test.txt
+python tools/smoke_mcp_stdio.py --container-image fullbleed-mcp:local --output-dir output/mcp-smoke --json
+python tools/verify_mcp_artifacts.py output/mcp-smoke
 npm ci --ignore-scripts --no-audit --no-fund --prefix tools/mcp-client-smoke
 node tools/mcp-client-smoke/smoke.mjs --container-image fullbleed-mcp:local
 ```
+
+Choose a new `--output-dir` for each run. The smoke check refuses to overwrite
+an existing directory. Omitting the option uses a temporary workspace.
 
 `container-requirements.txt` pins the released engine used by this distribution.
 Update its version and wheel hashes when intentionally moving the container to a
