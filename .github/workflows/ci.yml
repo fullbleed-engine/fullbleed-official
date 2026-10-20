@@ -392,6 +392,17 @@ jobs:
       - name: Verify hidden HTML text and author display overrides
         run: python -I tools/smoke_hidden_text.py --out target/hidden-text
 
+      - name: Verify decoration continuity across inline word spaces
+        run: python -I tools/smoke_text_decoration_spaces.py --out target/text-decoration-spaces
+
+      - name: Retain decoration-space PDFs and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: text-decoration-spaces-${{ runner.os }}
+          path: target/text-decoration-spaces
+          if-no-files-found: error
+
       - name: Retain hidden-text PDF and preview evidence
         if: always()
         uses: actions/upload-artifact@v7

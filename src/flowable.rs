@@ -11256,6 +11256,7 @@ pub(crate) struct CollapsibleSpaceFlowable {
     inline_ascent: Pt,
     x_height: Pt,
     font_extents: (Pt, Pt),
+    decoration_renderer: Option<Box<Paragraph>>,
 }
 
 impl CollapsibleSpaceFlowable {
@@ -11273,6 +11274,11 @@ impl CollapsibleSpaceFlowable {
         let font_extents = probe
             .inline_font_extents(width)
             .unwrap_or((baseline, (height - baseline).max(Pt::ZERO)));
+        // A collapsed interior space still belongs to its decorating inline.
+        // Keep the font/style only when paint needs it; ordinary spaces remain
+        // geometry and reading-order metadata. The line builder removes spaces
+        // at line edges before drawing these children.
+        let decoration_renderer = (!probe.style.text_decoration.is_none()).then(|| Box::new(probe));
         Self {
             width,
             letter_spacing,
@@ -11281,6 +11287,7 @@ impl CollapsibleSpaceFlowable {
             inline_ascent,
             x_height,
             font_extents,
+            decoration_renderer,
         }
     }
 }
@@ -11333,8 +11340,60 @@ impl Flowable for CollapsibleSpaceFlowable {
         None
     }
 
-    fn draw(&self, canvas: &mut Canvas, _x: Pt, _y: Pt, _avail_width: Pt, _avail_height: Pt) {
+    fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, _avail_height: Pt) {
         canvas.meta(META_READING_TEXT_KEY, " ");
+        if let Some(renderer) = self.decoration_renderer.as_ref() {
+            let draw_y = y + self.baseline - renderer.style.font_size;
+            let decoration_y = draw_y + renderer.propagated_decoration_baseline_shift;
+            let width = renderer.text_decoration_paint_width(avail_width);
+            // Paint only the decoration's shadow. A space has no glyph ink,
+            // and emitting a shadow glyph would change text extraction.
+            for shadow in renderer.style.text_shadows.iter().rev() {
+                renderer.draw_text_shadow(canvas, x, draw_y, "", width, shadow);
+            }
+            draw_text_decorations_before_glyphs(
+                canvas,
+                &renderer.style,
+                renderer.font_registry.as_deref(),
+                x,
+                decoration_y,
+                width,
+                Some(" "),
+            );
+            draw_text_decorations_after_glyphs(
+                canvas,
+                &renderer.style,
+                renderer.font_registry.as_deref(),
+                x,
+                decoration_y,
+                width,
+                Some(" "),
+            );
+        }
+    }
+
+    fn has_propagated_text_decoration(&self) -> bool {
+        self.decoration_renderer
+            .as_ref()
+            .is_some_and(|renderer| renderer.style.text_decoration_propagated)
+    }
+
+    fn with_propagated_text_decoration_baseline_shift(&self, shift: Pt) -> Box<dyn Flowable> {
+        let mut rebased = self.clone();
+        if let Some(renderer) = rebased.decoration_renderer.as_mut() {
+            if renderer.style.text_decoration_propagated {
+                renderer.propagated_decoration_baseline_shift += shift;
+            }
+        }
+        Box::new(rebased)
+    }
+
+    fn without_propagated_text_decoration(&self) -> Box<dyn Flowable> {
+        let mut isolated = self.clone();
+        if isolated.has_propagated_text_decoration() {
+            isolated.decoration_renderer = None;
+        }
+        Box::new(isolated)
     }
 }
 
@@ -20538,6 +20597,156 @@ mod inline_baseline_tests {
                 Some(Pt::from_f32(55.0))
             );
         }
+    }
+
+    fn decoration_segments(commands: &[Command]) -> Vec<(Pt, Pt, Pt)> {
+        let mut start = None;
+        let mut end = None;
+        let mut segments = Vec::new();
+        for command in commands {
+            match command {
+                Command::MoveTo { x, y } => start = Some((*x, *y)),
+                Command::LineTo { x, y } => end = Some((*x, *y)),
+                Command::Stroke => {
+                    if let (Some((x0, y0)), Some((x1, y1))) = (start, end) {
+                        assert_eq!(y0, y1);
+                        segments.push((x0, x1, y0));
+                    }
+                    start = None;
+                    end = None;
+                }
+                _ => {}
+            }
+        }
+        segments
+    }
+
+    #[test]
+    fn space_decoration_connects_words_and_skips_collapsed_line_edges() {
+        use crate::style::TextDecorationMode;
+        for decoration in [
+            TextDecorationMode {
+                underline: true,
+                ..Default::default()
+            },
+            TextDecorationMode {
+                overline: true,
+                ..Default::default()
+            },
+            TextDecorationMode {
+                line_through: true,
+                ..Default::default()
+            },
+        ] {
+            for letter_spacing in [Pt::ZERO, Pt::from_f32(1.0)] {
+                let mut style = TextStyle::default();
+                style.font_name = Arc::from("Courier");
+                style.font_size = Pt::from_f32(10.0);
+                style.line_height = Pt::from_f32(15.0);
+                style.line_height_is_auto = false;
+                style.letter_spacing = letter_spacing;
+                style.word_spacing = Pt::from_f32(2.0);
+                style.text_decoration = decoration;
+                let word = || {
+                    Box::new(Paragraph::new("HH").with_style(style.clone())) as Box<dyn Flowable>
+                };
+                let space = || {
+                    Box::new(CollapsibleSpaceFlowable::new(style.clone(), None))
+                        as Box<dyn Flowable>
+                };
+                let line = InlineBlockLayoutFlowable::new_pt(
+                    vec![space(), word(), space(), word(), space()]
+                        .into_iter()
+                        .map(|child| (child, VerticalAlign::Baseline))
+                        .collect(),
+                    Pt::ZERO,
+                    None,
+                );
+                let size = line.wrap(Pt::from_f32(100.0), Pt::from_f32(100.0));
+                let mut canvas = Canvas::new(Size {
+                    width: Pt::from_f32(120.0),
+                    height: Pt::from_f32(100.0),
+                });
+                line.draw(
+                    &mut canvas,
+                    Pt::from_f32(5.0),
+                    Pt::ZERO,
+                    Pt::from_f32(100.0),
+                    size.height,
+                );
+                let document = canvas.finish();
+                let segments = decoration_segments(&document.pages[0].commands);
+                assert_eq!(
+                    segments.len(),
+                    3,
+                    "decoration={decoration:?}, spacing={letter_spacing:?}"
+                );
+                assert_eq!(segments[0].0, Pt::from_f32(5.0));
+                assert_eq!(
+                    segments[2].1,
+                    Pt::from_f32(5.0) + size.width + letter_spacing
+                );
+                for pair in segments.windows(2) {
+                    assert_eq!(pair[0].1, pair[1].0, "gap at an interior word space");
+                    assert_eq!(
+                        pair[0].2, pair[1].2,
+                        "decoration baseline changed at a space"
+                    );
+                }
+                let mut wrapped = Canvas::new(Size {
+                    width: Pt::from_f32(120.0),
+                    height: Pt::from_f32(100.0),
+                });
+                line.draw(
+                    &mut wrapped,
+                    Pt::from_f32(5.0),
+                    Pt::ZERO,
+                    Pt::from_f32(15.0),
+                    Pt::from_f32(100.0),
+                );
+                let segments = decoration_segments(&wrapped.finish().pages[0].commands);
+                assert_eq!(
+                    segments.len(),
+                    2,
+                    "wrapped spaces must not paint at line edges"
+                );
+                assert!(
+                    segments
+                        .iter()
+                        .all(|segment| segment.0 == Pt::from_f32(5.0))
+                );
+                assert_ne!(segments[0].2, segments[1].2);
+            }
+        }
+    }
+
+    #[test]
+    fn space_decoration_obeys_propagated_baseline_and_atomic_isolation() {
+        let mut style = TextStyle::default();
+        style.text_decoration.underline = true;
+        style.text_decoration_propagated = true;
+        let space = CollapsibleSpaceFlowable::new(style.clone(), None);
+        let shifted = space.with_propagated_text_decoration_baseline_shift(Pt::from_f32(3.0));
+        let paint = |child: &dyn Flowable| {
+            let mut canvas = Canvas::new(Size {
+                width: Pt::from_f32(100.0),
+                height: Pt::from_f32(100.0),
+            });
+            child.draw(&mut canvas, Pt::ZERO, Pt::ZERO, space.width, space.height);
+            decoration_segments(&canvas.finish().pages[0].commands)
+        };
+        let original = paint(&space);
+        let rebased = paint(shifted.as_ref());
+        assert_eq!(original.len(), 1);
+        assert_eq!(rebased.len(), 1);
+        assert_eq!(rebased[0].2, original[0].2 + Pt::from_f32(3.0));
+        assert!(paint(space.without_propagated_text_decoration().as_ref()).is_empty());
+        style.text_decoration_propagated = false;
+        let own = CollapsibleSpaceFlowable::new(style, None);
+        assert_eq!(
+            paint(own.without_propagated_text_decoration().as_ref()).len(),
+            1
+        );
     }
 
     #[test]

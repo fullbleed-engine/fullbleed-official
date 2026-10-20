@@ -6711,6 +6711,7 @@ impl StyleResolver {
         resolve_font_relative_lengths(&mut computed, self.font_registry.as_deref());
         apply_border_style_mask(&mut computed);
         resolve_named_counter_style(&mut computed, &self.counter_styles);
+        resolve_text_decoration_propagation(&mut computed, parent);
         if let (Some(logger), Some(node)) = (debug, debug_node.as_ref()) {
             let style_json = debug_style_json(&computed);
             let unresolved_json = json_array(&unresolved);
@@ -7140,6 +7141,7 @@ impl StyleResolver {
         resolve_font_relative_lengths(&mut computed, self.font_registry.as_deref());
         apply_border_style_mask(&mut computed);
         resolve_named_counter_style(&mut computed, &self.counter_styles);
+        resolve_text_decoration_propagation(&mut computed, parent);
         computed.marker_content_overridden = marker_content_overrides_marker;
 
         let has_static_content = computed
@@ -19057,6 +19059,42 @@ fn copy_revert_layer_border_style(
         PhysicalSide::Right => computed.right = layer_base.right,
         PhysicalSide::Bottom => computed.bottom = layer_base.bottom,
     }
+}
+
+fn resolve_text_decoration_propagation(style: &mut ComputedStyle, parent: &ComputedStyle) {
+    // These fields carry effective line paint as well as authored decorations.
+    // Resolve the boundary after the cascade determines display and the box's
+    // own decoration. An atomic inline starts a separate formatting context.
+    if matches!(
+        style.display,
+        DisplayMode::InlineBlock
+            | DisplayMode::InlineTable
+            | DisplayMode::InlineFlex
+            | DisplayMode::InlineGrid
+    ) {
+        if style.text_decoration_propagated {
+            style.text_decoration = TextDecorationMode::default();
+            style.text_decoration_propagated = false;
+        }
+        return;
+    }
+    if parent.text_decoration.is_none()
+        || (!style.text_decoration_propagated && !style.text_decoration.is_none())
+    {
+        return;
+    }
+    // `none` adds no line; it cannot erase paint from an ancestor's decorating
+    // box. Descendant color and decoration longhands likewise do not recolor
+    // or restyle that ancestor's line. Preserve its resolved paint settings.
+    style.text_decoration = parent.text_decoration;
+    style.text_decoration_propagated = true;
+    style.text_decoration_color = parent.text_decoration_color;
+    style.text_decoration_color_tracks_current = false;
+    style.text_decoration_thickness = parent.text_decoration_thickness;
+    style.text_decoration_style = parent.text_decoration_style;
+    style.text_decoration_skip_ink = parent.text_decoration_skip_ink;
+    style.text_underline_offset = parent.text_underline_offset;
+    style.text_underline_position = parent.text_underline_position;
 }
 
 fn apply_border_style_mask(style: &mut ComputedStyle) {
@@ -44609,7 +44647,7 @@ mod tests {
     }
 
     #[test]
-    fn text_decoration_parses_and_resets() {
+    fn text_decoration_none_keeps_ancestor_paint() {
         let css = "div { text-decoration: underline; } span { text-decoration: none; }";
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
@@ -44620,7 +44658,63 @@ mod tests {
 
         let span_info = element("span", None, &[]);
         let span_style = resolver.compute_style(&span_info, &div_style, None, &[div_info]);
-        assert!(span_style.text_decoration.is_none());
+        assert!(span_style.text_decoration.underline);
+        assert!(span_style.text_decoration_propagated);
+        let standalone = resolver.compute_style(&span_info, &root, None, &[]);
+        assert!(standalone.text_decoration.is_none());
+    }
+
+    #[test]
+    fn text_decoration_propagation_keeps_root_color_and_geometry() {
+        let css = ".parent {color:red;text-decoration:underline solid 2px;text-underline-offset:3px} .child {color:blue;text-decoration:none;text-decoration-color:green;text-decoration-thickness:6px;text-underline-offset:8px}";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let parent_info = element("span", None, &["parent"]);
+        let parent = resolver.compute_style(&parent_info, &root, None, &[]);
+        let child = resolver.compute_style(
+            &element("span", None, &["child"]),
+            &parent,
+            None,
+            &[parent_info],
+        );
+        assert!(child.text_decoration.underline);
+        assert!(child.text_decoration_propagated);
+        assert_eq!(child.color, Color::rgb(0.0, 0.0, 1.0));
+        assert_eq!(child.text_decoration_color, parent.text_decoration_color);
+        assert_eq!(
+            child.text_decoration_thickness,
+            parent.text_decoration_thickness
+        );
+        assert_eq!(child.text_underline_offset, parent.text_underline_offset);
+    }
+
+    #[test]
+    fn text_decoration_propagation_stops_at_atomic_inlines_but_keeps_own_lines() {
+        for display in ["inline-block", "inline-table", "inline-flex", "inline-grid"] {
+            for own in [false, true] {
+                let css = format!(
+                    ".parent {{text-decoration:underline red}} .child {{display:{display};{}}}",
+                    if own {
+                        "text-decoration:line-through blue"
+                    } else {
+                        ""
+                    }
+                );
+                let resolver = StyleResolver::new(&css);
+                let root = resolver.default_style();
+                let parent_info = element("span", None, &["parent"]);
+                let parent = resolver.compute_style(&parent_info, &root, None, &[]);
+                let child_info = element("span", None, &["child"]);
+                let child = resolver.compute_style(&child_info, &parent, None, &[parent_info]);
+                assert!(!child.text_decoration.underline, "{display}");
+                assert_eq!(child.text_decoration.line_through, own, "{display}");
+                assert!(!child.text_decoration_propagated);
+                let descendant =
+                    resolver.compute_style(&element("b", None, &[]), &child, None, &[child_info]);
+                assert_eq!(descendant.text_decoration.line_through, own, "{display}");
+                assert!(!descendant.text_decoration.underline, "{display}");
+            }
+        }
     }
 
     #[test]
