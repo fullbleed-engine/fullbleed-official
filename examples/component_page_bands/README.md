@@ -1,12 +1,12 @@
 # Reusable page bands
 
-This example requires the experimental PageBand API in **Fullbleed 2.6.0a9**.
-The earlier `2.6.0a8` wheel does not provide these constructors. Install the
-explicit prerelease, or build this checkout when working from an unpublished
+This example uses **Fullbleed 2.6.0a11**, including native `Flow` spacing in
+styled HTML exports. Earlier alphas need an extra browser layout rule. Install
+the explicit prerelease, or build this checkout when working from an unpublished
 candidate.
 
 ```console
-python -m pip install --pre "fullbleed==2.6.0a9"
+python -m pip install --pre "fullbleed==2.6.0a11"
 python examples/component_page_bands/render.py --out target/page-bands --pdf-profile pdfua2
 ```
 
@@ -16,10 +16,11 @@ same report exports styled and unstyled browser HTML; those exports show one
 header and footer with `[page]` / `[pages]` placeholders. They do not paginate
 the browser or promise browser-print parity.
 
-The styled export adds a small screen stylesheet for font loading, a readable
-column width and continuous flex layout. `Flow` uses native paginated block
-spacing in PDFs; the screen stylesheet keeps its authored row gaps visible in
-the browser. It does not change the PDF source or the unstyled export.
+The styled export adds a small screen stylesheet for font loading and a
+readable column width. The component exporter supplies `Flow` layout and gaps;
+the screen stylesheet does not patch them. PDF-only page-break markers are
+hidden in continuous HTML. `Flow` keeps native paginated block spacing in PDFs.
+The screen framing does not change the PDF source or the unstyled export.
 
 Start with [report.py](report.py). `Brand` can also be used in the body or in a
 different document. Its styles travel with it. `.folio` demonstrates authored

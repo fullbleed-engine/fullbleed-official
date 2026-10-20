@@ -1,3 +1,32 @@
+# Fullbleed Release Notes - 2.6.0a11
+
+Styled HTML exports now apply `Flow` gaps in a browser without a layout
+workaround. HTML uses a flex column, preserving independent child margins and
+the existing recipe, prop, instance, named-part and selector precedence.
+PDF rendering keeps native block pagination. Shared component children are
+not rewritten during export.
+
+PDF-only `PageBreak` markers are hidden in continuous styled HTML, avoiding
+an empty flex item and a second gap. Unstyled export still omits generated
+and inline styles. Use `compile(target="pdf")` or
+`emit_artifacts(..., target="pdf")` to retain exact native print source.
+Browser layout is not a PDF pagination preview.
+
+The implementation passed 973 Python tests and 171 browser geometry/export
+checks across Chromium, Firefox and WebKit. Its 20 native Flow PDFs, 30 preview
+images and print source match the published alpha 10 wheel byte for byte.
+Common Ground also retains its native PDF and previews. The independent
+corpus remains at 1,623 passes, 21 failures and 18 disputed references; it is
+not a complete CSS-conformance pass. The final release must reproduce this
+evidence before publication.
+
+The [alpha 11 runbook](docs/release/2.6.0a11-runbook.md) defines that qualification.
+This entry describes a candidate until publication completes. Python uses
+`2.6.0a11` and Cargo source uses `2.6.0-alpha.11`. The component API remains
+experimental, exports remain static, and ordinary `pip install fullbleed`
+stays on the stable channel. No core dependency or human accessibility claim
+is added.
+
 # Fullbleed Release Notes - 2.6.0a10
 
 This component alpha carries solid underlines, overlines, strike-throughs and
