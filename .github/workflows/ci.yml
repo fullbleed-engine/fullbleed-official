@@ -462,6 +462,17 @@ jobs:
           path: target/floating-first-letter
           if-no-files-found: warn
 
+      - name: Verify first-letter styling across rich inline content and pages
+        run: python -I tools/smoke_rich_first_letter.py --out target/rich-first-letter
+
+      - name: Retain rich-initial PDFs and preview evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rich-first-letter-${{ runner.os }}
+          path: target/rich-first-letter
+          if-no-files-found: warn
+
       - name: Retain border-image tiling PDFs and preview evidence
         if: always()
         uses: actions/upload-artifact@v7
