@@ -7,6 +7,7 @@ browser, or language server is included in the Fullbleed runtime dependency set.
 from __future__ import annotations
 
 import argparse
+from importlib import import_module
 import json
 import os
 from pathlib import Path
@@ -19,7 +20,6 @@ import tempfile
 import threading
 import time
 
-import fullbleed.ui.experimental as components
 from fullbleed.ui.experimental._schema import STYLE_PROPERTIES
 
 
@@ -126,7 +126,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pyright-root", required=True, type=Path, help="Installed node_modules/pyright directory")
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--namespace", choices=("fullbleed.ui.experimental", "fullbleed.components"),
+                        default="fullbleed.ui.experimental")
     args = parser.parse_args()
+    components = import_module(args.namespace)
     package = args.pyright_root.resolve()
     metadata = json.loads((package / "package.json").read_text(encoding="utf-8"))
     node = shutil.which("node")
@@ -139,8 +142,10 @@ def main():
     completion_evidence = []
     with tempfile.TemporaryDirectory(prefix="fullbleed-editor-") as directory:
         folder = Path(directory).resolve()
-        (folder / "valid.py").write_text(contract["VALID"], encoding="utf-8")
-        (folder / "invalid.py").write_text(invalid, encoding="utf-8")
+        (folder / "valid.py").write_text(
+            contract["VALID"].replace("fullbleed.ui.experimental", args.namespace), encoding="utf-8")
+        (folder / "invalid.py").write_text(
+            invalid.replace("fullbleed.ui.experimental", args.namespace), encoding="utf-8")
         (folder / "pyrightconfig.json").write_text(json.dumps({
             "typeCheckingMode": "strict", "pythonVersion": "3.10",
         }), encoding="utf-8")
@@ -185,7 +190,7 @@ def main():
                 ("theme_derivation", 'Document(Paragraph("Text")).theme.with_§', {"with_values"}),
             ]
             for index, (name, expression, required) in enumerate(cases):
-                prefix = "from fullbleed.ui.experimental import component, style, styled, Paragraph, Stack, Row, Grid, DataTable, Heading, Node, Document, Renderer, bootstrap as bs\n"
+                prefix = f"from {args.namespace} import component, style, styled, Paragraph, Stack, Row, Grid, DataTable, Heading, Node, Document, Renderer, bootstrap as bs\n"
                 before, after = (prefix + expression).split("§")
                 path = folder / f"completion_{index}.py"
                 server.open(path, before + after)
@@ -200,7 +205,7 @@ def main():
                 completion_evidence.append({"name": name, "required": sorted(required), "matched": sorted(required & labels)})
         finally:
             server.close()
-    result = {"ok": True, "pyright_version": metadata["version"], "runtime": str(components.__file__),
+    result = {"ok": True, "namespace": args.namespace, "pyright_version": metadata["version"], "runtime": str(components.__file__),
               "valid_consumer": diagnostics["valid.py"], "invalid_consumer": diagnostics["invalid.py"],
               "rejected_cases": len(expected_errors) - len(missed), "runtime_only_cases": sorted(missed),
               "completions": completion_evidence,

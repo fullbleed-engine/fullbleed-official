@@ -218,9 +218,12 @@ jobs:
           python -I tools/smoke_component_fonts.py --out target/release-components/fonts
           python -I tools/smoke_component_flex.py --out target/release-components/flex
           python -I tools/smoke_component_bootstrap.py --out target/release-components/bootstrap
+          python -I tools/smoke_component_document_migration.py --out target/release-components/document-migration
           python -I tools/smoke_component_typing.py --out target/release-components/typing.json
+          python -I tools/smoke_component_typing.py --namespace fullbleed.components --out target/release-components/typing-public.json
           npm install --ignore-scripts --no-package-lock --no-save --no-audit --no-fund --prefix target/component-editor-tools pyright@1.1.414
           python -I tools/smoke_component_editor.py --pyright-root target/component-editor-tools/node_modules/pyright --out target/release-components/editor.json
+          python -I tools/smoke_component_editor.py --namespace fullbleed.components --pyright-root target/component-editor-tools/node_modules/pyright --out target/release-components/editor-public.json
 
       - name: Verify Flow HTML exports in Chromium, Firefox and WebKit
         run: |
