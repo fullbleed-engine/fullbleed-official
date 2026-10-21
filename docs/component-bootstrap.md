@@ -16,6 +16,10 @@ For an unpublished checkout, build with
 `python build_backend/fullbleed_build_backend.py wheel --out dist` and install
 the printed wheel path.
 
+This checkout also exposes the same kit at `fullbleed.components.bootstrap`.
+The published alpha above keeps its earlier import path; see
+[component imports and migration](component-namespace.md) before changing it.
+
 The [published Bootstrap preview](https://github.com/fullbleed-engine/fullbleed-official/releases/tag/component-preview-41a2cee)
 supports this kit and HTML export. The alpha's newer
 [part-forwarding contract](../examples/component_recipes/README.md#customize-a-root-or-an-exposed-part)

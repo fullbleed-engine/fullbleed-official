@@ -141,6 +141,11 @@ criteria](https://docs.fullbleed.dev/guides/component-status/) or
 [run the current preview](https://docs.fullbleed.dev/guides/component-preview-11/).
 The language packages have their own versions and API coverage.
 
+This source checkout also includes the intended `fullbleed.components` namespace
+and a [complete-document migration example](docs/component-namespace.md).
+That import path is being qualified for the next alpha; the published alpha
+above retains its existing imports.
+
 ## Choose your starting point
 
 | You want to build | Start here |

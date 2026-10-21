@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from importlib import metadata
+from importlib import import_module, metadata
 import json
 import os
 from pathlib import Path
@@ -11,9 +11,6 @@ import re
 import subprocess
 import sys
 import tempfile
-
-import fullbleed.ui.experimental as components
-
 
 VALID = '''from dataclasses import dataclass
 from fullbleed.ui.experimental import (
@@ -214,19 +211,26 @@ def invalid_consumer():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--namespace", choices=("fullbleed.ui.experimental", "fullbleed.components"),
+                        default="fullbleed.ui.experimental")
     args = parser.parse_args()
+    components = import_module(args.namespace)
     source = Path(__file__).resolve().parents[1] / "python"
     assert source not in Path(components.__file__).parents, "Use an installed candidate wheel with python -I"
     assert Path(components.__file__).with_name("py.typed").is_file(), "The wheel must carry its typing marker"
-    for name in ("_style", "_tree", "_table", "_document", "_page", "_bridge"):
+    stub_names = (("__init__", "bootstrap") if args.namespace == "fullbleed.components"
+                  else ("_style", "_tree", "_table", "_document", "_page", "_bridge"))
+    for name in stub_names:
         assert Path(components.__file__).with_name(name + ".pyi").is_file(), name
     environment = dict(os.environ)
     environment.pop("MYPYPATH", None)
     environment.pop("PYTHONPATH", None)
     with tempfile.TemporaryDirectory(prefix="fullbleed-component-types-") as directory:
         folder = Path(directory)
-        (folder / "valid.py").write_text(VALID, encoding="utf-8")
+        valid_source = VALID.replace("fullbleed.ui.experimental", args.namespace)
+        (folder / "valid.py").write_text(valid_source, encoding="utf-8")
         invalid_source, expected = invalid_consumer()
+        invalid_source = invalid_source.replace("fullbleed.ui.experimental", args.namespace)
         (folder / "invalid.py").write_text(invalid_source, encoding="utf-8")
 
         def check(name):
@@ -251,7 +255,7 @@ def main():
             runtime_guard = error.to_dict()
         else:
             raise AssertionError("Flow must reject unwrapped text at runtime")
-    result = {"ok": True, "mypy_version": metadata.version("mypy"), "runtime": str(components.__file__),
+    result = {"ok": True, "namespace": args.namespace, "mypy_version": metadata.version("mypy"), "runtime": str(components.__file__),
               "valid_consumer": valid.stdout, "valid_consumer_runs": True,
               "expected_invalid_consumer": invalid.stdout, "invalid_cases": expected,
               "rejected_cases": len(expected) - len(missed), "runtime_only_cases": sorted(missed),
@@ -259,7 +263,7 @@ def main():
               "scope": "Installed calls, style keywords and value shapes, page options, primitive props, layout choices, table record types and preserved component arguments. Styled factories retain exactly their wrapped argument types, including business arguments named style. Finite values, units, CSS syntax, token names and dynamic part names still require runtime validation."}
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"ok": True, "rejected_cases": len(expected) - len(missed), "runtime_only_cases": sorted(missed)}))
+    print(json.dumps({"ok": True, "namespace": args.namespace, "rejected_cases": len(expected) - len(missed), "runtime_only_cases": sorted(missed)}))
 
 
 if __name__ == "__main__":

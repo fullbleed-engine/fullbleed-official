@@ -204,11 +204,11 @@ EXAMPLES = [
     },
     {
         "id": "component_authoring_experimental_python",
-        "intent": "Opt into the experimental Python component kit and export static styled or unstyled HTML without constructing a PDF engine.",
+        "intent": "Opt into the alpha Python component kit through its intended public namespace and export static styled or unstyled HTML without constructing a PDF engine.",
         "interface": "python",
         "code": (
-            "from fullbleed.ui.experimental import Document, style\n"
-            "from fullbleed.ui.experimental import bootstrap as bs\n"
+            "from fullbleed.components import Document, style\n"
+            "from fullbleed.components import bootstrap as bs\n"
             "card = bs.Card('Your order has passed inspection.', title='Ready to ship',\n"
             "               footer=bs.Badge('Approved', variant='success'))\n"
             "document = Document(card.with_parts(title=style(color='#205b47')), title='Order summary')\n"
@@ -249,8 +249,8 @@ EXAMPLES = [
 KNOWN_LIMITATIONS = [
     {
         "id": "experimental_python_components",
-        "summary": "The fullbleed.ui.experimental API may change. Bootstrap components and HTML exports use authored static states; no Bootstrap JavaScript is included, and component inventory coverage does not establish complete CSS/browser or accessibility parity.",
-        "agent_action": "Opt into the experimental namespace explicitly, inspect the installed examples, and validate the resulting document. Use fullbleed.ui for the established component API; themes, fonts and assets remain explicit application choices.",
+        "summary": "The fullbleed.components API remains in alpha and may change. The earlier fullbleed.ui.experimental path exposes the same objects. Bootstrap components and HTML exports use authored static states; no Bootstrap JavaScript is included, and component inventory coverage does not establish complete CSS/browser or accessibility parity.",
+        "agent_action": "Use fullbleed.components for the alpha authoring API, inspect the installed examples, and validate the resulting document. Existing fullbleed.ui imports remain supported; themes, fonts and assets remain explicit application choices.",
     },
     {
         "id": "watch_scope",
