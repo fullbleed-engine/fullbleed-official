@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from hashlib import sha256
+from html.parser import HTMLParser
 from importlib.metadata import version
 from io import BytesIO
 import json
@@ -16,6 +17,34 @@ from fullbleed.ui import experimental
 from PIL import ImageChops
 from pypdf import PdfReader
 import pypdfium2 as pdfium
+
+
+class HtmlStyles(HTMLParser):
+    """Inspect the delivered HTML rather than only compiling another tree."""
+
+    def __init__(self):
+        super().__init__()
+        self.blocks = []
+        self.inline = []
+        self.classes = set()
+        self.in_style = False
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "style":
+            self.in_style = True
+            self.blocks.append("")
+        if "style" in attrs:
+            self.inline.append(attrs["style"])
+        self.classes.update(attrs.get("class", "").split())
+
+    def handle_endtag(self, tag):
+        if tag == "style":
+            self.in_style = False
+
+    def handle_data(self, data):
+        if self.in_style:
+            self.blocks[-1] += data
 
 
 def main():
@@ -61,8 +90,17 @@ def main():
         for html, css in ((legacy.to_html(), legacy.to_css()), (source.html, source.css)):
             _, glyphs = engine.render_pdf_with_glyph_report(html, css)
             assert not glyphs, (report.name, glyphs)
-        unstyled = migrated.to_html(include_styles=False)
-        assert "<style" not in unstyled and " style=" not in unstyled and 'class="muted"' in unstyled
+        styled = (args.out / f"{report.name}-styled.html").read_text(encoding="utf-8")
+        unstyled = (args.out / f"{report.name}-unstyled.html").read_text(encoding="utf-8")
+        styled_check, unstyled_check = HtmlStyles(), HtmlStyles()
+        styled_check.feed(styled)
+        unstyled_check.feed(unstyled)
+        assert styled_check.blocks == [migrated.to_css()], (report.name, "saved styled HTML must embed the complete stylesheet")
+        assert "muted" in styled_check.classes and ".muted" in styled_check.blocks[0]
+        assert not unstyled_check.blocks and not unstyled_check.inline
+        assert "muted" in unstyled_check.classes
+        assert styled == migrated.to_html(include_styles=True)
+        assert unstyled == migrated.to_html(include_styles=False)
         assert "@page" in source.css and "margin: " in source.css
         assert "@page" not in migrated.styles, "Page geometry must be owned by Page"
         old_doc, new_doc = pdfium.PdfDocument(old), pdfium.PdfDocument(new)
@@ -83,6 +121,7 @@ def main():
                       "text_per_page_matches": True, "pixels_match_at_96dpi": True,
                       "metadata_matches": True, "resolved_engine_timestamp": engine.document_timestamp,
                       "repeat_bytes_match_per_path": True, "missing_glyphs": 0,
+                      "styled_export_embeds_complete_stylesheet": True,
                       "unstyled_export_retains_literal_classes": True})
     result = {"ok": True, "version": version("fullbleed"), "runtime": str(components.__file__), "cases": cases,
               "scope": "Two explicit whole-document migrations, including portrait/landscape geometry, asymmetric margins, component styles, selector CSS, title/language, fonts and fixed timestamps. Old and new paths match in independent PDF text and pixels. Not an automatic converter or arbitrary stylesheet compatibility claim."}

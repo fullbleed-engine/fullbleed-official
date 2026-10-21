@@ -120,7 +120,8 @@ def render(out: Path, *, font: Path | None = None) -> None:
         (out / f"{report.name}-legacy.css").write_text(legacy.to_css(), encoding="utf-8")
         # After: Renderer accepts resource/options; Document supplies its own metadata and Page.
         (out / f"{report.name}-components.pdf").write_bytes(migrated.render_pdf(Renderer(**options)))
-        (out / f"{report.name}-styled.html").write_text(migrated.to_html(), encoding="utf-8")
+        (out / f"{report.name}-styled.html").write_text(
+            migrated.to_html(include_styles=True), encoding="utf-8")
         (out / f"{report.name}-unstyled.html").write_text(
             migrated.to_html(include_styles=False), encoding="utf-8")
         source = migrated.compile(target="pdf")

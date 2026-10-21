@@ -28,7 +28,11 @@ python -I examples/component_migration/render.py --out target/document-migration
 | Selector rules in `StyleSheet` | Reusable `styled(...)` defaults, explicit `style=`, and `Document(styles=...)` selectors |
 | Body typography in stylesheet | `Theme(text=style(...))` supplies document-wide typography |
 | `PdfEngine(font_files=..., document_timestamp=...)` | `Renderer(font_files=..., document_timestamp=...)` |
-| `artifact.to_html()` and `artifact.to_css()` | `document.to_html()` for styled browser HTML; `include_styles=False` for content without styling; `compile(target="pdf")` for native print source |
+| `artifact.to_html()` and `artifact.to_css()` | `document.to_html(include_styles=True)` for styled browser HTML; `include_styles=False` for content without styling; `compile(target="pdf")` for native print source |
+
+Use `include_styles=True` when the HTML file must carry its stylesheet. The
+default `document.to_html()` preserves the separate-CSS form used together
+with `document.to_css()`; it does not embed the collected stylesheet.
 
 The old decorator's `page` and `margin` are authoring metadata. Preserve the
 actual geometry from the old stylesheet or engine when creating the new `Page`.
