@@ -1,10 +1,10 @@
 # Migrate a complete component document
 
 This example compares the existing `fullbleed.ui` authoring API with the intended
-public `fullbleed.components` namespace for the 2.6 API. The new namespace is in
-this source checkout; the published `2.6.0a11` wheel still uses
-`fullbleed.ui.experimental`. Build and install this checkout to run it until the
-next alpha is published. The component API remains alpha.
+public `fullbleed.components` namespace introduced in **2.6.0a12**. Install it
+explicitly with `python -m pip install --pre "fullbleed==2.6.0a12"`, or build this
+checkout. The component API remains alpha; the earlier
+`fullbleed.ui.experimental` path still exposes the same objects.
 
 [render.py](render.py) contains both complete authoring functions and renders
 the same account report on A5 portrait and US Letter landscape paper. Both use

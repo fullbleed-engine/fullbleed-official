@@ -1,3 +1,32 @@
+# Fullbleed Release Notes - 2.6.0a12
+
+Use `fullbleed.components` for the new document component API and
+`fullbleed.components.bootstrap` for its static Bootstrap kit. These modules
+re-export the existing objects, styles and type contracts. Earlier alpha
+imports from `fullbleed.ui.experimental` remain supported; the established
+`fullbleed.ui.Document` decorator and existing component API are unchanged.
+
+The complete-document migration example maps styles, literal class selectors,
+body typography, page geometry, metadata, explicit fonts and renderer options.
+Its A5 portrait and Letter landscape reports match the old authoring path in
+independent PDF text and exact 96 dpi pixels across six pages per path. Both
+styled and unstyled HTML are retained. This is an explicit migration example,
+not an automatic converter for arbitrary stylesheets.
+
+The implementation passed 980 Python tests, both namespaces' mypy/Pyright
+contracts, and 24 real language-server completion checks per namespace. Its
+four paired PDFs and twelve HTML/CSS files match the published alpha 11 runtime
+byte for byte when only the import prefix changes. The independent source
+corpus retains 1,623 passes, 21 failures and 18 disputed references. These are
+implementation checks; the [alpha 12 runbook](docs/release/2.6.0a12-runbook.md)
+requires qualification of the final new-version package before publication.
+
+This entry describes a candidate until publication completes. Python uses
+`2.6.0a12` and Cargo source uses `2.6.0-alpha.12`. Components remain alpha while
+independent kit integration and author feedback are unresolved. No native
+rendering behavior, runtime dependency, conformance claim or stable API
+graduation is added. Ordinary installation remains on the stable channel.
+
 # Fullbleed Release Notes - 2.6.0a11
 
 Styled HTML exports now apply `Flow` gaps in a browser without a layout

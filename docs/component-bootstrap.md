@@ -5,20 +5,20 @@ The experimental Python kit covers the 23 component families in **Bootstrap
 utility stylesheet. It uses the repository's existing, unmodified MIT-licensed
 stylesheet. Components carry that dependency; a document includes it once.
 
-The published **2.6.0a11** alpha provides this kit under
-`fullbleed.ui.experimental.bootstrap`. Install it explicitly in a virtual
-environment: `python -m pip install --pre "fullbleed==2.6.0a11"`.
+The published **2.6.0a12** alpha provides this kit under
+`fullbleed.components.bootstrap`. Install it explicitly in a virtual
+environment: `python -m pip install --pre "fullbleed==2.6.0a12"`.
 Ordinary `pip install fullbleed` selects stable **2.5.34**, which includes the
 established `fullbleed.ui` API. The new kit remains experimental; see the
 [current release decision and stabilization criteria](https://docs.fullbleed.dev/guides/component-status/).
-The [alpha runbook](release/2.6.0a11-runbook.md) records the release gates and scope.
+The [alpha runbook](release/2.6.0a12-runbook.md) records the release gates and scope.
 For an unpublished checkout, build with
 `python build_backend/fullbleed_build_backend.py wheel --out dist` and install
 the printed wheel path.
 
-This checkout also exposes the same kit at `fullbleed.components.bootstrap`.
-The published alpha above keeps its earlier import path; see
-[component imports and migration](component-namespace.md) before changing it.
+Earlier `fullbleed.ui.experimental.bootstrap` imports remain supported and
+expose the same kit. See [component imports and migration](component-namespace.md)
+for compatibility with both earlier authoring APIs.
 
 The [published Bootstrap preview](https://github.com/fullbleed-engine/fullbleed-official/releases/tag/component-preview-41a2cee)
 supports this kit and HTML export. The alpha's newer
@@ -37,8 +37,8 @@ It writes a PDF and both styled and unstyled HTML using the bundled Inter font:
 ```python
 from importlib.resources import files
 from pathlib import Path
-from fullbleed.ui.experimental import Document, Renderer, Theme, pt, style
-from fullbleed.ui.experimental import bootstrap as bs
+from fullbleed.components import Document, Renderer, Theme, pt, style
+from fullbleed.components import bootstrap as bs
 
 card = bs.Card(
     bs.Paragraph("Your order has passed its final inspection."),
@@ -61,8 +61,8 @@ explain composition, styling and the static Bootstrap component families.
 ## Start with content
 
 ```python
-from fullbleed.ui.experimental import Document, style
-from fullbleed.ui.experimental import bootstrap as bs
+from fullbleed.components import Document, style
+from fullbleed.components import bootstrap as bs
 
 summary = bs.Card(
     bs.Paragraph("Your order has passed its final inspection."),
@@ -148,7 +148,7 @@ properties; it is not the engine's complete CSS vocabulary. For additional
 declarations, compose the explicit `css(...)` helper:
 
 ```python
-from fullbleed.ui.experimental import css, styled
+from fullbleed.components import css, styled
 
 ReceiptCard = styled(bs.Card, border_color="#d2e0da", border_radius="8px")
 receipt = ReceiptCard("Payment received.", title="Receipt").with_style(
@@ -167,7 +167,7 @@ does not load a font. For example, using Fullbleed's bundled Inter font:
 
 ```python
 from importlib.resources import files
-from fullbleed.ui.experimental import Renderer, Theme
+from fullbleed.components import Renderer, Theme
 
 document = Document(
     receipt,
@@ -283,7 +283,7 @@ still required. This change does not create a separate lightweight HTML package.
 ```python
 from importlib.resources import files
 from pathlib import Path
-from fullbleed.ui.experimental import Renderer
+from fullbleed.components import Renderer
 
 font = files("fullbleed_assets").joinpath("fonts/Inter-Variable.ttf")
 renderer = Renderer(font_files=[str(font)])
