@@ -184,7 +184,7 @@ The font-resolution trace identifies the `bundled_substitute` outcome; runtime
 discovery reports `bundled_standard_font_previews`. See the
 [font sources, licenses, and coverage limits](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a11/src/preview_fonts/README.md).
 
-Fullbleed uses static HTML/CSS as a document layout language. Check the [CSS coverage and remaining gaps](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a11/docs/css-coverage.md) for your templates. Use a browser when JavaScript or live website behavior is part of the required result.
+Fullbleed uses static HTML/CSS as a document layout language. Check the [CSS coverage and remaining gaps](https://github.com/fullbleed-engine/fullbleed-official/blob/master/docs/css-coverage.md) for your templates. Use a browser when JavaScript or live website behavior is part of the required result.
 
 Profile selection alone does not establish standards conformance. The [release evidence](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a11/docs/release/2.4.0-validation-report.md) records the checks performed and their limits.
 
