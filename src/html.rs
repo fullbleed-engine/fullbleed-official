@@ -115,6 +115,16 @@ struct CounterState {
     target_pages: Arc<HashMap<String, usize>>,
     table_semantics: Arc<crate::table_semantics::HtmlTableIndex>,
     running_layouts: Option<crate::running_layout::RunningLayouts>,
+    // A scoped lowering instruction, never a mutation of the authored DOM.
+    // Inline descendants keep their own computed styles while the selected
+    // text node supplies the block's first-letter pseudo-element.
+    first_letter: Option<Arc<RichFirstLetter>>,
+}
+
+#[derive(Debug, Clone)]
+struct RichFirstLetter {
+    node: NodeRef,
+    style: ComputedStyle,
 }
 
 #[derive(Debug, Clone)]
@@ -1532,6 +1542,7 @@ fn anonymous_table_cell_run_flowables(
                 doc_id,
                 true,
                 true,
+                None,
             ));
             items.extend(after_items);
             let items = coerce_items_to_inline_run(
@@ -1768,6 +1779,11 @@ fn collect_children(
                     doc_id,
                     true,
                     fragment_inline_words,
+                    counters
+                        .first_letter
+                        .as_ref()
+                        .filter(|initial| initial.node == *child)
+                        .map(|initial| &initial.style),
                 ));
                 continue;
             }
@@ -1830,6 +1846,7 @@ fn text_node_to_flowables(
     doc_id: Option<usize>,
     inline_context: bool,
     fragment_inline_words: bool,
+    first_letter_style: Option<&ComputedStyle>,
 ) -> Vec<LayoutItem> {
     if let Some(perf_logger) = perf {
         perf_logger.log_counts("story.text_nodes", doc_id, &[("count", 1)]);
@@ -1854,7 +1871,13 @@ fn text_node_to_flowables(
     }
 
     let t_transform = std::time::Instant::now();
-    let cleaned = apply_text_transform(&cleaned, parent_style.text_transform);
+    let mut cleaned = apply_text_transform(&cleaned, parent_style.text_transform);
+    let initial = first_letter_style.and_then(|style| {
+        let end = css_first_letter_prefix_end(&cleaned)?;
+        let text = apply_text_transform(&cleaned[..end], style.text_transform);
+        cleaned = cleaned[end..].to_string();
+        Some((text, style))
+    });
     if let Some(perf_logger) = perf {
         let ms = t_transform.elapsed().as_secs_f64() * 1000.0;
         perf_logger.log_span_ms("story.text.transform", doc_id, ms);
@@ -1899,12 +1922,83 @@ fn text_node_to_flowables(
         }
     };
     let mut items = Vec::new();
-    let has_text = !cleaned.is_empty();
+    let has_text = initial.is_some() || !cleaned.is_empty();
     if leading_space || (!has_text && trailing_space) {
         items.push(inline_item(Box::new(CollapsibleSpaceFlowable::new(
             text_style.clone(),
             font_registry.clone(),
         ))));
+    }
+    if let Some((text, style)) = initial {
+        let first_style = text_style_for_flow_text(style);
+        report_missing_glyphs(
+            report.as_deref_mut(),
+            font_registry.as_deref(),
+            &first_style,
+            &text,
+        );
+        let side = match style.float_mode {
+            FloatMode::Left => Some(FloatSide::Left),
+            FloatMode::Right => Some(FloatSide::Right),
+            _ => None,
+        };
+        let glyph = Paragraph::new(text)
+            .with_style(first_style)
+            .with_font_registry(font_registry.clone())
+            .with_whitespace(true, true)
+            .with_tag_role("Span");
+        let initial: Box<dyn Flowable> = if let Some(side) = side {
+            let mut box_style = style.clone();
+            box_style.display = DisplayMode::Block;
+            box_style.width = LengthSpec::MaxContent;
+            let glyph = glyph
+                .with_intrinsic_first_letter_indent()
+                .with_floating_first_letter_paint_phase();
+            let contents = vec![LayoutItem::Block {
+                flowable: Box::new(CssLineBoxFlowable::new(
+                    glyph.without_propagated_text_decoration(),
+                )),
+                flex_grow: 0.0,
+                flex_shrink: 1.0,
+                width_spec: None,
+                order: 0,
+            }];
+            let boxed = container_flowable_with_role_options(
+                contents,
+                &box_style,
+                None,
+                ContainerCompilationOptions::default(),
+            )
+            .expect("a floating initial contains a text flowable");
+            Box::new(FloatFlowable::new(boxed, side).with_containing_block_width())
+        } else {
+            let glyph: Box<dyn Flowable> = Box::new(glyph.with_inline_first_letter());
+            if let Some(background) = style.background_color {
+                let font_box_height = font_registry
+                    .as_deref()
+                    .and_then(|registry| {
+                        registry.vertical_metrics(style.font_name.as_ref(), style.font_size)
+                    })
+                    .map(|(ascent, descent)| ascent + descent)
+                    .unwrap_or(style.font_size * 1.2);
+                Box::new(
+                    InlineBackgroundFlowable::new_pt(glyph, background, font_box_height, Pt::ZERO)
+                        .with_css_pixel_snap(style.to_text_style().css_pixel_snap_metrics),
+                )
+            } else {
+                glyph
+            }
+        };
+        // Keep this item in the same shared inline formatting context. The
+        // initial's float box is excluded from ordinary line-height unions.
+        items.push(LayoutItem::Inline {
+            flowable: initial,
+            valign: vertical_align_from_style(style),
+            flex_grow: 0.0,
+            flex_shrink: 0.0,
+            width_spec: None,
+            order: 0,
+        });
     }
     let word_fragments = inline_context
         && fragment_inline_words
@@ -2381,6 +2475,11 @@ fn node_to_flowables_in_scope(
             doc_id,
             false,
             false,
+            counters
+                .first_letter
+                .as_ref()
+                .filter(|initial| initial.node == *node)
+                .map(|initial| &initial.style),
         ),
         NodeData::Element(element) => {
             if let Some(perf_logger) = perf {
@@ -3166,6 +3265,17 @@ fn node_to_flowables_in_scope(
                                     && inline_or_replaced_children_only(
                                         node, resolver, &style, ancestors,
                                     );
+                            let previous_first_letter = counters.first_letter.clone();
+                            if coerce_mixed_inline
+                                && before_items.is_empty()
+                                && first_letter_style.is_some()
+                            {
+                                if let Some(initial) =
+                                    rich_first_letter_for(node, resolver, &info, &style, ancestors)
+                                {
+                                    counters.first_letter = Some(Arc::new(initial));
+                                }
+                            }
                             let children = collect_children(
                                 node,
                                 resolver,
@@ -3180,6 +3290,7 @@ fn node_to_flowables_in_scope(
                                 perf,
                                 doc_id,
                             );
+                            counters.first_letter = previous_first_letter;
                             let children =
                                 inject_pseudo_items(children, &before_items, &after_items);
                             let children = if coerce_mixed_inline {
@@ -6393,6 +6504,123 @@ fn marker_text_style(marker_style: &ComputedStyle, item_style: &ComputedStyle) -
     text_style
 }
 
+/// Find the first visible text without flattening its styled ancestors or
+/// changing sibling selectors in the authored DOM. An atomic inline or a hard
+/// break before the text prevents a first-letter match on the initial line.
+fn first_formatted_inline_text(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    parent_style: &ComputedStyle,
+    ancestors: &[ElementInfo],
+) -> Result<Option<(NodeRef, ComputedStyle)>, ()> {
+    for child in node.children() {
+        match child.data() {
+            NodeData::Text(text) => {
+                let text = normalize_text_node_boundaries(
+                    &text.borrow(),
+                    parent_style.white_space,
+                    true,
+                    true,
+                );
+                if text.starts_with('\n') {
+                    return Err(());
+                }
+                if !text.trim().is_empty() {
+                    return Ok(Some((child.clone(), parent_style.clone())));
+                }
+            }
+            NodeData::Element(_) => {
+                let info = element_info(&child, resolver.has_sibling_selectors());
+                let inline_style = node_inline_style_attr(&child);
+                let style =
+                    resolver.compute_style(&info, parent_style, inline_style.as_deref(), ancestors);
+                if matches!(style.display, DisplayMode::None)
+                    || matches!(style.position, PositionMode::Absolute | PositionMode::Fixed)
+                    || info
+                        .attrs
+                        .get("data-fb-a11y-only")
+                        .is_some_and(|value| data_attribute_value_is_truthy(value))
+                {
+                    continue;
+                }
+                if !matches!(style.display, DisplayMode::Inline | DisplayMode::Contents)
+                    || !matches!(style.float_mode, FloatMode::None)
+                    || matches!(info.tag.as_str(), "br" | "img" | "svg" | "input")
+                    || style.border_width != EdgeSizes::zero()
+                    || style.padding != EdgeSizes::zero()
+                {
+                    return Err(());
+                }
+                // Generated content can precede this DOM text. Do not select
+                // a later authored letter in its place.
+                if resolver
+                    .compute_pseudo_style(
+                        &info,
+                        &style,
+                        ancestors,
+                        crate::style::PseudoTarget::Before,
+                    )
+                    .is_some_and(|pseudo| {
+                        pseudo.content.is_some() || pseudo.generated_content.is_some()
+                    })
+                {
+                    return Err(());
+                }
+                let mut child_ancestors = ancestors.to_vec();
+                child_ancestors.push(info);
+                if let Some(found) =
+                    first_formatted_inline_text(&child, resolver, &style, &child_ancestors)?
+                {
+                    return Ok(Some(found));
+                }
+                if resolver
+                    .compute_pseudo_style(
+                        child_ancestors.last().expect("inline ancestor"),
+                        &style,
+                        ancestors,
+                        crate::style::PseudoTarget::After,
+                    )
+                    .is_some_and(|pseudo| {
+                        pseudo.content.is_some() || pseudo.generated_content.is_some()
+                    })
+                {
+                    return Err(());
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(None)
+}
+
+fn rich_first_letter_for(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    origin: &ElementInfo,
+    style: &ComputedStyle,
+    child_ancestors: &[ElementInfo],
+) -> Option<RichFirstLetter> {
+    let (node, inherited) =
+        first_formatted_inline_text(node, resolver, style, child_ancestors).ok()??;
+    let pseudo = resolver.compute_pseudo_style(
+        origin,
+        &inherited,
+        &child_ancestors[..child_ancestors.len().saturating_sub(1)],
+        crate::style::PseudoTarget::FirstLetter,
+    )?;
+    // The native initial-letter sizing algorithm is separate from CSS floats.
+    // Keep that existing path rather than treating its size as a float box.
+    if pseudo.initial_letter.is_some()
+        || !matches!(pseudo.writing_mode, WritingModeMode::HorizontalTb)
+    {
+        return None;
+    }
+    Some(RichFirstLetter {
+        node,
+        style: pseudo,
+    })
+}
+
 fn inline_children_only(
     node: &NodeRef,
     resolver: &StyleResolver,
@@ -6663,7 +6891,7 @@ fn coerce_items_to_inline_run(
     // Rounding only their surrounding text can break baseline alignment.
     let ordinary_text_only = items.iter().all(|item| match item {
         LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => {
-            flowable.inline_x_height(Pt::ZERO).is_some()
+            flowable.out_of_flow() || flowable.inline_x_height(Pt::ZERO).is_some()
         }
     });
     let round_integral_baseline = snap_baseline_phase
@@ -12055,6 +12283,7 @@ fn container_flowable_with_role_options(
         anonymous_block_lines,
         style.direction,
         text_align_from_style(style),
+        style.pagination,
     );
     let is_multicol_container = (style.column_count > 1
         || !matches!(style.column_width, LengthSpec::Auto))
@@ -12340,6 +12569,7 @@ fn layout_children_to_flowables(
         false,
         DirectionMode::Ltr,
         TextAlign::Left,
+        crate::flowable::Pagination::default(),
     )
 }
 
@@ -12351,6 +12581,7 @@ fn layout_children_to_flowables_with_options(
     anonymous_block_context: bool,
     direction: DirectionMode,
     align: TextAlign,
+    pagination: crate::flowable::Pagination,
 ) -> Vec<Box<dyn Flowable>> {
     let mut out: Vec<Box<dyn Flowable>> = Vec::new();
     let mut inline_group: Vec<(Box<dyn Flowable>, VerticalAlign)> = Vec::new();
@@ -12371,6 +12602,7 @@ fn layout_children_to_flowables_with_options(
                         .with_css_pixel_line_snap(snap_line_height_to_css_pixel)
                         .with_anonymous_block_context(anonymous_block_context)
                         .with_inline_bidi(direction, align)
+                        .with_line_pagination(pagination)
                         .with_no_wrap(prevent_soft_wrap),
                     ));
                     inline_group = Vec::new();
@@ -12386,6 +12618,7 @@ fn layout_children_to_flowables_with_options(
                 .with_css_pixel_line_snap(snap_line_height_to_css_pixel)
                 .with_anonymous_block_context(anonymous_block_context)
                 .with_inline_bidi(direction, align)
+                .with_line_pagination(pagination)
                 .with_no_wrap(prevent_soft_wrap),
         ));
     }
