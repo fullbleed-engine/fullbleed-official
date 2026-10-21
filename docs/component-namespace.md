@@ -2,10 +2,11 @@
 
 The intended public import path for the new 2.6 component API is
 `fullbleed.components`, with its static Bootstrap kit at
-`fullbleed.components.bootstrap`. **The API remains alpha.** This namespace is
-available in this source checkout; the published `2.6.0a11` wheel uses the
-earlier `fullbleed.ui.experimental` path. Build and install this checkout to try
-the new path before the next alpha is published.
+`fullbleed.components.bootstrap`, introduced in **2.6.0a12**. **The API remains
+alpha.** Install it explicitly with
+`python -m pip install --pre "fullbleed==2.6.0a12"`. The earlier
+`fullbleed.ui.experimental` import path remains supported and exposes the same
+objects. Ordinary installation continues to select the stable channel.
 
 Existing `fullbleed.ui` imports remain supported. The namespace change does not
 deprecate them or replace their `Document` decorator. Kit-composition conventions
@@ -62,10 +63,12 @@ old `DocumentArtifact` into a new `Document`.
 
 ## HTML output
 
-`document.to_html()` includes the new document's component styles, theme and
+`document.to_html(include_styles=True)` embeds the document's component styles, theme and
 attached selectors. `document.to_html(include_styles=False)` emits content
 without generated CSS or inline styles; literal classes remain available to
-your host stylesheet. Use `compile(target="pdf")` for the native print source.
+your host stylesheet. The default `document.to_html()` preserves the separate-CSS
+form used with `document.to_css()`; it does not embed the collected stylesheet.
+Use `compile(target="pdf")` for the native print source.
 Continuous browser HTML and PDF pagination are separate output contexts.
 
 ## Retained checks

@@ -13,12 +13,12 @@ The complete workflow below is available in Fullbleed 2.5.25.
 For the next authoring iteration, see the experimental
 [Bootstrap kit and HTML export guide](component-bootstrap.md). That work adds
 component-owned Bootstrap CSS, content slots, checked utilities and explicit
-styled/unstyled HTML export in `fullbleed.ui.experimental`; the guide below
+styled/unstyled HTML export in `fullbleed.components`; the guide below
 documents the stable API.
 
-The source checkout also provides the intended `fullbleed.components` import
-path for that newer API. See [imports and complete-document migration](component-namespace.md)
-for its release status and compatibility with existing imports.
+The newer API uses the intended `fullbleed.components` import path. See
+[imports and complete-document migration](component-namespace.md) for its alpha
+status and compatibility with existing imports.
 
 ## A component is a function
 

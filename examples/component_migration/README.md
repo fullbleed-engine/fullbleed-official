@@ -1,10 +1,10 @@
 # Migrate a complete component document
 
 This example compares the existing `fullbleed.ui` authoring API with the intended
-public `fullbleed.components` namespace for the 2.6 API. The new namespace is in
-this source checkout; the published `2.6.0a11` wheel still uses
-`fullbleed.ui.experimental`. Build and install this checkout to run it until the
-next alpha is published. The component API remains alpha.
+public `fullbleed.components` namespace introduced in **2.6.0a12**. Install it
+explicitly with `python -m pip install --pre "fullbleed==2.6.0a12"`, or build this
+checkout. The component API remains alpha; the earlier
+`fullbleed.ui.experimental` path still exposes the same objects.
 
 [render.py](render.py) contains both complete authoring functions and renders
 the same account report on A5 portrait and US Letter landscape paper. Both use
@@ -28,7 +28,11 @@ python -I examples/component_migration/render.py --out target/document-migration
 | Selector rules in `StyleSheet` | Reusable `styled(...)` defaults, explicit `style=`, and `Document(styles=...)` selectors |
 | Body typography in stylesheet | `Theme(text=style(...))` supplies document-wide typography |
 | `PdfEngine(font_files=..., document_timestamp=...)` | `Renderer(font_files=..., document_timestamp=...)` |
-| `artifact.to_html()` and `artifact.to_css()` | `document.to_html()` for styled browser HTML; `include_styles=False` for content without styling; `compile(target="pdf")` for native print source |
+| `artifact.to_html()` and `artifact.to_css()` | `document.to_html(include_styles=True)` for styled browser HTML; `include_styles=False` for content without styling; `compile(target="pdf")` for native print source |
+
+Use `include_styles=True` when the HTML file must carry its stylesheet. The
+default `document.to_html()` preserves the separate-CSS form used together
+with `document.to_css()`; it does not embed the collected stylesheet.
 
 The old decorator's `page` and `margin` are authoring metadata. Preserve the
 actual geometry from the old stylesheet or engine when creating the new `Page`.
