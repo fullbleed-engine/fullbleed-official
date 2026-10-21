@@ -6,7 +6,53 @@ Scope baseline: static, paged document rendering (transactional/report workflows
 
 Source taxonomy: https://developer.mozilla.org/en-US/docs/Web/CSS
 
-## Latest retained full-corpus result
+<span id="latest-retained-full-corpus-result"></span>
+
+## Current retained full-corpus results
+
+Stable package verification and alpha source verification are separate results.
+Both use all 1,662 fixtures at pinned IronPress revision
+`0d1e53b6d8174d0a5059a8696c24e62759381f6d`, with the original comparator,
+references and thresholds.
+
+| Version and tested input | PASS | FAIL | REFERENCE-DISPUTED | Comparison gate |
+| --- | ---: | ---: | ---: | --- |
+| Stable 2.5.34, published PyPI Linux wheel | 1,620 | 24 | 18 | Fails |
+| Alpha 2.6.0a11, source-built Linux wheel | 1,623 | 21 | 18 | Fails |
+
+### Stable published-wheel verification: 2.5.34
+
+The [October 19 run](https://github.com/fullbleed-engine/fullbleed-official/actions/runs/39337511855)
+tests the wheel downloaded from PyPI; its SHA-256 matches PyPI's file record.
+All 1,662 candidate PDFs and all 5,489 compared PDF/PNG files are byte-identical
+to the [reviewed 2.5.34 source run](https://github.com/fullbleed-engine/fullbleed-official/actions/runs/39208485335).
+Fixture verdicts, scores and reference metadata also match. The failed gate,
+all 24 failing cases and all 18 disputed references remain in the evidence.
+
+[Browse every fixture](https://docs.fullbleed.dev/guides/css-explorer/?version=2.5.34)
+or download the [structured verification](https://github.com/fullbleed-engine/fullbleed-official/releases/download/v2.5.34/fullbleed-2.5.34-published-css-summary.json)
+and [complete published-wheel evidence](https://github.com/fullbleed-engine/fullbleed-official/releases/download/v2.5.34/fullbleed-2.5.34-published-css-corpus.zip).
+
+### Alpha source verification: 2.6.0a11
+
+The [alpha 11 source run](https://github.com/fullbleed-engine/fullbleed-official/actions/runs/39403828268)
+tests commit `c9958ccb19d10f0ecf11cbc3500f2151844394b9`. All 7,437 retained PDF/PNG
+files and every fixture verdict match the qualified alpha 10 source result.
+The alpha's HTML-export spacing change does not alter those native PDF outputs.
+
+The [release verification](https://github.com/fullbleed-engine/fullbleed-official/releases/download/v2.6.0a11/fullbleed-2.6.0a11-verification.json)
+and [complete source evidence](https://github.com/fullbleed-engine/fullbleed-official/releases/download/v2.6.0a11/fullbleed-css-corpus-2.6.0a11.zip)
+retain the source identity, output hashes and failed comparison. This is not a
+complete corpus run against a downloaded alpha wheel. The component API remains
+experimental; see its [release status](https://docs.fullbleed.dev/guides/component-status/).
+
+These results apply to their named inputs, explicit assets and pinned comparison
+policy. They do not establish complete CSS support, arbitrary website rendering
+or PDF standards conformance. The feature map below describes the repository's
+source surface; use the installed package's `fullbleed capabilities --json` and
+version-specific evidence when selecting features for a deployed document.
+
+## Historical source comparison: 2.5.28
 
 The source carried into 2.5.28 was checked against all 1,662 fixtures at pinned
 IronPress revision `0d1e53b6d8174d0a5059a8696c24e62759381f6d`. The
