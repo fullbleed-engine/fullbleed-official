@@ -4,7 +4,7 @@ The intended public import path for the new 2.6 component API is
 `fullbleed.components`, with its static Bootstrap kit at
 `fullbleed.components.bootstrap`, introduced in **2.6.0a12**. **The API remains
 alpha.** Install it explicitly with
-`python -m pip install --pre "fullbleed==2.6.0a12"`. The earlier
+`python -m pip install --pre "fullbleed==2.6.0a13"`. The earlier
 `fullbleed.ui.experimental` import path remains supported and exposes the same
 objects. Ordinary installation continues to select the stable channel.
 

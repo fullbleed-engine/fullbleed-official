@@ -1,3 +1,33 @@
+# Fullbleed Release Notes - 2.6.0a13
+
+Styled spans and links no longer drop a paragraph's `::first-letter` styling
+when it takes the rich-inline authoring path. Floated initials reserve their
+line space, clear words that cannot fit beside them, and stay on the first
+fragment when a paragraph continues across pages. Inline initials stay with
+the rest of their word, including across a text-node boundary.
+
+The implementation in [PR #121](https://github.com/fullbleed-engine/fullbleed-official/pull/121)
+passed 1,488 Rust unit tests and 981 local Python tests. Its 22 independent
+Chromium print references cover styled descendants, inherited emphasis,
+backgrounds, punctuation, whitespace, physical left/right floats, percentage
+edges, narrow words and page continuation. Both optimized CI platforms match
+the reviewed candidate's 66 PDFs and 56 preview images in PDF bytes and image
+pixels, respectively. Direct PDF, compiled replay, reflow, repeat determinism,
+native previews and render-time paragraph/text ownership are checked.
+
+All 1,662 verdicts and 7,437 PDF/PNG outputs in the independent corpus match the
+qualified 2.6.0a12 baseline: 1,623 PASS, 21 FAIL and 18 REFERENCE-DISPUTED. Its
+existing failing gate remains visible. The [alpha 13 runbook](docs/release/2.6.0a13-runbook.md)
+requires final-version qualification and public-package verification before
+publication; the implementation evidence alone is not a release approval.
+
+The new reference gate covers horizontal styled inline content. Generated
+initials, decorated inline ancestors, vertical text and the separate
+`initial-letter` sizing model remain outside its scope. Reading-order trace
+checks do not establish accessibility conformance. The component API remains
+alpha while independent kit integration and author feedback are unresolved.
+Python uses `2.6.0a13`; Cargo source uses `2.6.0-alpha.13`.
+
 # Fullbleed Release Notes - 2.6.0a12
 
 Use `fullbleed.components` for the new document component API and
