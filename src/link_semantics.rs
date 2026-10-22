@@ -112,6 +112,16 @@ impl HtmlLinkIndex {
             .unwrap_or(&[])
     }
 
+    pub(crate) fn destinations(&self, node: &NodeRef) -> Option<std::sync::Arc<[String]>> {
+        let names: Vec<_> = self
+            .metadata(node)
+            .iter()
+            .filter(|(key, _)| key == META_DESTINATION)
+            .map(|(_, value)| value.clone())
+            .collect();
+        (!names.is_empty()).then(|| names.into())
+    }
+
     pub(crate) fn has_descendant_boundary(&self, node: &NodeRef) -> bool {
         self.ancestors_with_boundaries
             .contains(&node.identity_key())

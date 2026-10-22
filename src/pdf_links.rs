@@ -248,6 +248,7 @@ struct State {
     text_mode: u8,
     fill: f32,
     stroke: f32,
+    transparent_placement: bool,
 }
 
 impl Default for State {
@@ -260,12 +261,16 @@ impl Default for State {
             text_mode: 0,
             fill: 1.0,
             stroke: 1.0,
+            transparent_placement: false,
         }
     }
 }
 
 impl State {
     fn text_visible(&self) -> bool {
+        if self.transparent_placement {
+            return false;
+        }
         match self.text_mode {
             0 | 4 => self.fill > 0.0,
             1 | 5 => self.stroke > 0.0,
@@ -361,7 +366,7 @@ impl Collector<'_> {
     }
 
     fn region(&mut self, scope: &Scope, state: &State, region: Region) {
-        if scope.navigation_suppressed {
+        if scope.navigation_suppressed || state.transparent_placement {
             return;
         }
         let region = region.intersect(&state.clip);
@@ -556,6 +561,8 @@ impl Collector<'_> {
                 }
                 Command::Meta { key, value } if key == META_DESTINATION_POINT => {
                     if let Some([x, y]) = coordinates::<2>(value) {
+                        // A target identifies a layout position. Clipping and
+                        // opacity affect painted link regions, not positions.
                         self.destination(&scope, state.matrix.point(Point::new(x, height - y)));
                     }
                 }
@@ -773,7 +780,7 @@ impl Collector<'_> {
                     height: box_height,
                     resource_id,
                     ..
-                } if state.fill > 0.0 => {
+                } => {
                     let Some((size, form_commands)) = self.forms.get(resource_id) else {
                         continue;
                     };
@@ -783,7 +790,10 @@ impl Collector<'_> {
                             "recursive link form placement",
                         ));
                     }
-                    if !has_navigation(form_commands) && scope.source_id.is_some() {
+                    if state.fill > 0.0
+                        && !has_navigation(form_commands)
+                        && scope.source_id.is_some()
+                    {
                         self.rectangle(
                             &scope,
                             &state,
@@ -804,6 +814,10 @@ impl Collector<'_> {
                         1.0
                     };
                     let mut placed = state.clone();
+                    // A form can contain target positions even when its
+                    // placement is transparent. Its own graphics state cannot
+                    // make link regions visible through that outer opacity.
+                    placed.transparent_placement |= state.fill <= 0.0;
                     placed.matrix = state.matrix.then(Matrix([
                         crate::pdf::serialized_real(sx),
                         0.0,
@@ -1008,6 +1022,57 @@ mod tests {
     }
 
     #[test]
+    fn pdf_links_destination_points_are_independent_of_clip_and_zero_opacity() {
+        let mut commands = Vec::new();
+        for (index, name) in ["inside", "outside", "transparent"].iter().enumerate() {
+            commands.extend(begin(&index.to_string(), &format!("#{name}")));
+            commands.extend([text(10.0, 10.0 + index as f32 * 12.0, name), end()]);
+        }
+        commands.extend([
+            Command::SaveState,
+            Command::ClipRect {
+                x: p(20.0),
+                y: p(50.0),
+                width: p(50.0),
+                height: p(50.0),
+            },
+            meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "target"),
+            meta(META_DESTINATION, "inside"),
+            meta(META_DESTINATION_POINT, "40000,60000"),
+            end(),
+            meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "target"),
+            meta(META_DESTINATION, "outside"),
+            meta(META_DESTINATION_POINT, "100000,60000"),
+            end(),
+            Command::RestoreState,
+            Command::SetOpacity {
+                fill: 0.0,
+                stroke: 0.0,
+            },
+            meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "target"),
+            meta(META_DESTINATION, "transparent"),
+            meta(META_DESTINATION_POINT, "40000,60000"),
+            end(),
+        ]);
+        let doc = document(vec![commands]);
+        let result = collect(&doc);
+        assert_eq!(result.pages[0].links.len(), 3);
+        assert_eq!(result.pages[0].links[0].label, "inside");
+        assert_eq!(
+            result.destinations["inside"].1,
+            mapped_point(&doc, 40.0, 140.0)
+        );
+        assert_eq!(
+            result.destinations["outside"].1,
+            mapped_point(&doc, 100.0, 140.0)
+        );
+        assert_eq!(
+            result.destinations["transparent"].1,
+            mapped_point(&doc, 40.0, 140.0)
+        );
+    }
+
+    #[test]
     fn pdf_links_transforms_follow_top_down_canvas_coordinates() {
         let mut commands = begin("1", "https://example.invalid/transformed");
         commands.extend([
@@ -1092,6 +1157,51 @@ mod tests {
         assert!(contains(&doc, link, 15.0, 185.0));
         assert!(contains(&doc, link, 105.0, 95.0));
         assert!(!contains(&doc, link, 50.0, 180.0));
+    }
+
+    #[test]
+    fn pdf_links_transparent_forms_keep_destinations_but_not_click_regions() {
+        let mut form = vec![
+            Command::SetOpacity {
+                fill: 1.0,
+                stroke: 1.0,
+            },
+            meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "target"),
+            meta(META_DESTINATION, "inside"),
+            meta(META_DESTINATION_POINT, "2000,3000"),
+        ];
+        form.extend(begin("2", "https://example.invalid/hidden"));
+        form.extend([image(0.0, 0.0, 10.0, 10.0), end(), end()]);
+        let mut commands = begin("1", "#inside");
+        commands.extend([
+            text(50.0, 10.0, "Go"),
+            end(),
+            Command::DefineForm {
+                resource_id: "transparent".into(),
+                width: p(10.0),
+                height: p(10.0),
+                commands: form,
+            },
+            Command::SetOpacity {
+                fill: 0.0,
+                stroke: 0.0,
+            },
+            Command::DrawForm {
+                resource_id: "transparent".into(),
+                x: p(10.0),
+                y: p(10.0),
+                width: p(20.0),
+                height: p(20.0),
+            },
+        ]);
+        let doc = document(vec![commands]);
+        let result = collect(&doc);
+        assert_eq!(result.pages[0].links.len(), 1);
+        assert_eq!(result.pages[0].links[0].label, "Go");
+        assert_eq!(
+            result.destinations["inside"].1,
+            mapped_point(&doc, 14.0, 184.0)
+        );
     }
 
     #[test]
@@ -1238,6 +1348,191 @@ mod tests {
         let bytes = compiled.render_many_to_buffer(2).unwrap();
         assert_eq!(String::from_utf8_lossy(&bytes).matches(" /SD [").count(), 4);
         retain_pdf("ua2-destinations-copies", &bytes);
+    }
+
+    #[test]
+    fn pdf_links_table_destinations_follow_rows_cells_groups_and_page_fragments() {
+        let names = [
+            "head",
+            "head-row",
+            "head-cell",
+            "body",
+            "body-row",
+            "body-cell",
+            "foot",
+            "foot-row",
+            "foot-cell",
+        ];
+        let navigation = names
+            .iter()
+            .chain(["hidden-row", "hidden-cell"].iter())
+            .map(|name| format!(r##"<a href="#{name}">{name}</a> "##))
+            .collect::<String>();
+        let html = format!(
+            r##"<h1>Table navigation</h1><p>{navigation}</p>
+            <table><thead id="head"><tr id="head-row"><th id="head-cell">Item</th><th>Value</th></tr></thead>
+            <tbody id="body"><tr><td rowspan="2">Span</td><td>First</td></tr>
+            <tr id="body-row"><td id="body-cell">Second</td></tr>
+            <tr id="hidden-row" style="visibility:collapse"><td>Collapsed</td><td>Row</td></tr>
+            <tr><td id="hidden-cell" style="display:none">Absent</td><td colspan="2">Visible</td></tr>{}</tbody>
+            <tfoot id="foot"><tr id="foot-row"><td id="foot-cell">Total</td><td>42</td></tr></tfoot></table>"##,
+            "<tr><td>Additional</td><td>Line</td></tr>".repeat(28)
+        );
+        let css = "@page{size:300pt 240pt;margin:16pt}body{font-family:'Noto Sans';font-size:10pt;line-height:14pt}h1{font-size:14pt;line-height:18pt;font-weight:normal;margin:0}p{margin:0 0 8pt}table{width:230pt;border-collapse:collapse}th{font-weight:normal}td,th{padding:3pt;border:1pt solid #555}";
+        for (name, profile) in [
+            ("plain", crate::PdfProfile::None),
+            ("ua1", crate::PdfProfile::PdfUa1),
+            ("ua2", crate::PdfProfile::PdfUa2),
+        ] {
+            let engine = crate::FullBleed::builder()
+                .register_font_file("python/fullbleed_assets/fonts/NotoSans-Regular.ttf")
+                .pdf_profile(profile)
+                .document_lang("en-US")
+                .document_title("Table navigation")
+                .build()
+                .unwrap();
+            let compiled = engine.compile_document(&html, css).unwrap();
+            let links = DocumentLinks::collect(
+                &compiled.document,
+                compiled.document.page_size,
+                Some(&compiled.font_registry),
+                &[],
+            )
+            .unwrap();
+            assert!(links.pages.len() >= 3);
+            assert_eq!(
+                links
+                    .pages
+                    .iter()
+                    .map(|page| page.links.len())
+                    .sum::<usize>(),
+                names.len(),
+                "{name}"
+            );
+            assert!(!links.destinations.contains_key("hidden-row"));
+            assert!(!links.destinations.contains_key("hidden-cell"));
+            for target in names {
+                assert!(links.destinations.contains_key(target), "{name}: {target}");
+            }
+            for target in ["head", "head-row", "head-cell"] {
+                assert_eq!(links.destinations[target].0, 0, "{target}");
+            }
+            for target in ["foot", "foot-row", "foot-cell"] {
+                assert_eq!(
+                    links.destinations[target].0,
+                    links.pages.len() - 1,
+                    "{target}"
+                );
+            }
+            let row = links.destinations["body-row"];
+            let cell = links.destinations["body-cell"];
+            assert_eq!(row.0, cell.0);
+            assert_eq!(row.1.y, cell.1.y);
+            assert!(
+                cell.1.x > row.1.x + 50.0,
+                "rowspan placeholder must retain the new row, not the spanning cell's identity"
+            );
+            let untargeted = names.iter().fold(html.clone(), |source, target| {
+                source.replace(&format!(" id=\"{target}\""), "")
+            });
+            let baseline = engine.compile_document(&untargeted, css).unwrap();
+            let paint = |document: &Document| {
+                document
+                    .pages
+                    .iter()
+                    .map(|page| {
+                        page.commands
+                            .iter()
+                            .filter(|command| {
+                                !matches!(
+                                    command,
+                                    Command::Meta { .. }
+                                        | Command::BeginTag { .. }
+                                        | Command::BeginTagActualText { .. }
+                                        | Command::EndTag
+                                )
+                            })
+                            .map(|command| format!("{command:?}"))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                paint(&compiled.document),
+                paint(&baseline.document),
+                "destinations must not change layout or paint"
+            );
+            let bytes = compiled.render_to_buffer().unwrap();
+            assert_eq!(bytes, compiled.render_to_buffer().unwrap());
+            if profile == crate::PdfProfile::PdfUa2 {
+                assert_eq!(
+                    String::from_utf8_lossy(&bytes).matches(" /SD [").count(),
+                    names.len()
+                );
+            }
+            retain_pdf(&format!("table-destinations-{name}"), &bytes);
+            retain_pdf(
+                &format!("table-destinations-{name}-copies"),
+                &compiled.render_many_to_buffer(2).unwrap(),
+            );
+        }
+    }
+
+    #[test]
+    fn pdf_links_table_destination_points_follow_transforms_and_opacity() {
+        let engine = crate::FullBleed::builder().build().unwrap();
+        let html = r##"<p><a href="#row">Row</a> <a href="#cell">Cell</a></p><div><table><tr id="row"><td id="cell">Target</td></tr></table></div>"##;
+        let css = "@page{size:300pt 300pt;margin:16pt}body{font-family:Helvetica;font-size:12pt;line-height:16pt}p{margin:0}div{width:120pt}table{width:100pt}td{padding:4pt}";
+        let plain = collect(&engine.compile_document(html, css).unwrap().document);
+        assert_eq!(plain.pages[0].links.len(), 2);
+        let transformed_document = engine
+            .compile_document(
+                html,
+                &format!("{css}div{{transform:translate(13pt,9pt);opacity:0.6}}"),
+            )
+            .unwrap();
+        retain_pdf(
+            "table-destination-transform",
+            &transformed_document.render_to_buffer().unwrap(),
+        );
+        let transformed = collect(&transformed_document.document);
+        assert_eq!(transformed.pages[0].links.len(), 2);
+        for name in ["row", "cell"] {
+            assert!(
+                (transformed.destinations[name].1.x - plain.destinations[name].1.x - 13.0).abs()
+                    < 0.01,
+                "{name}: plain {:?}, transformed {:?}",
+                plain.destinations[name],
+                transformed.destinations[name]
+            );
+            assert!(
+                (transformed.destinations[name].1.y - plain.destinations[name].1.y + 9.0).abs()
+                    < 0.01,
+                "{name}: plain {:?}, transformed {:?}",
+                plain.destinations[name],
+                transformed.destinations[name]
+            );
+        }
+        for effect in [
+            "opacity:0",
+            "visibility:hidden",
+            "height:0;overflow:hidden",
+            "clip-path:inset(100%)",
+        ] {
+            let hidden = collect(
+                &engine
+                    .compile_document(html, &format!("{css}div{{{effect}}}"))
+                    .unwrap()
+                    .document,
+            );
+            assert_eq!(hidden.pages[0].links.len(), 2, "{effect}");
+            for name in ["row", "cell"] {
+                assert_eq!(
+                    hidden.destinations[name], plain.destinations[name],
+                    "{effect}: {name}"
+                );
+            }
+        }
     }
 
     #[test]

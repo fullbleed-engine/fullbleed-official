@@ -5,6 +5,8 @@ they do not establish general PDF/UA conformance or screen-reader behavior.
 """
 import io
 from html.parser import HTMLParser
+import os
+from pathlib import Path
 
 import fullbleed
 import fullbleed_assets
@@ -141,6 +143,150 @@ def test_fixed_bindings_use_final_recipient_link_text():
         annotations = [ref.get_object() for ref in page["/Annots"]]
         assert annotations[0]["/Contents"] == expected
         assert ref_id(annotations[1]["/Dest"][0]) == ref_id(page)
+
+
+@pytest.mark.parametrize("profile", ["none", "pdfua1", "pdfua2"])
+@pytest.mark.parametrize("mode", ["direct", "compiled", "repeat", "reflow", "compact"])
+def test_table_destinations_keep_semantic_owners_and_recipient_pages(profile, mode):
+    targets = {
+        "head": "/THead", "head-row": "/TR", "head-cell": "/TH",
+        "body": "/TBody", "body-row": "/TR", "body-cell": "/TD",
+        "foot": "/TFoot", "foot-row": "/TR", "foot-cell": "/TD",
+    }
+    navigation = " ".join(f'<a href="#{name}">{name}</a>' for name in targets)
+    html = '<h1>{{name}}</h1><p>' + navigation + """</p>
+    <table><thead id="head"><tr id="head-row"><th id="head-cell">Item</th><th>Value</th></tr></thead>
+    <tbody id="body"><tr><td rowspan="2">Span</td><td>First</td></tr>
+    <tr id="body-row"><td id="body-cell">Second</td></tr>""" + (
+        "<tr><td>Additional</td><td>Line</td></tr>" * 28
+    ) + """</tbody><tfoot id="foot"><tr id="foot-row"><td id="foot-cell">Total</td>
+    <td>42</td></tr></tfoot></table>"""
+    css = """@page{size:300pt 240pt;margin:16pt}
+    body{font-family:'Noto Sans';font-size:10pt;line-height:14pt}
+    h1{font-size:14pt;line-height:18pt;font-weight:normal;margin:0}
+    p{margin:0 0 8pt}table{width:230pt;border-collapse:collapse}
+    th{font-weight:normal}td,th{padding:3pt;border:1pt solid #555}"""
+    engine = fullbleed.PdfEngine(
+        pdf_profile=profile, document_lang="en-US", document_title="Table navigation",
+        font_files=[font()],
+    )
+    if mode == "direct":
+        data = engine.render_pdf(html.replace("{{name}}", "Ada"), css)
+    else:
+        compiled = engine.compile_pdf(
+            html if mode in {"reflow", "compact"} else html.replace("{{name}}", "Ada"), css
+        )
+        if mode == "compiled":
+            data = compiled.render_pdf()
+        elif mode == "repeat":
+            data = compiled.render_pdf_batch(2)
+        else:
+            data = compiled.render_pdf_reflow_bindings(
+                {"name": ["Ada", "Grace"]},
+                compression="compact" if mode == "compact" else "throughput",
+            )
+    if output := os.environ.get("FULLBLEED_TABLE_LINK_TEST_OUTPUT"):
+        directory = Path(output)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / f"table-{mode}-{profile}.pdf").write_bytes(bytes(data))
+    pdf = reader(data)
+    copies = 1 if mode in {"direct", "compiled"} else 2
+    assert len(pdf.pages) % copies == 0
+    pages_per_copy = len(pdf.pages) // copies
+    assert pages_per_copy >= 3
+    page_numbers = {ref_id(page): index for index, page in enumerate(pdf.pages)}
+    tags = structures(pdf.trailer["/Root"]["/StructTreeRoot"]) if profile != "none" else {}
+    owners = set()
+    for copy in range(copies):
+        first_page = copy * pages_per_copy
+        annotations = [reference.get_object() for page in pdf.pages[first_page:first_page + pages_per_copy]
+                       for reference in page.get("/Annots", [])]
+        assert len(annotations) == len(targets)
+        assert {annotation["/Contents"] for annotation in annotations} == set(targets)
+        positions = {}
+        for annotation in annotations:
+            name = annotation["/Contents"]
+            if profile == "pdfua2":
+                action = annotation["/A"]
+                assert action["/S"] == "/GoTo"
+                destination = action["/D"]
+                semantic = action["/SD"]
+                owner = ref_id(semantic[0])
+                assert owner not in owners, "Destinations must preserve both element and recipient identity"
+                owners.add(owner)
+                assert tags[owner]["/S"] == targets[name]
+                assert ref_id(tags[owner].raw_get("/Pg")) == ref_id(destination[0])
+                assert semantic[1:] == destination[1:]
+            else:
+                destination = annotation["/Dest"]
+            page_number = page_numbers[ref_id(destination[0])]
+            assert first_page <= page_number < first_page + pages_per_copy
+            if name.startswith("head"):
+                assert page_number == first_page
+            elif name.startswith("foot"):
+                assert page_number == first_page + pages_per_copy - 1
+            positions[name] = tuple(map(float, destination[2:4]))
+        assert positions["body-row"][1] == positions["body-cell"][1]
+        assert positions["body-cell"][0] > positions["body-row"][0] + 50
+
+
+@pytest.mark.parametrize("profile", ["none", "pdfua1", "pdfua2"])
+@pytest.mark.parametrize("mode", ["direct", "compact"])
+@pytest.mark.parametrize("effect, style", [
+    ("visible", ""),
+    ("transparent", "opacity:0"),
+    ("hidden", "visibility:hidden"),
+    ("overflow", "height:0;overflow:hidden"),
+    ("clip", "clip-path:inset(100%)"),
+    ("absent", "display:none"),
+])
+def test_table_targets_survive_suppressed_paint_without_activating_hidden_links(profile, mode, effect, style):
+    # Fragment navigation addresses layout positions, even when the target's
+    # paint is suppressed. A display:none target has no layout position.
+    html = """<h1>{{name}}</h1><p><a href="#row">Row</a> <a href="#cell">Cell</a></p>
+    <div><table><tr id="row"><td id="cell"><a href="https://example.invalid/inside">
+    Inside</a></td></tr></table></div><p>After</p>"""
+    css = CSS + "div{width:120pt;" + style + "}table{width:100pt}td{padding:4pt}"
+    engine = fullbleed.PdfEngine(
+        pdf_profile=profile, document_lang="en-US", document_title="Destination visibility",
+        font_files=[font()],
+    )
+    if mode == "direct":
+        data = engine.render_pdf(html.replace("{{name}}", "Ada"), css)
+    else:
+        data = engine.compile_pdf(html, css).render_pdf_reflow_bindings(
+            {"name": ["Ada", "Grace"]}, compression="compact",
+        )
+    if output := os.environ.get("FULLBLEED_DESTINATION_VISIBILITY_TEST_OUTPUT"):
+        directory = Path(output)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / f"{effect}-{mode}-{profile}.pdf").write_bytes(bytes(data))
+    pdf = reader(data)
+    assert len(pdf.pages) == (1 if mode == "direct" else 2)
+    tags = structures(pdf.trailer["/Root"]["/StructTreeRoot"]) if profile != "none" else {}
+    owners = set()
+    for page in pdf.pages:
+        links = [ref.get_object() for ref in page.get("/Annots", [])]
+        expected = set() if effect == "absent" else {"Row", "Cell"}
+        if effect == "visible":
+            expected.add("Inside")
+        assert {link["/Contents"] for link in links} == expected
+        assert len(links) == len(expected)
+        for link in links:
+            if link["/Contents"] == "Inside":
+                assert link["/A"]["/URI"] == "https://example.invalid/inside"
+                continue
+            destination = link["/A"]["/D"] if profile == "pdfua2" else link["/Dest"]
+            assert ref_id(destination[0]) == ref_id(page)
+            assert destination[1] == "/XYZ"
+            if profile == "pdfua2":
+                semantic = link["/A"]["/SD"]
+                owner = ref_id(semantic[0])
+                assert owner not in owners, "Each recipient retains its own target owner"
+                owners.add(owner)
+                assert tags[owner]["/S"] == ("/TR" if link["/Contents"] == "Row" else "/TD")
+                assert ref_id(tags[owner].raw_get("/Pg")) == ref_id(page)
+                assert semantic[1:] == destination[1:]
 
 
 SVG_IMAGE = """<img alt="Open documents" width="40" height="20"

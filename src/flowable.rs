@@ -13460,6 +13460,9 @@ pub struct TableCell {
     pub scope: Option<String>,
     table_semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
     authoring_source_id: Option<Arc<str>>,
+    cell_destinations: Option<Arc<[String]>>,
+    row_destinations: Option<Arc<[String]>>,
+    group_destinations: Option<Arc<[String]>>,
     col_span: usize,
     row_span: usize,
     rowspan_placeholder: bool,
@@ -13539,6 +13542,9 @@ impl TableCell {
             scope,
             table_semantics: None,
             authoring_source_id: None,
+            cell_destinations: None,
+            row_destinations: None,
+            group_destinations: None,
             col_span: col_span.max(1),
             row_span: 1,
             rowspan_placeholder: false,
@@ -13597,6 +13603,18 @@ impl TableCell {
         self
     }
 
+    pub(crate) fn with_navigation_destinations(
+        mut self,
+        cell: Option<Arc<[String]>>,
+        row: Option<Arc<[String]>>,
+        group: Option<Arc<[String]>>,
+    ) -> Self {
+        self.cell_destinations = cell;
+        self.row_destinations = row;
+        self.group_destinations = group;
+        self
+    }
+
     fn table_container_semantics(
         &self,
         row: bool,
@@ -13630,6 +13648,9 @@ impl TableCell {
         placeholder.tag_role = None;
         placeholder.scope = None;
         placeholder.authoring_source_id = None;
+        placeholder.cell_destinations = None;
+        placeholder.row_destinations = None;
+        placeholder.group_destinations = None;
         placeholder.col_span = 1;
         placeholder.row_span = 1;
         placeholder.rowspan_placeholder = true;
@@ -16738,9 +16759,19 @@ impl TableFlowable {
         row_lines: Option<&[Arc<Vec<LineLayout>>]>,
         row_heights: &[Pt],
         row_gap: Pt,
+        retain_destinations: bool,
     ) -> Pt {
         // Collapsed rows can retain a fractional border strut. Keep its layout
         // and paint behavior, but never emit an empty logical row or its cells.
+        let row_destination_scope = retain_destinations
+            && !Self::row_is_collapsed(row)
+            && row.first().is_some_and(|cell| {
+                canvas.begin_destination_scope(
+                    cell.row_destinations.as_deref().unwrap_or(&[]),
+                    x + col_gap,
+                    y,
+                )
+            });
         let row_tagged = self
             .tag_role
             .as_ref()
@@ -16849,6 +16880,13 @@ impl TableFlowable {
                     height: cell_height,
                 },
             );
+            let cell_destination_scope = retain_destinations
+                && !Self::row_is_collapsed(row)
+                && canvas.begin_destination_scope(
+                    cell.cell_destinations.as_deref().unwrap_or(&[]),
+                    cell_x,
+                    cell_y,
+                );
             let tagged = cell
                 .tag_role
                 .as_ref()
@@ -16883,6 +16921,9 @@ impl TableFlowable {
                 if tagged.is_some() {
                     begin_cell_tag(canvas);
                     canvas.end_tag();
+                }
+                if cell_destination_scope {
+                    canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "destination");
                 }
                 if authoring_scope {
                     canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "table-cell");
@@ -17425,6 +17466,9 @@ impl TableFlowable {
             if tagged.is_some() {
                 canvas.end_tag();
             }
+            if cell_destination_scope {
+                canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "destination");
+            }
             if authoring_scope {
                 canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "table-cell");
             }
@@ -17444,6 +17488,9 @@ impl TableFlowable {
         }
         if row_tagged.is_some() {
             canvas.end_tag();
+        }
+        if row_destination_scope {
+            canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "destination");
         }
         row_height
     }
@@ -18057,6 +18104,20 @@ impl Flowable for TableFlowable {
             if repeated {
                 canvas.begin_artifact(None);
             }
+            let head_destination_scope = !repeated
+                && self
+                    .data
+                    .header_rows
+                    .iter()
+                    .filter(|row| !Self::row_is_collapsed(row))
+                    .find_map(|row| row.first())
+                    .is_some_and(|cell| {
+                        canvas.begin_destination_scope(
+                            cell.group_destinations.as_deref().unwrap_or(&[]),
+                            grid_x + col_gap,
+                            cursor_y,
+                        )
+                    });
             let head_tagged = self.tag_role.as_ref().map(|_| {
                 canvas.begin_tag("THead", None, None, Some(self.table_id), None, true);
                 canvas.set_table_semantics(
@@ -18111,6 +18172,7 @@ impl Flowable for TableFlowable {
                     row_lines,
                     computed_row_heights.as_deref().unwrap_or(&[]),
                     row_gap,
+                    !repeated,
                 );
                 cursor_y = cursor_y + row_height;
                 row_index += 1;
@@ -18125,12 +18187,16 @@ impl Flowable for TableFlowable {
             if head_tagged.is_some() {
                 canvas.end_tag();
             }
+            if head_destination_scope {
+                canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "destination");
+            }
             if repeated {
                 canvas.end_marked_content();
             }
         }
 
         let mut body_tagged = false;
+        let mut body_destination_scope = false;
         let mut body_group_pending = true;
         for (i, row) in self.data.body_rows[self.body_range.clone()]
             .iter()
@@ -18171,6 +18237,16 @@ impl Flowable for TableFlowable {
                 if body_tagged {
                     canvas.end_tag();
                 }
+                if body_destination_scope {
+                    canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "destination");
+                }
+                body_destination_scope = row.first().is_some_and(|cell| {
+                    canvas.begin_destination_scope(
+                        cell.group_destinations.as_deref().unwrap_or(&[]),
+                        grid_x + col_gap,
+                        cursor_y,
+                    )
+                });
                 canvas.begin_tag("TBody", None, None, Some(self.table_id), None, true);
                 canvas.set_table_semantics(
                     row.iter()
@@ -18202,6 +18278,7 @@ impl Flowable for TableFlowable {
                 row_lines,
                 computed_row_heights.as_deref().unwrap_or(&[]),
                 row_gap,
+                true,
             );
             cursor_y = cursor_y + row_height;
             row_index += 1;
@@ -18214,12 +18291,27 @@ impl Flowable for TableFlowable {
         if body_tagged {
             canvas.end_tag();
         }
+        if body_destination_scope {
+            canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "destination");
+        }
 
         if self.include_footer && self.footer_range.start < self.footer_range.end {
             let repeated = self.table_semantics.is_some() && !self.last_fragment;
             if repeated {
                 canvas.begin_artifact(None);
             }
+            let footer_destination_scope = !repeated
+                && self.data.body_rows[self.footer_range.clone()]
+                    .iter()
+                    .filter(|row| !Self::row_is_collapsed(row))
+                    .find_map(|row| row.first())
+                    .is_some_and(|cell| {
+                        canvas.begin_destination_scope(
+                            cell.group_destinations.as_deref().unwrap_or(&[]),
+                            grid_x + col_gap,
+                            cursor_y,
+                        )
+                    });
             let footer_tagged = self.tag_role.as_ref().map(|_| {
                 canvas.begin_tag("TFoot", None, None, Some(self.table_id), None, true);
                 canvas.set_table_semantics(
@@ -18282,6 +18374,7 @@ impl Flowable for TableFlowable {
                     row_lines,
                     computed_row_heights.as_deref().unwrap_or(&[]),
                     row_gap,
+                    !repeated,
                 );
                 cursor_y += row_height;
                 row_index += 1;
@@ -18292,6 +18385,9 @@ impl Flowable for TableFlowable {
             }
             if footer_tagged.is_some() {
                 canvas.end_tag();
+            }
+            if footer_destination_scope {
+                canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "destination");
             }
             if repeated {
                 canvas.end_marked_content();

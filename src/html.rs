@@ -16679,6 +16679,15 @@ fn table_flowable(
                     .map(|s| parse_data_fb(s))
             })
             .unwrap_or_default();
+        let row_destinations = if anonymous_row {
+            None
+        } else {
+            counters.link_semantics.destinations(&row)
+        };
+        let group_destinations = row
+            .parent()
+            .filter(|parent| *parent != table_node)
+            .and_then(|parent| counters.link_semantics.destinations(&parent));
         let section_context = row.parent().and_then(|parent| {
             let parent_el = parent.as_element()?;
             if parent == table_node {
@@ -16907,6 +16916,11 @@ fn table_flowable(
                     spanning_cell
                         .as_rowspan_placeholder()
                         .with_table_semantics(counters.table_semantics.node(&row))
+                        .with_navigation_destinations(
+                            None,
+                            row_destinations.clone(),
+                            group_destinations.clone(),
+                        )
                         .with_row_collapsed(row_collapsed)
                         .with_row_border(
                             row_style.border_width,
@@ -17349,6 +17363,11 @@ fn table_flowable(
             );
             let mut cell = cell
                 .with_table_semantics(counters.table_semantics.node(cell_child))
+                .with_navigation_destinations(
+                    counters.link_semantics.destinations(cell_child),
+                    row_destinations.clone(),
+                    group_destinations.clone(),
+                )
                 .with_border_styles(
                     border_styles.top,
                     border_styles.right,
@@ -17470,6 +17489,11 @@ fn table_flowable(
                     spanning_cell
                         .as_rowspan_placeholder()
                         .with_table_semantics(counters.table_semantics.node(&row))
+                        .with_navigation_destinations(
+                            None,
+                            row_destinations.clone(),
+                            group_destinations.clone(),
+                        )
                         .with_row_collapsed(row_collapsed)
                         .with_row_border(
                             row_style.border_width,

@@ -1119,6 +1119,28 @@ impl Canvas {
         }
     }
 
+    /// A destination is a position, not a painted rectangle. Keep the source
+    /// scope open until its semantic owner has been emitted.
+    pub(crate) fn begin_destination_scope(&mut self, names: &[String], x: Pt, y: Pt) -> bool {
+        if names.is_empty() {
+            return false;
+        }
+        self.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "destination");
+        for name in names {
+            self.meta(crate::link_semantics::META_DESTINATION, name.clone());
+        }
+        let (x, y) = self
+            .current_state
+            .projective_transform
+            .map(|transform| transform.map_point(x, y))
+            .unwrap_or((x, y));
+        self.meta(
+            crate::pdf_links::META_DESTINATION_POINT,
+            format!("{},{}", x.to_milli_i64(), y.to_milli_i64()),
+        );
+        true
+    }
+
     pub(crate) fn record_link_box(&mut self, x: Pt, y: Pt, width: Pt, height: Pt) {
         if !self.navigation_active || width <= Pt::ZERO || height <= Pt::ZERO {
             return;

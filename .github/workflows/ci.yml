@@ -850,6 +850,8 @@ jobs:
           FULLBLEED_TEST_INSTALLED_NATIVE: "1"
           FULLBLEED_FORM_TEST_OUTPUT: target/python315/tagged-forms
           FULLBLEED_INLINE_OPACITY_TEST_OUTPUT: target/python315/inline-opacity
+          FULLBLEED_TABLE_LINK_TEST_OUTPUT: target/python315/table-links
+          FULLBLEED_DESTINATION_VISIBILITY_TEST_OUTPUT: target/python315/destination-visibility
         run: python -m pytest tests -q -ra --junitxml target/python315/python-tests.xml
       - name: Generate and check PDFs and previews
         shell: bash
