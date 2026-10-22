@@ -25,15 +25,18 @@ pub(super) fn normalize(records: Vec<TagRecord>) -> Vec<TagRecord> {
             *cell_counts.entry(key).or_insert(0usize) += 1;
         }
     }
-    let mut cells = BTreeMap::new();
+    let mut cells = BTreeMap::<_, usize>::new();
     let mut mapped = Vec::<usize>::with_capacity(records.len());
-    let mut containers = BTreeMap::new();
-    let mut normalized = Vec::with_capacity(records.len());
+    let mut containers = BTreeMap::<_, usize>::new();
+    let mut normalized = Vec::<TagRecord>::with_capacity(records.len());
     for mut record in records {
         record.parent = record.parent.and_then(|parent| mapped.get(parent).copied());
         if let Some(key) = cell_key(&record).filter(|key| cell_counts[key] > 1) {
             let leaf = record.mcid.map(|_| record.clone());
             let existing = if let Some(&existing) = cells.get(&key) {
+                normalized[existing]
+                    .destination_sources
+                    .extend(record.destination_sources);
                 existing
             } else {
                 let existing = normalized.len();
@@ -51,6 +54,7 @@ pub(super) fn normalize(records: Vec<TagRecord>) -> Vec<TagRecord> {
                 leaf.row_span = None;
                 leaf.table_semantics = None;
                 leaf.structure_id = None;
+                leaf.destination_sources.clear();
                 normalized.push(leaf);
             }
             continue;
@@ -74,6 +78,9 @@ pub(super) fn normalize(records: Vec<TagRecord>) -> Vec<TagRecord> {
         });
         if let Some(key) = key {
             if let Some(&existing) = containers.get(&key) {
+                normalized[existing]
+                    .destination_sources
+                    .extend(record.destination_sources);
                 mapped.push(existing);
                 continue;
             }

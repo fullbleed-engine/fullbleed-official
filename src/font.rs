@@ -15,6 +15,7 @@ struct TextWidthKey {
     font_index: usize,
     size_milli: i64,
     text: String,
+    shaped: bool,
 }
 
 #[derive(Debug)]
@@ -856,6 +857,40 @@ impl FontRegistry {
         self.measure_text_width_encoded(name, font_size, &encoded)
     }
 
+    /// Inline fragments must advance by their painted glyphs, including GPOS
+    /// kerning and ligatures. The legacy Basic Latin estimate is insufficient
+    /// when a following fragment starts at this measured end position.
+    pub(crate) fn measure_shaped_text_width(
+        &self,
+        name: &str,
+        font_size: Pt,
+        text: &str,
+        options: text_shape::ShapeOptions,
+    ) -> Pt {
+        let Some(index) = self.lookup.get(&normalize_name(name)).copied() else {
+            return self.measure_text_width_with_shape_options(name, font_size, text, options);
+        };
+        let encoded = text_shape::encode_shape_options(text, options);
+        let key = TextWidthKey {
+            font_index: index,
+            size_milli: font_size.to_milli_i64(),
+            text: encoded.clone(),
+            shaped: true,
+        };
+        if let Ok(mut cache) = self.text_width_cache.lock() {
+            if let Some(value) = cache.get(&key) {
+                return value;
+            }
+        }
+        let font = &self.fonts[index];
+        let value = measure_text_width_full(font, font_size, &encoded)
+            .unwrap_or_else(|| font.metrics.measure_text_width(font_size, text));
+        if let Ok(mut cache) = self.text_width_cache.lock() {
+            cache.insert(key, value);
+        }
+        value
+    }
+
     fn measure_text_width_encoded(&self, name: &str, font_size: Pt, text: &str) -> Pt {
         let (shape_options, clean_text) = text_shape::decode_shape_options(text);
         let key = normalize_name(name);
@@ -867,6 +902,7 @@ impl FontRegistry {
             font_index: index,
             size_milli: font_size.to_milli_i64(),
             text: text.to_string(),
+            shaped: false,
         };
         if let Ok(mut cache) = self.text_width_cache.lock() {
             if let Some(value) = cache.get(&cache_key) {

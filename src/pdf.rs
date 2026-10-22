@@ -8,6 +8,7 @@ use crate::font::{
 };
 use crate::metrics::{DocumentMetrics, PageMetrics};
 use crate::pdf_identity::{IdentityWriter, PdfIdentity, PdfTimestamp};
+use crate::pdf_links::{DocumentLinks, Link, Target};
 use crate::perf::PerfLogger;
 use crate::sfnt::{Face as SfntFace, GlyphId};
 use crate::types::{
@@ -240,10 +241,14 @@ fn pdf_header_bytes(version: PdfVersion) -> &'static [u8] {
 
 #[path = "pdf_table.rs"]
 mod table_structure;
+#[path = "pdf_tagged_forms.rs"]
+mod tagged_forms;
+use tagged_forms::{FormTagContext, TagContentStream};
 
 #[derive(Debug, Clone)]
 struct TagRecord {
     page_index: usize,
+    content_stream: TagContentStream,
     mcid: Option<u32>,
     role: String,
     alt: Option<String>,
@@ -257,6 +262,63 @@ struct TagRecord {
     structure_id: Option<String>,
     list_numbering: Option<String>,
     html_figure_group: bool,
+    link_source: Option<(usize, String)>,
+    group_source: Option<(usize, Option<usize>, String)>,
+    // Referenced HTML targets stay attached to their actual semantic content
+    // while figure, table, list, and link normalizers rebuild the tree.
+    destination_sources: Vec<(usize, String)>,
+}
+
+fn take_structure_destinations(
+    pending: &mut [Option<(usize, String)>],
+    needs_document_destination: &mut bool,
+    document: usize,
+) -> Vec<(usize, String)> {
+    let mut destinations: Vec<_> = pending.iter_mut().filter_map(Option::take).collect();
+    if std::mem::take(needs_document_destination) {
+        // An empty fragment targets this input document's first semantic
+        // content, including each independent recipient in a combined job.
+        destinations.push((document, String::new()));
+    }
+    destinations
+}
+
+fn normalize_shared_structure(mut records: Vec<TagRecord>) -> Vec<TagRecord> {
+    let mut first = BTreeMap::new();
+    let mut groups = BTreeMap::new();
+    let mut canonical: Vec<usize> = (0..records.len()).collect();
+    for (index, record) in records.iter().enumerate() {
+        if let Some(source) = &record.link_source {
+            canonical[index] = *first.entry(source.clone()).or_insert(index);
+        } else if let Some(source) = &record.group_source {
+            debug_assert!(record.mcid.is_none());
+            canonical[index] = *groups.entry(source.clone()).or_insert(index);
+        }
+    }
+    for index in 0..records.len() {
+        if canonical[index] != index {
+            let destinations = std::mem::take(&mut records[index].destination_sources);
+            records[canonical[index]]
+                .destination_sources
+                .extend(destinations);
+        }
+    }
+    let mut compact = vec![0; records.len()];
+    let mut next = 0;
+    for (index, &owner) in canonical.iter().enumerate() {
+        if owner == index {
+            compact[index] = next;
+            next += 1;
+        }
+    }
+    for record in &mut records {
+        record.parent = record.parent.map(|parent| compact[canonical[parent]]);
+    }
+    records
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, record)| (canonical[index] == index).then_some(record))
+        .collect()
 }
 
 fn list_attributes(tag: &TagRecord, pdf20: bool) -> Option<String> {
@@ -384,6 +446,7 @@ fn normalize_definition_list_structure(records: Vec<TagRecord>) -> Vec<TagRecord
     fn synthetic_record(role: &str, parent: Option<usize>, page_index: usize) -> TagRecord {
         TagRecord {
             page_index,
+            content_stream: TagContentStream::Page,
             mcid: None,
             role: role.to_string(),
             alt: None,
@@ -397,6 +460,9 @@ fn normalize_definition_list_structure(records: Vec<TagRecord>) -> Vec<TagRecord
             structure_id: None,
             list_numbering: (role == "L").then(|| "Description".to_owned()),
             html_figure_group: false,
+            link_source: None,
+            group_source: None,
+            destination_sources: Vec::new(),
         }
     }
 
@@ -1223,6 +1289,17 @@ pub(crate) fn compile_binding_plan(
     })
 }
 
+#[derive(Clone)]
+struct PendingLinkAnnotation {
+    object_id: usize,
+    page_index: usize,
+    source: (usize, String),
+    link: Link,
+    destination: Option<(usize, crate::pdf_link_geometry::Point)>,
+    destination_structure: Option<usize>,
+    struct_parent: Option<usize>,
+}
+
 pub(crate) struct PdfStreamWriter<'a, W: Write> {
     writer: IdentityWriter<'a, W>,
     offset: usize,
@@ -1241,6 +1318,11 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
     next_type3_resource: usize,
     current_doc_id: usize,
     current_tag_document: usize,
+    current_link_document: usize,
+    link_annotations: Vec<PendingLinkAnnotation>,
+    page_link_annotations: BTreeMap<usize, Vec<usize>>,
+    source_link_annotations: BTreeMap<(usize, String), Vec<usize>>,
+    page_source_link_annotation: BTreeMap<(usize, String), usize>,
     doc_font_usage: BTreeMap<usize, BTreeSet<String>>,
 
     image_resources: Vec<(String, usize)>,
@@ -1297,6 +1379,9 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
 
     // Tagged PDF state
     tag_records: Vec<TagRecord>,
+    page_parent_tree_keys: Vec<usize>,
+    next_parent_tree_key: usize,
+    active_semantic_forms: Vec<String>,
     page_ids: Vec<usize>,
     page_content_bytes: Vec<usize>,
     page_content_stream_count: usize,
@@ -1679,6 +1764,11 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             next_type3_resource: 1,
             current_doc_id: 0,
             current_tag_document: 0,
+            current_link_document: 0,
+            link_annotations: Vec::new(),
+            page_link_annotations: BTreeMap::new(),
+            source_link_annotations: BTreeMap::new(),
+            page_source_link_annotation: BTreeMap::new(),
             doc_font_usage: BTreeMap::new(),
             image_resources: Vec::new(),
             image_name_map: HashMap::new(),
@@ -1724,6 +1814,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             compiled_flow_reject_command_pages: 0,
             compiled_flow_reject_transform_pages: 0,
             tag_records: Vec::new(),
+            page_parent_tree_keys: Vec::new(),
+            next_parent_tree_key: 0,
+            active_semantic_forms: Vec::new(),
             page_ids: Vec::new(),
             page_content_bytes: Vec::new(),
             page_content_stream_count: 0,
@@ -1763,8 +1856,160 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         self.current_doc_id = doc_id;
         self.current_tag_document = self.tag_records.len();
         self.shaped_cache.clear();
+        self.flush_compiled_flow_pages()?;
+        let links = DocumentLinks::collect(document, self.page_size, self.registry, &[])?;
+        self.register_document_links(&links);
         for page in &document.pages {
             self.add_page(page)?;
+        }
+        Ok(())
+    }
+
+    /// Allocate annotation references before writing their page dictionaries.
+    /// Internal targets are already resolved within this input document; every
+    /// repeated/recipient document gets its own page-offset namespace.
+    fn register_document_links(&mut self, links: &DocumentLinks) {
+        let first_page = self.page_ids.len() + self.pending_compiled_flow_pages.len();
+        self.current_link_document = first_page;
+        if matches!(
+            self.options.pdf_profile,
+            PdfProfile::PdfX4 | PdfProfile::PdfVt1
+        ) {
+            let count: usize = links.pages.iter().map(|page| page.links.len()).sum();
+            if count > 0 {
+                if let Some(logger) = self.debug.as_deref() {
+                    logger.log_json(&format!(
+                        "{{\"type\":\"pdf.links_omitted\",\"reason\":\"print_profile\",\"count\":{count}}}"
+                    ));
+                    logger.increment("pdf.links_omitted.print_profile", count as u64);
+                }
+            }
+            return;
+        }
+        for (page, navigation) in links.pages.iter().enumerate() {
+            for link in &navigation.links {
+                let page_index = first_page + page;
+                let destination = match &link.target {
+                    Target::Local(name) => links
+                        .destinations
+                        .get(name)
+                        .map(|(page, point)| (first_page + page, *point)),
+                    Target::Uri(_) => None,
+                };
+                let source = (first_page, link.source_id.clone());
+                // Readers that only use Rect must not activate the gaps between
+                // lines, disconnected images, or axis-aligned clipped regions.
+                // All pieces still belong to the same logical Link element.
+                for region in link.region.annotation_regions() {
+                    let object_id = self.alloc_ids(1);
+                    let index = self.link_annotations.len();
+                    self.link_annotations.push(PendingLinkAnnotation {
+                        object_id,
+                        page_index,
+                        source: source.clone(),
+                        link: Link {
+                            region,
+                            ..link.clone()
+                        },
+                        destination,
+                        destination_structure: None,
+                        struct_parent: None,
+                    });
+                    self.source_link_annotations
+                        .entry(source.clone())
+                        .or_default()
+                        .push(index);
+                    self.page_source_link_annotation
+                        .entry((page_index, link.source_id.clone()))
+                        .or_insert(index);
+                    self.page_link_annotations
+                        .entry(page_index)
+                        .or_default()
+                        .push(object_id);
+                }
+            }
+        }
+    }
+
+    fn write_link_annotations(&mut self) -> io::Result<()> {
+        for annotation in std::mem::take(&mut self.link_annotations) {
+            let Some([left, bottom, right, top]) = annotation.link.region.bounds() else {
+                continue;
+            };
+            let numbers = |values: &[f64]| {
+                values
+                    .iter()
+                    .map(|value| format!("{value:.6}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            let rect = numbers(&[left, bottom, right, top]);
+            let quads = annotation
+                .link
+                .region
+                .quads
+                .iter()
+                .flat_map(|quad| quad.0.iter().flat_map(|point| [point.x, point.y]))
+                .collect::<Vec<_>>();
+            let action = match &annotation.link.target {
+                Target::Uri(uri) => format!(" /A << /S /URI /URI ({}) >>", escape_pdf_string(uri)),
+                Target::Local(_) => {
+                    let (page, point) = annotation.destination.ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "unresolved PDF link destination",
+                        )
+                    })?;
+                    let page_id = self.page_ids.get(page).ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "PDF link destination page is missing",
+                        )
+                    })?;
+                    if let Some(structure_id) = annotation.destination_structure {
+                        // PDF 2.0, 12.3.2.3 and Table 202: SD identifies the
+                        // semantic destination; D preserves navigation in older
+                        // readers that do not implement structure destinations.
+                        format!(
+                            " /A << /S /GoTo /D [{page_id} 0 R /XYZ {x:.6} {y:.6} null] /SD [{structure_id} 0 R /XYZ {x:.6} {y:.6} null] >>",
+                            x = point.x,
+                            y = point.y
+                        )
+                    } else {
+                        format!(
+                            " /Dest [{page_id} 0 R /XYZ {:.6} {:.6} null]",
+                            point.x, point.y
+                        )
+                    }
+                }
+            };
+            let struct_parent = annotation
+                .struct_parent
+                .map(|key| format!(" /StructParent {key}"))
+                .unwrap_or_default();
+            if self.options.pdf_profile.emits_tagged_structure()
+                && annotation.struct_parent.is_none()
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "authored PDF link has no structure owner",
+                ));
+            }
+            let contents = if annotation.link.label.is_empty() {
+                match &annotation.link.target {
+                    Target::Uri(uri) => uri.as_str(),
+                    Target::Local(name) => name.as_str(),
+                }
+            } else {
+                &annotation.link.label
+            };
+            let object = format!(
+                "<< /Type /Annot /Subtype /Link /P {} 0 R /Rect [{rect}] /QuadPoints [{}] /Border [0 0 0] /F 4 /Contents {}{action}{struct_parent} >>",
+                self.page_ids[annotation.page_index],
+                numbers(&quads),
+                pdf_text_string(contents),
+            );
+            self.write_object(annotation.object_id, &object)?;
         }
         Ok(())
     }
@@ -1891,6 +2136,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         self.begin_vt_document(document.pages.len())?;
         self.current_doc_id = doc_id;
         self.current_tag_document = self.tag_records.len();
+        let links =
+            DocumentLinks::collect(document, self.page_size, self.registry, &page_overrides)?;
+        self.register_document_links(&links);
         let document_key = document as *const Document as usize;
         let mut encoded_pages = encoded_pages.map(Vec::into_iter);
         for (source_page, (page, overrides)) in
@@ -1956,6 +2204,8 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         self.shaped_cache.clear();
         self.ensure_page_node();
 
+        self.flush_compiled_flow_pages()?;
+        let links = DocumentLinks::collect(document, self.page_size, self.registry, &[])?;
         let first_page_index = self.page_ids.len();
         let mut shared_contents = Vec::with_capacity(document.pages.len());
         for (source_index, page) in document.pages.iter().enumerate() {
@@ -1983,6 +2233,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         }
         for _copy in 0..copies {
             self.begin_vt_document(document.pages.len())?;
+            self.register_document_links(&links);
             for (content_id, content_len, geometry) in &shared_contents {
                 self.add_page_reference_sized(*content_id, *content_len, *geometry)?;
             }
@@ -2097,8 +2348,31 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             .max()
             .unwrap_or(0);
         let mut dynamic_content = Vec::with_capacity(max_dynamic_capacity);
+        let has_links = document
+            .pages
+            .iter()
+            .any(|page| crate::pdf_links::has_navigation(&page.commands));
         for row in 0..record_count {
             self.begin_vt_document(document.pages.len())?;
+            if has_links {
+                let bound = Document {
+                    page_size: document.page_size,
+                    pages: document
+                        .pages
+                        .iter()
+                        .map(|page| {
+                            instantiate_binding_overlay_page(
+                                page,
+                                &binding_plan.slot_lookup,
+                                columns,
+                                row,
+                            )
+                        })
+                        .collect(),
+                };
+                let links = DocumentLinks::collect(&bound, self.page_size, self.registry, &[])?;
+                self.register_document_links(&links);
+            }
             if cancelled() {
                 return Err(io::Error::new(
                     io::ErrorKind::Interrupted,
@@ -2419,7 +2693,10 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         self.page_ids.push(page_id);
 
         let (struct_parents, tabs) = if self.options.pdf_profile.emits_tagged_structure() {
-            (format!(" /StructParents {}", page_index), " /Tabs /S")
+            (
+                format!(" /StructParents {}", self.page_parent_tree_key(page_index)),
+                " /Tabs /S",
+            )
         } else {
             (String::new(), "")
         };
@@ -2429,8 +2706,21 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             .get(page_index)
             .map(|id| format!(" /DPart {} 0 R", id))
             .unwrap_or_default();
+        let annotations = self
+            .page_link_annotations
+            .get(&page_index)
+            .map(|ids| {
+                format!(
+                    " /Annots [{}]",
+                    ids.iter()
+                        .map(|id| format!("{id} 0 R"))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+            })
+            .unwrap_or_default();
         let page_obj = format!(
-            "<< /Type /Page /Parent {} 0 R /MediaBox [0 0 {} {}]{} /Resources {} 0 R /Contents {}{}{}{} >>",
+            "<< /Type /Page /Parent {} 0 R /MediaBox [0 0 {} {}]{} /Resources {} 0 R /Contents {}{}{}{}{annotations} >>",
             parent_id,
             fmt_pt(geometry.media_size.width),
             fmt_pt(geometry.media_size.height),
@@ -2800,8 +3090,10 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         if self.options.pdf_profile.emits_tagged_structure() {
             let uses_pdf20_structure_namespace =
                 self.options.pdf_profile.uses_pdf20_structure_namespace();
-            let tag_records = normalize_definition_list_structure(table_structure::normalize(
-                normalize_figure_structure(std::mem::take(&mut self.tag_records)),
+            let tag_records = normalize_shared_structure(normalize_definition_list_structure(
+                table_structure::normalize(normalize_figure_structure(std::mem::take(
+                    &mut self.tag_records,
+                ))),
             ));
             let tag_count = tag_records.len();
             if let Some(debug) = &self.debug {
@@ -2831,6 +3123,27 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 .collect::<BTreeMap<_, _>>();
             let id_tree_id = (!ids.is_empty()).then(|| self.alloc_ids(1));
 
+            if uses_pdf20_structure_namespace {
+                let mut destinations = BTreeMap::new();
+                for (index, tag) in tag_records.iter().enumerate() {
+                    for source in &tag.destination_sources {
+                        destinations
+                            .entry(source.clone())
+                            .or_insert(start_id + index);
+                    }
+                }
+                for annotation in &mut self.link_annotations {
+                    if let Target::Local(name) = &annotation.link.target {
+                        annotation.destination_structure = Some(*destinations
+                            .get(&(annotation.source.0, name.clone()))
+                            .ok_or_else(|| io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!("PDF/UA-2 link destination {name:?} has no tagged content"),
+                            ))?);
+                    }
+                }
+            }
+
             let mut children: Vec<Vec<usize>> = vec![Vec::new(); tag_count];
             for (idx, tag) in tag_records.iter().enumerate() {
                 if let Some(parent) = tag.parent {
@@ -2839,8 +3152,8 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     }
                 }
             }
-            let mut page_parent_tree: Vec<Vec<Option<usize>>> =
-                vec![Vec::new(); self.page_ids.len()];
+            let mut stream_parent_tree: Vec<Vec<Option<usize>>> =
+                vec![Vec::new(); self.next_parent_tree_key];
             let mut root_kids: Vec<usize> = Vec::new();
             for (i, tag) in tag_records.iter().enumerate() {
                 if let Some(page_id) = self.page_ids.get(tag.page_index).copied() {
@@ -2853,11 +3166,29 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         .unwrap_or(root_id);
                     let mut k_parts: Vec<String> = Vec::new();
                     if let Some(mcid) = tag.mcid {
-                        k_parts.push(format!("{}", mcid));
+                        k_parts.push(match tag.content_stream {
+                            TagContentStream::Page => format!("{mcid}"),
+                            TagContentStream::Form { object_id, .. } => format!(
+                                "<< /Type /MCR /Stm {object_id} 0 R /Pg {page_id} 0 R /MCID {mcid} >>"
+                            ),
+                        });
                     }
                     if let Some(kids) = children.get(i) {
                         for child in kids {
                             k_parts.push(format!("{} 0 R", start_id + *child));
+                        }
+                    }
+                    if let Some(source) = &tag.link_source {
+                        if let Some(indices) = self.source_link_annotations.get(source) {
+                            for &annotation_index in indices {
+                                let annotation = &mut self.link_annotations[annotation_index];
+                                annotation.struct_parent =
+                                    Some(self.next_parent_tree_key + annotation_index);
+                                k_parts.push(format!(
+                                    "<< /Type /OBJR /Obj {} 0 R /Pg {} 0 R >>",
+                                    annotation.object_id, self.page_ids[annotation.page_index]
+                                ));
+                            }
                         }
                     }
                     let k_entry = if k_parts.is_empty() {
@@ -2872,7 +3203,11 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         role, parent_id, page_id, k_entry
                     );
                     if let Some(alt) = tag.alt.as_deref() {
-                        obj.push_str(&format!(" /Alt ({})", escape_pdf_string(alt)));
+                        if tag.link_source.is_some() {
+                            obj.push_str(&format!(" /Alt {}", pdf_text_string(alt)));
+                        } else {
+                            obj.push_str(&format!(" /Alt ({})", escape_pdf_string(alt)));
+                        }
                     }
                     if let Some(actual_text) = tag.actual_text.as_deref() {
                         obj.push_str(&format!(" /ActualText {}", pdf_text_string(actual_text)));
@@ -2891,8 +3226,14 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     if tag.parent.is_none() {
                         root_kids.push(id);
                     }
+                    let stream_key = match tag.content_stream {
+                        TagContentStream::Page => self.page_parent_tree_keys[tag.page_index],
+                        TagContentStream::Form {
+                            parent_tree_key, ..
+                        } => parent_tree_key,
+                    };
                     if let (Some(list), Some(mcid)) =
-                        (page_parent_tree.get_mut(tag.page_index), tag.mcid)
+                        (stream_parent_tree.get_mut(stream_key), tag.mcid)
                     {
                         let mcid = mcid as usize;
                         if list.len() <= mcid {
@@ -2904,7 +3245,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             }
 
             let mut nums_entries: Vec<String> = Vec::new();
-            for (idx, elems) in page_parent_tree.iter().enumerate() {
+            for (idx, elems) in stream_parent_tree.iter().enumerate() {
                 let refs = elems
                     .iter()
                     .map(|id| {
@@ -2914,6 +3255,23 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     .collect::<Vec<_>>()
                     .join(" ");
                 nums_entries.push(format!("{} [{}]", idx, refs));
+            }
+            let link_owners = tag_records
+                .iter()
+                .enumerate()
+                .filter_map(|(index, tag)| {
+                    tag.link_source
+                        .as_ref()
+                        .map(|source| (source, start_id + index))
+                })
+                .collect::<BTreeMap<_, _>>();
+            for annotation in &self.link_annotations {
+                if let (Some(key), Some(owner)) = (
+                    annotation.struct_parent,
+                    link_owners.get(&annotation.source),
+                ) {
+                    nums_entries.push(format!("{key} {owner} 0 R"));
+                }
             }
             let parent_tree_obj = format!("<< /Nums [{}] >>", nums_entries.join(" "));
             self.write_object(parent_tree_id, &parent_tree_obj)?;
@@ -2952,6 +3310,8 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             self.write_object(root_id, &root_obj)?;
             struct_tree_root_id = Some(root_id);
         }
+
+        self.write_link_annotations()?;
 
         let mut pdfvt_dpart_root_id: Option<usize> = None;
         if let (Some(root_id), Some(job_id)) = (self.pdfvt_dpart_root_id, self.pdfvt_dpart_node_id)
@@ -3538,6 +3898,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             None,
             overrides,
             None,
+            None,
         )?;
         let content = wrap_page_content_for_presentation(content, geometry);
         Ok(wrap_page_content_for_print_device_phase(
@@ -3561,6 +3922,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             None,
             overrides,
             Some(&mut rendered_slots),
+            None,
         )?;
         if rendered_slots.len() != overrides.len() {
             return Err(io::Error::new(
@@ -3775,7 +4137,15 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         page_height: Pt,
         page_index: Option<usize>,
     ) -> io::Result<String> {
-        self.render_commands_with_filter_offset(commands, page_height, page_index, None, &[], None)
+        self.render_commands_with_filter_offset(
+            commands,
+            page_height,
+            page_index,
+            None,
+            &[],
+            None,
+            None,
+        )
     }
 
     fn render_commands_with_filter_offset(
@@ -3786,6 +4156,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         filter_raster_offset: Option<(Pt, Pt)>,
         compiled_flow_overrides: &[CompiledFlowTextOverride],
         mut compiled_flow_capture: Option<&mut Vec<CompiledFlowRenderedSlot>>,
+        form_context: Option<FormTagContext>,
     ) -> io::Result<String> {
         let mut out = String::new();
         let mut current_font_size = Pt::from_f32(12.0);
@@ -3794,11 +4165,28 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let mut current_text_rendering_mode = 0u8;
         let mut graphics_state_stack: Vec<(Pt, String, Color, u8)> = Vec::new();
         let mut tag_stack: Vec<usize> = Vec::new();
+        let mut link_scope_stack: Vec<(usize, usize)> = Vec::new();
+        let content_stream = form_context
+            .as_ref()
+            .map(|context| context.content_stream)
+            .unwrap_or_default();
+        let inherited_parent = form_context.as_ref().and_then(|context| context.parent);
+        let group_scope = form_context
+            .as_ref()
+            .and_then(|context| context.group_scope);
+        let mut needs_document_destination = form_context.is_none();
+        let mut pending_destinations: Vec<Option<(usize, String)>> = form_context
+            .map(|context| context.destinations.into_iter().map(Some).collect())
+            .unwrap_or_default();
+        let mut next_form_mcid = 0u32;
         let mut suppressed_tag_depth = 0usize;
         let mut marked_content_stack: Vec<bool> = Vec::new();
         let mut explicit_artifact_depth = 0usize;
         let mut automatic_artifact_open = false;
         let tag_enabled = self.options.pdf_profile.emits_tagged_structure() && page_index.is_some();
+        if tag_enabled && matches!(content_stream, TagContentStream::Page) {
+            self.page_parent_tree_key(page_index.unwrap());
+        }
 
         if compiled_flow_overrides
             .windows(2)
@@ -3833,6 +4221,18 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     ));
                 }
             }
+            let semantic_form =
+                if tag_enabled && explicit_artifact_depth == 0 && suppressed_tag_depth == 0 {
+                    match cmd {
+                        Command::DrawForm { resource_id, .. }
+                        | Command::DrawMaskedForm { resource_id, .. } => {
+                            self.form_has_semantic_content(resource_id)?
+                        }
+                        _ => false,
+                    }
+                } else {
+                    false
+                };
             let marked_content_boundary = matches!(
                 cmd,
                 Command::BeginTag { .. }
@@ -3843,7 +4243,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     | Command::EndMarkedContent
             );
             if automatic_artifact_open
-                && (marked_content_boundary || command_paints_text_content(cmd))
+                && (marked_content_boundary || command_paints_text_content(cmd) || semantic_form)
             {
                 out.push_str("EMC\n");
                 automatic_artifact_open = false;
@@ -3858,6 +4258,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     .all(|&index| self.tag_records[index].mcid.is_none())
                 && explicit_artifact_depth == 0
                 && command_paints_nontext_content(cmd)
+                && !semantic_form
             {
                 out.push_str("/Artifact BMC\n");
                 automatic_artifact_open = true;
@@ -3925,6 +4326,75 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     if tag_enabled
                         && explicit_artifact_depth == 0
                         && suppressed_tag_depth == 0
+                        && key == crate::inline_opacity::GROUP_SOURCE
+                    {
+                        if let Some(record) = tag_stack
+                            .last()
+                            .and_then(|index| self.tag_records.get_mut(*index))
+                        {
+                            if record.mcid.is_none() {
+                                record.group_source =
+                                    Some((page_index.unwrap(), group_scope, value.clone()));
+                            }
+                        }
+                    }
+                    if tag_enabled {
+                        if key == crate::canvas::META_DIAGNOSTIC_SCOPE_BEGIN_KEY {
+                            link_scope_stack.push((tag_stack.len(), pending_destinations.len()));
+                        } else if key == crate::canvas::META_DIAGNOSTIC_SCOPE_END_KEY {
+                            if let Some((depth, destinations)) = link_scope_stack.pop() {
+                                tag_stack.truncate(depth);
+                                pending_destinations.truncate(destinations);
+                            }
+                        } else if key == crate::link_semantics::META_DESTINATION
+                            && explicit_artifact_depth == 0
+                            && suppressed_tag_depth == 0
+                        {
+                            pending_destinations
+                                .push(Some((self.current_link_document, value.clone())));
+                        } else if key == crate::link_semantics::META_LINK_ID
+                            && explicit_artifact_depth == 0
+                            && suppressed_tag_depth == 0
+                        {
+                            let source = (self.current_link_document, value.clone());
+                            if let Some(annotation) = self
+                                .page_source_link_annotation
+                                .get(&(page_index.unwrap_or(0), value.clone()))
+                                .map(|&index| &self.link_annotations[index])
+                            {
+                                let index = self.tag_records.len();
+                                self.tag_records.push(TagRecord {
+                                    page_index: page_index.unwrap_or(0),
+                                    content_stream,
+                                    mcid: None,
+                                    role: "Link".into(),
+                                    alt: (!annotation.link.label.is_empty())
+                                        .then(|| annotation.link.label.clone()),
+                                    actual_text: None,
+                                    scope: None,
+                                    parent: tag_stack.last().copied().or(inherited_parent),
+                                    column_span: None,
+                                    row_span: None,
+                                    table_semantics: None,
+                                    table_document: self.current_tag_document,
+                                    structure_id: None,
+                                    list_numbering: None,
+                                    html_figure_group: false,
+                                    link_source: Some(source),
+                                    group_source: None,
+                                    destination_sources: take_structure_destinations(
+                                        &mut pending_destinations,
+                                        &mut needs_document_destination,
+                                        self.current_link_document,
+                                    ),
+                                });
+                                tag_stack.push(index);
+                            }
+                        }
+                    }
+                    if tag_enabled
+                        && explicit_artifact_depth == 0
+                        && suppressed_tag_depth == 0
                         && key == META_LIST_NUMBERING_KEY
                     {
                         apply_list_numbering(&mut self.tag_records, &tag_stack, value);
@@ -3960,6 +4430,15 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             suppressed_tag_depth += 1;
                             continue;
                         }
+                        let mcid = mcid.map(|source| {
+                            if matches!(content_stream, TagContentStream::Form { .. }) {
+                                let value = next_form_mcid;
+                                next_form_mcid += 1;
+                                value
+                            } else {
+                                source
+                            }
+                        });
                         let role_raw = role.clone();
                         let role = escape_pdf_name(role);
                         if *group_only {
@@ -3967,11 +4446,12 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         } else if let Some(mcid) = mcid {
                             out.push_str(&format!("/{role} <</MCID {}>> BDC\n", mcid));
                         }
-                        let parent = tag_stack.last().copied();
+                        let parent = tag_stack.last().copied().or(inherited_parent);
                         let idx = self.tag_records.len();
                         self.tag_records.push(TagRecord {
                             page_index: page_index.unwrap_or(0),
-                            mcid: *mcid,
+                            content_stream,
+                            mcid,
                             role: role_raw,
                             alt: alt.clone(),
                             actual_text: None,
@@ -3984,6 +4464,13 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             structure_id: None,
                             list_numbering: None,
                             html_figure_group: false,
+                            link_source: None,
+                            group_source: None,
+                            destination_sources: take_structure_destinations(
+                                &mut pending_destinations,
+                                &mut needs_document_destination,
+                                self.current_link_document,
+                            ),
                         });
                         tag_stack.push(idx);
                     }
@@ -3998,17 +4485,25 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             suppressed_tag_depth += 1;
                             continue;
                         }
+                        let mcid = if matches!(content_stream, TagContentStream::Form { .. }) {
+                            let value = next_form_mcid;
+                            next_form_mcid += 1;
+                            value
+                        } else {
+                            *mcid
+                        };
                         let role_raw = role.clone();
                         let role = escape_pdf_name(role);
                         out.push_str(&format!(
                             "/{role} <</MCID {mcid} /ActualText {}>> BDC\n",
                             pdf_text_string(actual_text)
                         ));
-                        let parent = tag_stack.last().copied();
+                        let parent = tag_stack.last().copied().or(inherited_parent);
                         let idx = self.tag_records.len();
                         self.tag_records.push(TagRecord {
                             page_index: page_index.unwrap_or(0),
-                            mcid: Some(*mcid),
+                            content_stream,
+                            mcid: Some(mcid),
                             role: role_raw,
                             alt: None,
                             actual_text: Some(actual_text.clone()),
@@ -4021,6 +4516,13 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             structure_id: None,
                             list_numbering: None,
                             html_figure_group: false,
+                            link_source: None,
+                            group_source: None,
+                            destination_sources: take_structure_destinations(
+                                &mut pending_destinations,
+                                &mut needs_document_destination,
+                                self.current_link_document,
+                            ),
                         });
                         tag_stack.push(idx);
                     }
@@ -4408,7 +4910,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     height,
                     commands,
                 } => {
-                    self.register_form_definition(resource_id, *width, *height, commands, false);
+                    self.declare_form_definition(resource_id, *width, *height, commands, false);
                 }
                 Command::DefineIsolatedForm {
                     resource_id,
@@ -4416,7 +4918,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     height,
                     commands,
                 } => {
-                    self.register_form_definition(resource_id, *width, *height, commands, true);
+                    self.declare_form_definition(resource_id, *width, *height, commands, true);
                 }
                 Command::DrawForm {
                     x,
@@ -4425,7 +4927,24 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     height,
                     resource_id,
                 } => {
-                    if let Some(name) = self.ensure_registered_form(resource_id)? {
+                    let form_name = if semantic_form {
+                        let destinations = take_structure_destinations(
+                            &mut pending_destinations,
+                            &mut needs_document_destination,
+                            self.current_link_document,
+                        );
+                        self.ensure_semantic_form(
+                            resource_id,
+                            page_index.unwrap(),
+                            tag_stack.last().copied().or(inherited_parent),
+                            destinations,
+                            group_scope,
+                            None,
+                        )?
+                    } else {
+                        self.ensure_registered_form(resource_id)?
+                    };
+                    if let Some(name) = form_name {
                         let draw_y = page_height - *y - *height;
                         let (sx, sy) = self
                             .form_size_map
@@ -4821,7 +5340,21 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     let phase_specialized = commands_contain_filtered_form(&form_commands)
                         && (sx - 1.0).abs() <= 1.0e-6
                         && (sy - 1.0).abs() <= 1.0e-6;
-                    let form_name = if phase_specialized {
+                    let form_name = if semantic_form {
+                        let destinations = take_structure_destinations(
+                            &mut pending_destinations,
+                            &mut needs_document_destination,
+                            self.current_link_document,
+                        );
+                        self.ensure_semantic_form(
+                            resource_id,
+                            page_index.unwrap(),
+                            tag_stack.last().copied().or(inherited_parent),
+                            destinations,
+                            group_scope,
+                            phase_specialized.then_some((*x, *y)),
+                        )?
+                    } else if phase_specialized {
                         self.ensure_registered_form_with_filter_offset(resource_id, (*x, *y))?
                     } else {
                         self.ensure_registered_form(resource_id)?
@@ -5514,6 +6047,39 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         Ok(Some(name))
     }
 
+    /// A display-list declaration can replace an earlier document's local
+    /// resource name. Invalidate only that alias; content-addressed resources
+    /// remain reusable when the newly rendered definition is identical.
+    fn declare_form_definition(
+        &mut self,
+        resource_id: &str,
+        width: Pt,
+        height: Pt,
+        commands: &[Command],
+        isolated: bool,
+    ) {
+        let replaced = self
+            .form_definition_map
+            .insert(resource_id.to_owned(), (width, height, commands.to_vec()))
+            .is_some();
+        self.form_isolated_map
+            .insert(resource_id.to_owned(), isolated);
+        self.form_name_map.remove(resource_id);
+        self.form_size_map.remove(resource_id);
+        if replaced {
+            let prefix = format!("{resource_id}#filter-offset:");
+            self.form_name_map
+                .retain(|key, _| !key.starts_with(&prefix));
+            self.form_size_map
+                .retain(|key, _| !key.starts_with(&prefix));
+            // Flattened tiles refer to local form names (including descendant
+            // forms). Those names no longer identify immutable source paint.
+            self.masked_form_raster_cache.clear();
+            self.mask_coverage_raster_cache.clear();
+            self.mask_coverage_gs_map.clear();
+        }
+    }
+
     fn register_form_definition(
         &mut self,
         resource_id: &str,
@@ -5603,6 +6169,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             None,
             filter_raster_offset,
             &[],
+            None,
             None,
         )?;
         let mut hash_input = Vec::with_capacity(content.len() + 1);
@@ -7037,6 +7604,7 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                     let idx = records.len();
                     records.push(TagRecord {
                         page_index,
+                        content_stream: TagContentStream::Page,
                         mcid: *mcid,
                         role: role.clone(),
                         alt: alt.clone(),
@@ -7050,6 +7618,9 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                         structure_id: None,
                         list_numbering: None,
                         html_figure_group: false,
+                        link_source: None,
+                        group_source: None,
+                        destination_sources: Vec::new(),
                     });
                     stack.push(idx);
                 }
@@ -7066,6 +7637,7 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                     let idx = records.len();
                     records.push(TagRecord {
                         page_index,
+                        content_stream: TagContentStream::Page,
                         mcid: Some(*mcid),
                         role: role.clone(),
                         alt: None,
@@ -7079,6 +7651,9 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                         structure_id: None,
                         list_numbering: None,
                         html_figure_group: false,
+                        link_source: None,
+                        group_source: None,
+                        destination_sources: Vec::new(),
                     });
                     stack.push(idx);
                 }
@@ -7917,6 +8492,7 @@ fn render_page(
                         let idx = records.len();
                         records.push(TagRecord {
                             page_index,
+                            content_stream: TagContentStream::Page,
                             mcid: *mcid,
                             role: role_raw,
                             alt: alt.clone(),
@@ -7930,6 +8506,9 @@ fn render_page(
                             structure_id: None,
                             list_numbering: None,
                             html_figure_group: false,
+                            link_source: None,
+                            group_source: None,
+                            destination_sources: Vec::new(),
                         });
                         tag_stack.push(idx);
                     }
@@ -7956,6 +8535,7 @@ fn render_page(
                         let idx = records.len();
                         records.push(TagRecord {
                             page_index,
+                            content_stream: TagContentStream::Page,
                             mcid: Some(*mcid),
                             role: role_raw,
                             alt: None,
@@ -7969,6 +8549,9 @@ fn render_page(
                             structure_id: None,
                             list_numbering: None,
                             html_figure_group: false,
+                            link_source: None,
+                            group_source: None,
+                            destination_sources: Vec::new(),
                         });
                         tag_stack.push(idx);
                     }
@@ -10298,6 +10881,7 @@ mod tests {
     fn orphan_definition_parts_are_normalized_into_list_items_in_source_order() {
         let record = |role: &str| TagRecord {
             page_index: 0,
+            content_stream: TagContentStream::Page,
             mcid: Some(0),
             role: role.to_string(),
             alt: None,
@@ -10311,6 +10895,9 @@ mod tests {
             structure_id: None,
             list_numbering: None,
             html_figure_group: false,
+            link_source: None,
+            group_source: None,
+            destination_sources: Vec::new(),
         };
         let normalized = normalize_definition_list_structure(vec![
             record("P"),

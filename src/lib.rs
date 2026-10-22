@@ -130,8 +130,10 @@ mod icc;
 mod image_native;
 #[cfg(test)]
 mod inline_line_height_tests;
+mod inline_opacity;
 mod jit;
 mod jpeg_native;
+mod link_semantics;
 mod math;
 mod metrics;
 mod native_shape;
@@ -143,6 +145,8 @@ mod parallel;
 mod pdf;
 mod pdf_encodings;
 mod pdf_identity;
+mod pdf_link_geometry;
+mod pdf_links;
 mod pdf_native;
 mod pdf_print_contract;
 mod pdf_profile;
@@ -329,6 +333,7 @@ struct CompiledTextConstraint {
     word_spacing: Pt,
     css_pixel_snap_metrics: bool,
     align: u8,
+    paint_origin: Option<Pt>,
 }
 
 #[derive(Clone)]
@@ -400,6 +405,10 @@ impl CompiledTextConstraint {
             "j" => b'j',
             _ => return None,
         };
+        let paint_origin = match fields.next() {
+            Some(value) => Some(Pt::from_milli_i64(value.parse().ok()?)),
+            None => None,
+        };
         fields.next().is_none().then_some(Self {
             origin_x,
             position_max_width,
@@ -410,6 +419,7 @@ impl CompiledTextConstraint {
             word_spacing,
             css_pixel_snap_metrics,
             align,
+            paint_origin,
         })
     }
 
@@ -433,7 +443,8 @@ impl CompiledTextConstraint {
             _ => self.origin_x,
         };
         if self.css_pixel_snap_metrics {
-            flowable::browser_registered_text_paint_x(x)
+            let origin = self.paint_origin.unwrap_or(x);
+            x + flowable::browser_registered_text_paint_x(origin) - origin
         } else {
             x
         }
@@ -804,6 +815,14 @@ impl CompiledFlowRecordProgram {
                         if new_text.contains(['\n', '\r', '\t'])
                             || constrained_width? > constraint.guard_max_width + Pt::from_f32(0.01)
                         {
+                            return None;
+                        }
+                        if constraint.paint_origin.is_some()
+                            && constrained_width? != constraint.old_width
+                        {
+                            // A source run shares placement with its sibling
+                            // words. A changed advance needs the ordinary
+                            // reflow path to reposition those siblings as well.
                             return None;
                         }
                         let slack =

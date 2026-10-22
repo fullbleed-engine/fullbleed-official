@@ -85,7 +85,19 @@ jobs:
         run: python tools/generate_base14_metrics.py --check
 
       - name: Run rust test suite
+        env:
+          FULLBLEED_LINK_TEST_OUTPUT: ${{ runner.temp }}/native-renderer-regressions/fixtures
+          FULLBLEED_COMPOSE_TEST_OUTPUT: ${{ runner.temp }}/native-renderer-regressions/composition
         run: cargo test --locked -- --nocapture
+
+      - name: Retain native link, form, and inline-effect specimens
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-renderer-regressions-${{ matrix.os }}
+          path: ${{ runner.temp }}/native-renderer-regressions
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Render on the native main-thread stack
         run: python tools/smoke_rust_stack.py --out "${{ runner.temp }}/fullbleed-stack-${{ github.run_id }}-${{ github.run_attempt }}"
@@ -836,6 +848,8 @@ jobs:
       - name: Run repository Python tests with the installed native extension
         env:
           FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+          FULLBLEED_FORM_TEST_OUTPUT: target/python315/tagged-forms
+          FULLBLEED_INLINE_OPACITY_TEST_OUTPUT: target/python315/inline-opacity
         run: python -m pytest tests -q -ra --junitxml target/python315/python-tests.xml
       - name: Generate and check PDFs and previews
         shell: bash

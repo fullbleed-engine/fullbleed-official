@@ -211,20 +211,25 @@ fn emit_compiled_text_constraint(
         TextAlign::Right => 'r',
         TextAlign::Justify => 'j',
     };
-    canvas.meta(
-        META_COMPILED_TEXT_CONSTRAINT_KEY,
-        format!(
-            "{}:{}:{}:{}:{}:{}:{}:{}:{align}",
-            origin_x.to_milli_i64(),
-            position_max_width.max(Pt::ZERO).to_milli_i64(),
-            position_width.max(Pt::ZERO).to_milli_i64(),
-            guard_max_width.max(Pt::ZERO).to_milli_i64(),
-            text_width.max(Pt::ZERO).to_milli_i64(),
-            letter_spacing.to_milli_i64(),
-            word_spacing.to_milli_i64(),
-            u8::from(css_pixel_snap_metrics),
-        ),
+    let mut constraint = format!(
+        "{}:{}:{}:{}:{}:{}:{}:{}:{align}",
+        origin_x.to_milli_i64(),
+        position_max_width.max(Pt::ZERO).to_milli_i64(),
+        position_width.max(Pt::ZERO).to_milli_i64(),
+        guard_max_width.max(Pt::ZERO).to_milli_i64(),
+        text_width.max(Pt::ZERO).to_milli_i64(),
+        letter_spacing.to_milli_i64(),
+        word_spacing.to_milli_i64(),
+        u8::from(css_pixel_snap_metrics),
     );
+    // Reflow must use the same source-run paint phase as ordinary drawing.
+    // The optional suffix preserves the existing constraint representation
+    // for runs that do not share an inline paint origin.
+    if let Some(origin) = canvas.inline_text_paint_origin() {
+        constraint.push(':');
+        constraint.push_str(&origin.to_milli_i64().to_string());
+    }
+    canvas.meta(META_COMPILED_TEXT_CONSTRAINT_KEY, constraint);
 }
 
 pub(crate) fn set_perf_context(perf: Option<Arc<PerfLogger>>, doc_id: Option<usize>) -> PerfGuard {
@@ -2545,6 +2550,20 @@ pub trait Flowable: FlowableClone + Send + Sync {
     /// at the inline boundary preserves CSS spacing across adjacent DOM nodes.
     fn inline_text_edge_letter_spacing(&self) -> Option<Pt> {
         None
+    }
+
+    /// Identity shared by word/space fragments from one source text run.
+    /// This is an in-memory grouping key, never an emitted command or ID.
+    fn inline_text_run_id(&self) -> Option<usize> {
+        None
+    }
+
+    /// Whether an anonymous inline row needs a paragraph owner. Graphics keep
+    /// their own Figure semantics; wrappers must preserve this classification.
+    fn needs_anonymous_paragraph(&self) -> bool {
+        !self.is_collapsible_inline_space()
+            && !self.is_layout_marker()
+            && !self.is_monolithic_replaced()
     }
 
     /// Resolved vertical margins for an in-flow block that can participate in
@@ -6262,7 +6281,12 @@ fn draw_registered_text_run(
         }
         (false, true) => canvas.draw_string_synthetic_italic(x, y, text, italic_shear),
         (false, false) if style.css_pixel_snap_metrics => {
-            canvas.draw_string(browser_registered_text_paint_x(x), y, text);
+            let origin = canvas.inline_text_paint_origin().unwrap_or(x);
+            canvas.draw_string(
+                x + browser_registered_text_paint_x(origin) - origin,
+                y,
+                text,
+            );
         }
         (false, false) => canvas.draw_string(x, y, text),
     }
@@ -6682,6 +6706,7 @@ pub struct Paragraph {
     break_spaces: bool,
     no_wrap: bool,
     measure_inline_word: bool,
+    inline_text_run: Option<Arc<()>>,
     inline_first_letter: bool,
     intrinsic_first_letter_indent: bool,
     suppress_first_line_indent: bool,
@@ -6718,6 +6743,7 @@ impl Paragraph {
             break_spaces: false,
             no_wrap: false,
             measure_inline_word: false,
+            inline_text_run: None,
             inline_first_letter: false,
             intrinsic_first_letter_indent: false,
             suppress_first_line_indent: false,
@@ -6750,6 +6776,11 @@ impl Paragraph {
 
     pub(crate) fn with_inline_word_measurement(mut self, enabled: bool) -> Self {
         self.measure_inline_word = enabled;
+        self
+    }
+
+    pub(crate) fn with_inline_text_run(mut self, run: Option<Arc<()>>) -> Self {
+        self.inline_text_run = run;
         self
     }
 
@@ -7097,7 +7128,34 @@ impl Paragraph {
                 resolve_font_stack_with_ranges(Some(registry), &self.style);
             let unrestricted = unicode_ranges.iter().all(Option::is_none);
             let shape_options = text_shape_options(&self.style);
-            let base = if fallbacks.is_empty() && unrestricted {
+            let base = if self.measure_inline_word {
+                if fallbacks.is_empty() && unrestricted {
+                    registry.measure_shaped_text_width(
+                        &primary,
+                        self.style.font_size,
+                        text,
+                        shape_options,
+                    )
+                } else {
+                    registry
+                        .split_text_by_fallbacks_with_ranges(
+                            &primary,
+                            &fallbacks,
+                            &unicode_ranges,
+                            text,
+                        )
+                        .iter()
+                        .fold(Pt::ZERO, |total, run| {
+                            total
+                                + registry.measure_shaped_text_width(
+                                    &run.font_name,
+                                    self.style.font_size,
+                                    &run.text,
+                                    shape_options,
+                                )
+                        })
+                }
+            } else if fallbacks.is_empty() && unrestricted {
                 registry.measure_text_width_with_shape_options(
                     &primary,
                     self.style.font_size,
@@ -7993,6 +8051,24 @@ impl Paragraph {
         if shadow.opacity <= 0.001 {
             return;
         }
+        // The shadow is a decorative copy, including fallback glyphs and
+        // filtered forms. Keep it out of both the reading tree and navigation.
+        canvas.with_navigation_suppressed(|canvas| {
+            canvas.begin_artifact(Some("Layout".into()));
+            self.paint_text_shadow(canvas, x, y, text, width, shadow);
+            canvas.end_marked_content();
+        });
+    }
+
+    fn paint_text_shadow(
+        &self,
+        canvas: &mut Canvas,
+        x: Pt,
+        y: Pt,
+        text: &str,
+        width: Pt,
+        shadow: &BoxShadowSpec,
+    ) {
         let base_x = x + self.text_shadow_length_to_pt(shadow.offset_x);
         let base_y = y + self.text_shadow_length_to_pt(shadow.offset_y);
         let blur = self.text_shadow_length_to_pt(shadow.blur).max(Pt::ZERO);
@@ -9080,6 +9156,12 @@ fn split_word_by_hard_hyphen(
 }
 
 impl Flowable for Paragraph {
+    fn inline_text_run_id(&self) -> Option<usize> {
+        self.inline_text_run
+            .as_ref()
+            .map(|run| Arc::as_ptr(run) as usize)
+    }
+
     fn is_inline_first_letter(&self) -> bool {
         self.inline_first_letter
     }
@@ -9435,6 +9517,7 @@ impl Flowable for Paragraph {
             break_spaces: self.break_spaces,
             no_wrap: self.no_wrap,
             measure_inline_word: self.measure_inline_word,
+            inline_text_run: self.inline_text_run.clone(),
             inline_first_letter: self.inline_first_letter,
             intrinsic_first_letter_indent: self.intrinsic_first_letter_indent,
             suppress_first_line_indent: self.suppress_first_line_indent,
@@ -9471,6 +9554,7 @@ impl Flowable for Paragraph {
             break_spaces: self.break_spaces,
             no_wrap: self.no_wrap,
             measure_inline_word: self.measure_inline_word,
+            inline_text_run: self.inline_text_run.clone(),
             inline_first_letter: false,
             intrinsic_first_letter_indent: self.intrinsic_first_letter_indent,
             suppress_first_line_indent: true,
@@ -10312,6 +10396,28 @@ impl CssLineBoxFlowable {
 }
 
 impl Flowable for CssLineBoxFlowable {
+    fn expands_inline_fill(&self) -> bool {
+        self.child.expands_inline_fill()
+    }
+
+    fn draw_expanding_inline_fill(
+        &self,
+        canvas: &mut Canvas,
+        x: Pt,
+        y: Pt,
+        width: Pt,
+        height: Pt,
+        line_origin_x: Pt,
+    ) {
+        let y = if self.compensate_nested_floor {
+            y
+        } else {
+            y + self.baseline_phase(y, width)
+        };
+        self.child
+            .draw_expanding_inline_fill(canvas, x, y, width, height, line_origin_x);
+    }
+
     fn is_inline_first_letter(&self) -> bool {
         self.child.is_inline_first_letter()
     }
@@ -10540,8 +10646,16 @@ impl Flowable for CssLineBoxFlowable {
         self.child.inline_font_extents(avail_width)
     }
 
+    fn needs_anonymous_paragraph(&self) -> bool {
+        self.child.needs_anonymous_paragraph()
+    }
+
     fn inline_text_edge_letter_spacing(&self) -> Option<Pt> {
         self.child.inline_text_edge_letter_spacing()
+    }
+
+    fn inline_text_run_id(&self) -> Option<usize> {
+        self.child.inline_text_run_id()
     }
 
     fn out_of_flow(&self) -> bool {
@@ -10885,8 +10999,16 @@ impl Flowable for CssPixelHeightFlowable {
         self.child.inline_font_extents(avail_width)
     }
 
+    fn needs_anonymous_paragraph(&self) -> bool {
+        self.child.needs_anonymous_paragraph()
+    }
+
     fn inline_text_edge_letter_spacing(&self) -> Option<Pt> {
         self.child.inline_text_edge_letter_spacing()
+    }
+
+    fn inline_text_run_id(&self) -> Option<usize> {
+        self.child.inline_text_run_id()
     }
 
     fn collapsible_block_margins(&self, avail_width: Pt) -> Option<(Pt, Pt)> {
@@ -11276,6 +11398,7 @@ impl Flowable for ScreenReaderTextFlowable {
 
 #[derive(Debug, Clone)]
 pub(crate) struct CollapsibleSpaceFlowable {
+    inline_text_run: Option<Arc<()>>,
     width: Pt,
     letter_spacing: Pt,
     height: Pt,
@@ -11288,12 +11411,30 @@ pub(crate) struct CollapsibleSpaceFlowable {
 
 impl CollapsibleSpaceFlowable {
     pub(crate) fn new(style: TextStyle, font_registry: Option<Arc<FontRegistry>>) -> Self {
+        Self::with_shaping_context(style, font_registry, "", "")
+    }
+
+    pub(crate) fn with_shaping_context(
+        style: TextStyle,
+        font_registry: Option<Arc<FontRegistry>>,
+        before: &str,
+        after: &str,
+    ) -> Self {
         let letter_spacing = style.letter_spacing;
         let probe = Paragraph::new(" ")
             .with_inline_word_measurement(true)
             .with_style(style)
             .with_font_registry(font_registry);
-        let width = probe.measure_text_width(" ").max(Pt::ZERO);
+        // Shaping a space alone loses kerning against the preceding/following
+        // word (including GPOS adjustments in embedded fonts). Keep the same
+        // advance as an unsplit text run while still exposing the break point.
+        let context = format!("{before} {after}");
+        let width = (probe.measure_text_width(&context)
+            - probe.measure_text_width(before)
+            - probe.measure_text_width(after)
+            - letter_spacing * i32::from(!before.is_empty())
+            - letter_spacing * i32::from(!after.is_empty()))
+        .max(Pt::ZERO);
         let height = probe.effective_line_height().max(Pt::ZERO);
         let baseline = probe.first_baseline(width).unwrap_or(height);
         let inline_ascent = probe.inline_box_ascent(width).unwrap_or(baseline);
@@ -11307,6 +11448,7 @@ impl CollapsibleSpaceFlowable {
         // at line edges before drawing these children.
         let decoration_renderer = (!probe.style.text_decoration.is_none()).then(|| Box::new(probe));
         Self {
+            inline_text_run: None,
             width,
             letter_spacing,
             height,
@@ -11317,9 +11459,20 @@ impl CollapsibleSpaceFlowable {
             decoration_renderer,
         }
     }
+
+    pub(crate) fn with_inline_text_run(mut self, run: Option<Arc<()>>) -> Self {
+        self.inline_text_run = run;
+        self
+    }
 }
 
 impl Flowable for CollapsibleSpaceFlowable {
+    fn inline_text_run_id(&self) -> Option<usize> {
+        self.inline_text_run
+            .as_ref()
+            .map(|run| Arc::as_ptr(run) as usize)
+    }
+
     fn inline_bidi_text(&self) -> Option<Cow<'_, str>> {
         Some(Cow::Borrowed(" "))
     }
@@ -11369,6 +11522,12 @@ impl Flowable for CollapsibleSpaceFlowable {
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, _avail_height: Pt) {
         canvas.meta(META_READING_TEXT_KEY, " ");
+        canvas.record_link_box(
+            x,
+            y + self.baseline - self.font_extents.0,
+            avail_width,
+            self.font_extents.0 + self.font_extents.1,
+        );
         if let Some(renderer) = self.decoration_renderer.as_ref() {
             let draw_y = y + self.baseline - renderer.style.font_size;
             let decoration_y = draw_y + renderer.propagated_decoration_baseline_shift;
@@ -12825,6 +12984,10 @@ impl Flowable for SvgFlowable {
         // rescales individual fragments independently.
         canvas.save_state();
         canvas.clip_rect(x, y, area.width, area.height);
+        // SVG images may paint as ordinary vector paths with no DrawImage or
+        // DrawForm command. The replaced element's viewport is still clickable,
+        // including object-fit letterboxing and each visible page fragment.
+        canvas.record_link_box(x, y, area.width, area.height);
         if self.mix_blend_mode != MixBlendMode::Normal {
             let form_id = self.form_id(&surface, true);
             canvas.define_isolated_form(
@@ -19114,6 +19277,7 @@ struct InlineLineLayout {
     parent_font_descent: Pt,
     items: Vec<InlineItemLayout>,
     reading_break_after: bool,
+    source_end: usize,
 }
 
 #[derive(Clone)]
@@ -19123,6 +19287,13 @@ struct InlineLayoutCache {
     total_height: Pt,
     lines: Vec<InlineLineLayout>,
     leading_float: Option<InlineFloatLayout>,
+    bidi_context: Option<Arc<InlineBidiContext>>,
+}
+
+#[derive(Clone)]
+struct InlineBidiContext {
+    levels: Vec<unicode_bidi::Level>,
+    child_starts: Vec<usize>,
 }
 
 #[derive(Clone)]
@@ -19315,8 +19486,16 @@ impl Flowable for InlineBackgroundFlowable {
         self.child.inline_font_extents(avail_width)
     }
 
+    fn needs_anonymous_paragraph(&self) -> bool {
+        self.child.needs_anonymous_paragraph()
+    }
+
     fn inline_text_edge_letter_spacing(&self) -> Option<Pt> {
         self.child.inline_text_edge_letter_spacing()
+    }
+
+    fn inline_text_run_id(&self) -> Option<usize> {
+        self.child.inline_text_run_id()
     }
 
     fn pagination(&self) -> Pagination {
@@ -19356,11 +19535,11 @@ pub struct InlineBlockLayoutFlowable {
     no_wrap: bool,
     css_pixel_snap: bool,
     anonymous_block_context: bool,
+    tag_role: Option<&'static str>,
     bidi_direction: DirectionMode,
     bidi_align: TextAlign,
     bidi_levels: Option<Arc<[unicode_bidi::Level]>>,
     pagination: Pagination,
-    continued_float_paragraph: bool,
     layout_cache: Arc<Mutex<Option<InlineLayoutCache>>>,
 }
 
@@ -19377,11 +19556,11 @@ impl InlineBlockLayoutFlowable {
             no_wrap: false,
             css_pixel_snap: false,
             anonymous_block_context: false,
+            tag_role: None,
             bidi_direction: DirectionMode::Ltr,
             bidi_align: TextAlign::Left,
             bidi_levels: None,
             pagination: Pagination::default(),
-            continued_float_paragraph: false,
             layout_cache: Arc::new(Mutex::new(None)),
         }
     }
@@ -19416,6 +19595,14 @@ impl InlineBlockLayoutFlowable {
         self
     }
 
+    pub(crate) fn with_text_group_role(mut self, role: Option<&'static str>) -> Self {
+        // An image-only inline row already has Figure semantics. Adding a
+        // paragraph around it would separate that graphic from its caption
+        // and hide the image's authored alternative from figure grouping.
+        self.tag_role = role.filter(|_| self.needs_anonymous_paragraph());
+        self
+    }
+
     fn intrinsic_inline_width(&self, min_content: bool, avail_width: Pt) -> Option<Pt> {
         let min_content = min_content && !self.no_wrap;
         let mut line_width = Pt::ZERO;
@@ -19424,6 +19611,8 @@ impl InlineBlockLayoutFlowable {
         let mut float_width = Pt::ZERO;
         let mut previous: Option<&dyn Flowable> = None;
         let mut last_positive_is_space = None;
+        let mut run_id = None;
+        let mut run_start = Pt::ZERO;
         for (child, _) in &self.children {
             if child.out_of_flow() {
                 if let Some((_, size)) = child.float_layout_size(avail_width, huge_pt()) {
@@ -19438,10 +19627,15 @@ impl InlineBlockLayoutFlowable {
                 content_width = Pt::ZERO;
                 previous = None;
                 last_positive_is_space = None;
+                run_id = None;
                 continue;
             }
             if space && last_positive_is_space.is_none_or(|was_space| was_space) {
                 continue;
+            }
+            let next_run = child.inline_text_run_id();
+            if self.css_pixel_snap && run_id.is_some() && next_run != run_id {
+                line_width = run_start + ceil_to_css_layout_unit(line_width - run_start);
             }
             let mut width = if min_content {
                 child.flex_min_content_width(avail_width)?
@@ -19449,11 +19643,12 @@ impl InlineBlockLayoutFlowable {
                 child.intrinsic_width()?
             }
             .max(Pt::ZERO);
-            // Intrinsic sizing must reserve the advances the shared line
-            // builder will actually use, including fragment-edge spacing and
-            // its CSS layout-unit rounding. Otherwise an exact-fit flex item
-            // wraps again when drawn into its own max-content width.
-            if self.css_pixel_snap && child.inline_text_edge_letter_spacing().is_some() {
+            // Word fragments retain their source run's advances. Quantize at
+            // the run boundary, exactly as the line builder does below.
+            if self.css_pixel_snap
+                && next_run.is_none()
+                && child.inline_text_edge_letter_spacing().is_some()
+            {
                 width = ceil_to_css_layout_unit(width);
             }
             if let Some(prior) = previous {
@@ -19466,9 +19661,17 @@ impl InlineBlockLayoutFlowable {
                     .unwrap_or(Pt::ZERO);
                 line_width += self.gap + boundary_spacing;
             }
+            if next_run != run_id || previous.is_none() {
+                run_start = line_width;
+            }
+            run_id = next_run;
             line_width += width;
             if !space {
-                content_width = line_width;
+                content_width = if self.css_pixel_snap && run_id.is_some() {
+                    run_start + ceil_to_css_layout_unit(line_width - run_start)
+                } else {
+                    line_width
+                };
             }
             if width > Pt::ZERO {
                 last_positive_is_space = Some(space);
@@ -19481,6 +19684,48 @@ impl InlineBlockLayoutFlowable {
         } else {
             text_width + float_width
         })
+    }
+
+    fn finish_inline_text_run(&self, items: &mut [InlineItemLayout]) -> Option<Pt> {
+        let last = items.last()?;
+        let run_id = self.children[last.idx].0.inline_text_run_id()?;
+        let start = items
+            .iter()
+            .rev()
+            .take_while(|item| self.children[item.idx].0.inline_text_run_id() == Some(run_id))
+            .last()?
+            .x_off;
+        let end = last.x_off + last.size.width;
+        let rounded_end = start + ceil_to_css_layout_unit(end - start);
+        // Put only the final layout-unit remainder on the terminal fragment.
+        // Reordering and intrinsic sizing then see the same total advance.
+        items.last_mut()?.size.width += rounded_end - end;
+        Some(rounded_end)
+    }
+
+    fn split_inline_children(
+        &self,
+        split_index: usize,
+        layout: &InlineLayoutCache,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        if split_index == 0 || split_index >= self.children.len() {
+            return None;
+        }
+        let mut first = self.clone();
+        first.children = self.children[..split_index].to_vec();
+        first.layout_cache = Arc::new(Mutex::new(None));
+        let mut second = self.clone();
+        second.children = self.children[split_index..].to_vec();
+        second.layout_cache = Arc::new(Mutex::new(None));
+        if let Some(context) = &layout.bidi_context {
+            // Resolve direction over the source paragraph, not independently
+            // over each page. A continuation can begin inside an override or
+            // with neutrals whose strong directional context is on page one.
+            let offset = context.child_starts[split_index];
+            first.bidi_levels = Some(Arc::from(&context.levels[..offset]));
+            second.bidi_levels = Some(Arc::from(&context.levels[offset..]));
+        }
+        Some((Box::new(first), Box::new(second)))
     }
 
     fn compute_layout(&self, avail_width: Pt) -> InlineLayoutCache {
@@ -19580,6 +19825,9 @@ impl InlineBlockLayoutFlowable {
             }
             if line_items.is_empty() {
                 return;
+            }
+            if css_pixel_snap {
+                self.finish_inline_text_run(line_items);
             }
             if let Some(last) = line_items.last() {
                 line_width = last.x_off + last.size.width;
@@ -19828,6 +20076,7 @@ impl InlineBlockLayoutFlowable {
                 baseline: line_baseline,
                 parent_font_ascent,
                 parent_font_descent,
+                source_end: items.last().map_or(0, |item| item.idx + 1),
                 items,
                 reading_break_after: false,
             });
@@ -19865,6 +20114,7 @@ impl InlineBlockLayoutFlowable {
                         parent_font_descent: Pt::ZERO,
                         items: Vec::new(),
                         reading_break_after: false,
+                        source_end: idx + 1,
                     });
                 } else {
                     line_height = line_height.max(break_height);
@@ -19880,6 +20130,7 @@ impl InlineBlockLayoutFlowable {
                 }
                 if let Some(line) = lines.last_mut() {
                     line.reading_break_after = true;
+                    line.source_end = idx + 1;
                 }
                 line_width = Pt::ZERO;
                 raw_line_width = Pt::ZERO;
@@ -19899,8 +20150,19 @@ impl InlineBlockLayoutFlowable {
                 }
             }
             let raw_width = size.width;
-            if css_pixel_snap && child.inline_text_edge_letter_spacing().is_some() {
-                size.width = ceil_to_css_layout_unit(size.width);
+            let run_id = child.inline_text_run_id();
+            if css_pixel_snap {
+                let previous_run = line_items
+                    .last()
+                    .and_then(|item| self.children[item.idx].0.inline_text_run_id());
+                if previous_run.is_some() && previous_run != run_id {
+                    if let Some(end) = self.finish_inline_text_run(&mut line_items) {
+                        line_width = end;
+                    }
+                }
+                if run_id.is_none() && child.inline_text_edge_letter_spacing().is_some() {
+                    size.width = ceil_to_css_layout_unit(size.width);
+                }
             }
             let text_boundary_spacing = line_items
                 .last()
@@ -20044,6 +20306,12 @@ impl InlineBlockLayoutFlowable {
             total_height,
             lines,
             leading_float,
+            bidi_context: bidi.map(|info| {
+                Arc::new(InlineBidiContext {
+                    levels: info.levels,
+                    child_starts: bidi_ranges.iter().map(|range| range.start).collect(),
+                })
+            }),
         }
     }
 
@@ -20107,6 +20375,12 @@ fn draw_inline_child_with_compiled_parent_width(
 }
 
 impl Flowable for InlineBlockLayoutFlowable {
+    fn needs_anonymous_paragraph(&self) -> bool {
+        self.children
+            .iter()
+            .any(|(child, _)| child.needs_anonymous_paragraph())
+    }
+
     fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
         let mut resolved = self.clone();
         resolved.bidi_levels = Some(Arc::from(levels));
@@ -20178,14 +20452,7 @@ impl Flowable for InlineBlockLayoutFlowable {
         if !matches!(policy, FootnotePolicy::Line) {
             return None;
         }
-
-        let mut first = self.clone();
-        first.children = self.children[..split_index].to_vec();
-        first.layout_cache = Arc::new(Mutex::new(None));
-        let mut second = self.clone();
-        second.children = self.children[split_index..].to_vec();
-        second.layout_cache = Arc::new(Mutex::new(None));
-        Some((Box::new(first), Box::new(second)))
+        self.split_inline_children(split_index, &layout)
     }
 
     fn has_out_of_flow_descendant(&self) -> bool {
@@ -20327,9 +20594,9 @@ impl Flowable for InlineBlockLayoutFlowable {
         avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
         let layout = self.cached_layout(avail_width);
-        if !self.continued_float_paragraph && layout.leading_float.is_none() {
-            return None;
-        }
+        // These are lines in an inline formatting context, including ordinary
+        // styled spans and links. Pagination is not limited to paragraphs with
+        // a floated initial. Atomic inline children still stay on their line.
         let mut height = Pt::ZERO;
         let mut fitting = 0;
         for line in &layout.lines {
@@ -20363,26 +20630,20 @@ impl Flowable for InlineBlockLayoutFlowable {
             // first fragment. Continuations must not repeat or clip its box.
             return None;
         }
-        let split_index = layout.lines[split_at..]
-            .iter()
-            .flat_map(|line| line.items.iter().map(|item| item.idx))
-            .min()?;
-        if split_index == 0 || split_index >= self.children.len() {
-            return None;
-        }
-        let mut first = self.clone();
-        first.children = self.children[..split_index].to_vec();
-        first.layout_cache = Arc::new(Mutex::new(None));
-        let mut second = self.clone();
-        second.children = self.children[split_index..].to_vec();
-        second.continued_float_paragraph = true;
-        second.layout_cache = Arc::new(Mutex::new(None));
-        Some((Box::new(first), Box::new(second)))
+        // Empty lines have no painted item. Split at the consumed source
+        // boundary so their hard breaks cannot migrate into the first page.
+        let split_index = layout.lines[split_at - 1].source_end;
+        self.split_inline_children(split_index, &layout)
     }
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
         let perf = perf_start();
         let layout = self.cached_layout(avail_width);
+        if let Some(role) = self.tag_role {
+            // One logical owner for the complete anonymous text run. Inline
+            // styles, links and effect forms retain their own child semantics.
+            canvas.begin_tag(role, None, None, None, None, true);
+        }
         if let Some(initial) = &layout.leading_float {
             self.children[initial.idx]
                 .0
@@ -20392,6 +20653,15 @@ impl Flowable for InlineBlockLayoutFlowable {
         for line in &layout.lines {
             cursor_y += line.clearance_before;
             let mut paint_items: Vec<&InlineItemLayout> = line.items.iter().collect();
+            let mut run_origins = HashMap::<usize, Pt>::new();
+            for item in &line.items {
+                if let Some(run) = self.children[item.idx].0.inline_text_run_id() {
+                    run_origins
+                        .entry(run)
+                        .and_modify(|origin| *origin = (*origin).min(x + item.x_off))
+                        .or_insert(x + item.x_off);
+                }
+            }
             paint_items.sort_by(|a, b| {
                 let a_child = &self.children[a.idx].0;
                 let b_child = &self.children[b.idx].0;
@@ -20415,6 +20685,11 @@ impl Flowable for InlineBlockLayoutFlowable {
                 .then(|| child.with_propagated_text_decoration_baseline_shift(decoration_shift));
                 let child = rebased_decoration.as_deref().unwrap_or(child);
                 let item_x = x + item.x_off;
+                let run_origin = child
+                    .inline_text_run_id()
+                    .and_then(|run| run_origins.get(&run))
+                    .copied();
+                let previous_origin = canvas.replace_inline_text_paint_origin(run_origin);
                 let item_width = item.size.width.min(avail_width);
                 let item_height = if child.uses_parent_content_height() {
                     avail_height
@@ -20445,11 +20720,15 @@ impl Flowable for InlineBlockLayoutFlowable {
                 } else {
                     child.draw(canvas, item_x, cursor_y + y_off, item_width, item_height);
                 }
+                canvas.replace_inline_text_paint_origin(previous_origin);
             }
             if line.reading_break_after {
                 canvas.meta(META_READING_TEXT_KEY, "\n");
             }
             cursor_y = cursor_y + line.line_height;
+        }
+        if self.tag_role.is_some() {
+            canvas.end_tag();
         }
         perf_end("layout.inline.draw", perf);
     }
@@ -20707,6 +20986,85 @@ mod inline_baseline_tests {
                 text
             );
         }
+    }
+
+    #[test]
+    fn link_semantics_pagination_preserves_resolved_bidi_context() {
+        let text = "aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss tt uu vv ww xx";
+        let mut style = TextStyle::default();
+        style.font_name = "Courier".into();
+        style.font_size = Pt::from_f32(10.0);
+        style.line_height = Pt::from_f32(12.0);
+        style.line_height_is_auto = false;
+        let mut children: Vec<(Box<dyn Flowable>, VerticalAlign)> = Vec::new();
+        for (index, word) in text.split(' ').enumerate() {
+            if index > 0 {
+                children.push((
+                    Box::new(CollapsibleSpaceFlowable::new(style.clone(), None)),
+                    VerticalAlign::Baseline,
+                ));
+            }
+            children.push((
+                Box::new(Paragraph::new(word).with_style(style.clone())),
+                VerticalAlign::Baseline,
+            ));
+        }
+        let mut story = InlineBlockLayoutFlowable::new_pt(children, Pt::ZERO, None);
+        // The surrounding inline context can supply a CSS bidi override. Its
+        // resolved levels must survive a page break even without control bytes
+        // in the fragment itself.
+        story.bidi_levels = Some(Arc::from(vec![unicode_bidi::Level::rtl(); text.len()]));
+        let page = Size {
+            width: Pt::from_f32(90.0),
+            height: Pt::from_f32(200.0),
+        };
+        let (head, tail) = story.split(page.width, Pt::from_f32(24.0)).unwrap();
+        let height = head.wrap(page.width, page.height).height;
+        let mut whole = Canvas::new(page);
+        story.draw(&mut whole, Pt::ZERO, Pt::ZERO, page.width, page.height);
+        let mut fragmented = Canvas::new(page);
+        head.draw(&mut fragmented, Pt::ZERO, Pt::ZERO, page.width, height);
+        tail.draw(
+            &mut fragmented,
+            Pt::ZERO,
+            height,
+            page.width,
+            page.height - height,
+        );
+        let text_commands = |canvas: Canvas| {
+            canvas.finish().pages[0]
+                .commands
+                .iter()
+                .filter_map(|command| {
+                    if let Command::DrawString { x, y, text } = command {
+                        Some((*x, *y, text.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(text_commands(fragmented), text_commands(whole));
+    }
+
+    #[test]
+    fn link_semantics_pagination_does_not_split_an_atomic_inline_child() {
+        let atomic = ContainerFlowable::new(
+            vec![Box::new(Paragraph::new(
+                "A long atomic inline block that contains several lines of text and must move as a single box.",
+            ))],
+            12.0,
+            12.0,
+        );
+        let story = InlineBlockLayoutFlowable::new_pt(
+            vec![(Box::new(atomic), VerticalAlign::Baseline)],
+            Pt::ZERO,
+            None,
+        );
+        let width = Pt::from_f32(80.0);
+        let height = story.wrap(width, super::huge_pt()).height;
+        assert!(height > Pt::from_f32(24.0));
+        assert!(story.split(width, Pt::from_f32(24.0)).is_none());
     }
 
     #[derive(Clone)]
@@ -21752,6 +22110,42 @@ mod inline_baseline_tests {
             }
         );
         assert_eq!(layout.intrinsic_width(), Some(Pt::from_f32(10.0)));
+    }
+
+    #[test]
+    fn link_semantics_pagination_keeps_blank_lines_in_their_page_fragments() {
+        let line_height = Pt::from_f32(12.0);
+        let run = || BaselineProbe {
+            size: Size {
+                width: Pt::from_f32(10.0),
+                height: line_height,
+            },
+            baseline: Pt::from_f32(9.0),
+        };
+        let mut children: Vec<(Box<dyn Flowable>, VerticalAlign)> =
+            vec![(Box::new(run()), VerticalAlign::Baseline)];
+        for _ in 0..5 {
+            children.push((
+                Box::new(HardBreakProbe { line_height }),
+                VerticalAlign::Baseline,
+            ));
+        }
+        children.push((Box::new(run()), VerticalAlign::Baseline));
+        let story = InlineBlockLayoutFlowable::new_pt(children, Pt::ZERO, None);
+        let width = Pt::from_f32(100.0);
+        assert_eq!(
+            story.wrap(width, super::huge_pt()).height,
+            Pt::from_f32(72.0)
+        );
+        let (head, tail) = story.split(width, Pt::from_f32(24.0)).unwrap();
+        assert_eq!(
+            head.wrap(width, super::huge_pt()).height,
+            Pt::from_f32(24.0)
+        );
+        assert_eq!(
+            tail.wrap(width, super::huge_pt()).height,
+            Pt::from_f32(48.0)
+        );
     }
 
     #[test]
@@ -35388,6 +35782,13 @@ impl Flowable for ContainerFlowable {
         Some(Box::new(resolved))
     }
 
+    fn needs_anonymous_paragraph(&self) -> bool {
+        self.state
+            .children
+            .iter()
+            .any(|child| child.needs_anonymous_paragraph())
+    }
+
     fn inline_bidi_text(&self) -> Option<Cow<'_, str>> {
         if !self.state.inline_bidi_transparent {
             return None;
@@ -36873,6 +37274,7 @@ impl Flowable for ContainerFlowable {
             grouped.state.opacity = 1.0;
 
             let mut temp = Canvas::new(page_size);
+            temp.inherit_navigation_context(canvas);
             grouped.draw(&mut temp, x, y, avail_width, avail_height);
             let doc = temp.finish();
             let commands = doc
@@ -36917,6 +37319,7 @@ impl Flowable for ContainerFlowable {
             grouped.state.isolation = false;
 
             let mut temp = Canvas::new(page_size);
+            temp.inherit_navigation_context(canvas);
             grouped.draw(&mut temp, x, y, avail_width, avail_height);
             let doc = temp.finish();
             let commands = doc
@@ -37113,6 +37516,7 @@ impl Flowable for ContainerFlowable {
             grouped.state.clip_path_backdrop_root_group_suppressed = true;
 
             let mut temp = Canvas::new(page_size);
+            temp.inherit_navigation_context(canvas);
             grouped.draw(&mut temp, x, y, avail_width, avail_height);
             let doc = temp.finish();
             let commands = doc
@@ -37199,6 +37603,7 @@ impl Flowable for ContainerFlowable {
             grouped.state.backdrop_filter = None;
 
             let mut temp = Canvas::new(page_size);
+            temp.inherit_navigation_context(canvas);
             grouped.draw(&mut temp, x, y, avail_width, avail_height);
             let doc = temp.finish();
             let commands = doc
@@ -37237,6 +37642,7 @@ impl Flowable for ContainerFlowable {
             grouped.state.will_change_backdrop_root_group_suppressed = true;
 
             let mut temp = Canvas::new(page_size);
+            temp.inherit_navigation_context(canvas);
             grouped.draw(&mut temp, x, y, avail_width, avail_height);
             let doc = temp.finish();
             let commands = doc
@@ -37448,6 +37854,7 @@ impl Flowable for ContainerFlowable {
             grouped.state.mask_backdrop_root_group_suppressed = true;
 
             let mut temp = Canvas::new(page_size);
+            temp.inherit_navigation_context(canvas);
             grouped.draw(&mut temp, x, y, avail_width, avail_height);
             let doc = temp.finish();
             let commands = doc
@@ -37663,6 +38070,15 @@ impl Flowable for ContainerFlowable {
         let clip_path_applied = self.apply_resolved_clip_path(canvas, x, y, &cache);
 
         let paint_self = self.state.self_visible;
+
+        if paint_self {
+            canvas.record_link_box(
+                border_box_x,
+                border_box_y,
+                border_box_width,
+                border_box_height,
+            );
+        }
 
         if paint_self {
             if let Some(backdrop_filter) = self.state.backdrop_filter.as_ref() {
@@ -40305,6 +40721,7 @@ pub struct MetaFlowable {
     metadata: Arc<Vec<(String, String)>>,
     bidi_prefix: &'static str,
     bidi_suffix: &'static str,
+    inline_opacity: Option<crate::inline_opacity::InlineOpacity>,
 }
 
 impl MetaFlowable {
@@ -40314,6 +40731,7 @@ impl MetaFlowable {
             metadata: Arc::new(metadata),
             bidi_prefix: "",
             bidi_suffix: "",
+            inline_opacity: None,
         }
     }
 
@@ -40324,6 +40742,14 @@ impl MetaFlowable {
     ) -> Self {
         self.bidi_prefix = prefix;
         self.bidi_suffix = suffix;
+        self
+    }
+
+    pub(crate) fn with_inline_opacity(
+        mut self,
+        effect: crate::inline_opacity::InlineOpacity,
+    ) -> Self {
+        self.inline_opacity = Some(effect);
         self
     }
 
@@ -40475,6 +40901,9 @@ impl Flowable for MetaFlowable {
         height: Pt,
         line_origin_x: Pt,
     ) {
+        if let Some(effect) = self.inline_opacity {
+            canvas.begin_inline_opacity(effect);
+        }
         canvas.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "flowable");
         for (key, value) in self.metadata.iter() {
             canvas.meta(key.clone(), value.clone());
@@ -40483,6 +40912,9 @@ impl Flowable for MetaFlowable {
             .draw_expanding_inline_fill(canvas, x, y, width, height, line_origin_x);
         self.record_authored_bounds(canvas, x, y, width, height, Size { width, height });
         canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
+        if let Some(effect) = self.inline_opacity {
+            canvas.end_inline_opacity(effect);
+        }
     }
     fn with_sliced_decoration_block_extension(&self, extra: Pt) -> Box<dyn Flowable> {
         let mut extended = self.clone();
@@ -40492,8 +40924,16 @@ impl Flowable for MetaFlowable {
         Box::new(extended)
     }
 
+    fn needs_anonymous_paragraph(&self) -> bool {
+        self.child.needs_anonymous_paragraph()
+    }
+
     fn inline_text_edge_letter_spacing(&self) -> Option<Pt> {
         self.child.inline_text_edge_letter_spacing()
+    }
+
+    fn inline_text_run_id(&self) -> Option<usize> {
+        self.child.inline_text_run_id()
     }
 
     fn authoring_paint_bounds(
@@ -40629,6 +41069,9 @@ impl Flowable for MetaFlowable {
     }
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
+        if let Some(effect) = self.inline_opacity {
+            canvas.begin_inline_opacity(effect);
+        }
         canvas.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "flowable");
         for (k, v) in self.metadata.iter() {
             canvas.meta(k.clone(), v.clone());
@@ -40643,9 +41086,15 @@ impl Flowable for MetaFlowable {
             self.child.wrap(avail_width, avail_height),
         );
         canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
+        if let Some(effect) = self.inline_opacity {
+            canvas.end_inline_opacity(effect);
+        }
     }
 
     fn draw_stretched(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
+        if let Some(effect) = self.inline_opacity {
+            canvas.begin_inline_opacity(effect);
+        }
         canvas.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "flowable");
         for (key, value) in self.metadata.iter() {
             canvas.meta(key.clone(), value.clone());
@@ -40661,6 +41110,9 @@ impl Flowable for MetaFlowable {
             self.child.wrap(avail_width, avail_height),
         );
         canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
+        if let Some(effect) = self.inline_opacity {
+            canvas.end_inline_opacity(effect);
+        }
     }
 
     fn draw_flexed_width(
@@ -40672,6 +41124,9 @@ impl Flowable for MetaFlowable {
         avail_height: Pt,
         stretch_cross_axis: bool,
     ) {
+        if let Some(effect) = self.inline_opacity {
+            canvas.begin_inline_opacity(effect);
+        }
         canvas.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "flowable");
         for (key, value) in self.metadata.iter() {
             canvas.meta(key.clone(), value.clone());
@@ -40687,6 +41142,9 @@ impl Flowable for MetaFlowable {
             self.child.wrap_flexed_width(avail_width, avail_height),
         );
         canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
+        if let Some(effect) = self.inline_opacity {
+            canvas.end_inline_opacity(effect);
+        }
     }
 
     fn draw_flexed_width_with_containing_block(
@@ -40699,6 +41157,9 @@ impl Flowable for MetaFlowable {
         avail_height: Pt,
         stretch_cross_axis: bool,
     ) {
+        if let Some(effect) = self.inline_opacity {
+            canvas.begin_inline_opacity(effect);
+        }
         canvas.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "flowable");
         for (key, value) in self.metadata.iter() {
             canvas.meta(key.clone(), value.clone());
@@ -40725,6 +41186,9 @@ impl Flowable for MetaFlowable {
             ),
         );
         canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
+        if let Some(effect) = self.inline_opacity {
+            canvas.end_inline_opacity(effect);
+        }
     }
 
     fn draw_flexed_height(
@@ -40735,6 +41199,9 @@ impl Flowable for MetaFlowable {
         avail_width: Pt,
         avail_height: Pt,
     ) {
+        if let Some(effect) = self.inline_opacity {
+            canvas.begin_inline_opacity(effect);
+        }
         canvas.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "flowable");
         for (key, value) in self.metadata.iter() {
             canvas.meta(key.clone(), value.clone());
@@ -40745,6 +41212,9 @@ impl Flowable for MetaFlowable {
         size.height = avail_height;
         self.record_authored_bounds(canvas, x, y, avail_width, avail_height, size);
         canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
+        if let Some(effect) = self.inline_opacity {
+            canvas.end_inline_opacity(effect);
+        }
     }
 
     fn accepts_stretched_height(&self) -> bool {
@@ -41402,8 +41872,16 @@ impl Flowable for RelativePositionedFlowable {
         self.child.inline_bidi_text()
     }
 
+    fn needs_anonymous_paragraph(&self) -> bool {
+        self.child.needs_anonymous_paragraph()
+    }
+
     fn inline_text_edge_letter_spacing(&self) -> Option<Pt> {
         self.child.inline_text_edge_letter_spacing()
+    }
+
+    fn inline_text_run_id(&self) -> Option<usize> {
+        self.child.inline_text_run_id()
     }
 
     fn has_out_of_flow_descendant(&self) -> bool {
