@@ -1,6 +1,6 @@
 # Component authoring: the next iteration
 
-> Current release status, reviewed 2026-10-21: the component alpha is merged into
+> Release status at the 2026-10-21 review: the component alpha was merged into
 > `master` and published as **2.6.0a12**. The stable package is **2.5.34**.
 > [Read the current stabilization decision and remaining gates](https://docs.fullbleed.dev/guides/component-status/).
 > The dated implementation observations below retain their original scope.

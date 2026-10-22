@@ -2,7 +2,7 @@
 
 This example compares the existing `fullbleed.ui` authoring API with the intended
 public `fullbleed.components` namespace introduced in **2.6.0a12**. Install it
-explicitly with `python -m pip install --pre "fullbleed==2.6.0a12"`, or build this
+explicitly with `python -m pip install --pre "fullbleed==2.6.0a13"`, or build this
 checkout. The component API remains alpha; the earlier
 `fullbleed.ui.experimental` path still exposes the same objects.
 
