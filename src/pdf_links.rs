@@ -1269,6 +1269,191 @@ mod tests {
     }
 
     #[test]
+    fn pdf_links_block_destinations_do_not_depend_on_painted_content() {
+        for (suffix, profile) in [
+            ("plain", crate::PdfProfile::None),
+            ("ua2", crate::PdfProfile::PdfUa2),
+        ] {
+            let engine = crate::FullBleed::builder()
+                .register_font_file("python/fullbleed_assets/fonts/NotoSans-Regular.ttf")
+                .pdf_profile(profile)
+                .document_lang("en-US")
+                .document_title("Unpainted destination")
+                .build()
+                .unwrap();
+            for (name, style) in [
+                ("visible", ""),
+                ("transparent", "opacity:0"),
+                ("hidden", "visibility:hidden"),
+                ("clipped", "clip-path:inset(100%)"),
+                ("filtered", "filter:opacity(0)"),
+                (
+                    "masked",
+                    "mask-image:linear-gradient(transparent,transparent)",
+                ),
+                ("removed", "display:none"),
+            ] {
+                let html = format!(
+                    r##"<p><a href="#target">Go to target</a></p><p id="target" style="{style}">Target</p><p>After target</p>"##
+                );
+                let css = "@page{size:240pt 240pt;margin:20pt}body{font-family:'Noto Sans';font-size:12pt;line-height:18pt}p{margin:0}";
+                let compiled = engine.compile_document(&html, css).unwrap();
+                let links = collect(&compiled.document);
+                assert_eq!(
+                    links.destinations.contains_key("target"),
+                    name != "removed",
+                    "{name}-{suffix}"
+                );
+                if name != "removed" {
+                    let (page, point) = links.destinations["target"];
+                    assert_eq!(page, 0);
+                    assert!((point.x - 20.0).abs() < 0.001, "{name}-{suffix}: {point:?}");
+                    assert!(
+                        (point.y - 202.0).abs() < 0.001,
+                        "{name}-{suffix}: {point:?}"
+                    );
+                }
+                let bytes = compiled.render_to_buffer().unwrap();
+                let pdf = String::from_utf8_lossy(&bytes);
+                assert_eq!(links.pages[0].links.len(), usize::from(name != "removed"));
+                assert_eq!(pdf.contains("/Subtype /Link "), name != "removed");
+                retain_pdf(&format!("block-destination-{name}-{suffix}"), &bytes);
+            }
+        }
+    }
+
+    #[test]
+    fn pdf_links_empty_anchors_keep_positions_without_adding_content() {
+        let css = "@page{size:240pt 240pt;margin:20pt}body{font-family:'Noto Sans';font-size:12pt;line-height:18pt}p,h2{margin:0;font-size:12pt;font-weight:normal}";
+        for (suffix, profile) in [
+            ("plain", crate::PdfProfile::None),
+            ("ua2", crate::PdfProfile::PdfUa2),
+        ] {
+            let engine = crate::FullBleed::builder()
+                .register_font_file("python/fullbleed_assets/fonts/NotoSans-Regular.ttf")
+                .pdf_profile(profile)
+                .document_lang("en-US")
+                .document_title("Empty destinations")
+                .build()
+                .unwrap();
+            for (name, body) in [
+                (
+                    "between-blocks",
+                    "<p>Before</p><a id='target'></a><h2>After</h2>",
+                ),
+                (
+                    "margins",
+                    "<p style='margin-bottom:24pt'>Before</p><span id='target'></span><p style='margin-top:30pt'>After</p>",
+                ),
+                (
+                    "leading-margin",
+                    "<div><span id='target'></span><p style='margin-top:24pt'>After</p></div>",
+                ),
+                (
+                    "trailing-margin",
+                    "<div><p style='margin-bottom:24pt'>Before</p><span id='target'></span></div><p>After</p>",
+                ),
+                ("inline", "<p>Before<span id='target'></span> after</p>"),
+                ("inline-space", "<p>Before <a name='target'></a> after</p>"),
+                (
+                    "whitespace",
+                    "<p>Before <span id='target'> </span> after</p>",
+                ),
+                (
+                    "empty-paragraph",
+                    "<p>Before</p><p><span id='target'></span></p><p>After</p>",
+                ),
+                (
+                    "nested",
+                    "<p>Before<span><span id='target'></span></span> after</p>",
+                ),
+                (
+                    "empty-link",
+                    "<p>Before<a id='target' href='https://example.invalid/empty'></a> after</p>",
+                ),
+                (
+                    "hard-break",
+                    "<p>Before<br><span id='target'></span>After</p>",
+                ),
+                ("trailing", "<p>Before</p><span id='target'></span>"),
+                (
+                    "empty-block",
+                    "<p>Before</p><div id='target'></div><p>After</p>",
+                ),
+                (
+                    "positioned",
+                    "<p>Before</p><span id='target' style='position:absolute;left:40pt;top:80pt'></span><p>After</p>",
+                ),
+                (
+                    "page-boundary",
+                    "<div style='height:182pt'>Before</div><a id='target'></a><p>After</p>",
+                ),
+                (
+                    "hidden",
+                    "<p>Before</p><a id='target' style='visibility:hidden'></a><p>After</p>",
+                ),
+                (
+                    "display-none",
+                    "<p>Before</p><a id='target' style='display:none'></a><p>After</p>",
+                ),
+            ] {
+                let html = format!("<p><a href='#target'>Go</a></p>{body}");
+                let compiled = engine.compile_document(&html, css).unwrap();
+                let control = engine
+                    .compile_document(
+                        &html
+                            .replace(" id='target'", "")
+                            .replace(" name='target'", ""),
+                        css,
+                    )
+                    .unwrap();
+                assert_eq!(
+                    compiled.page_count(),
+                    control.page_count(),
+                    "{name}-{suffix}"
+                );
+                if matches!(
+                    name,
+                    "empty-link" | "hard-break" | "margins" | "leading-margin" | "trailing-margin"
+                ) {
+                    let text_commands = |document: &Document| {
+                        document
+                            .pages
+                            .iter()
+                            .flat_map(|page| &page.commands)
+                            .filter_map(|command| match command {
+                                Command::DrawString { x, y, text } => Some((*x, *y, text.clone())),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                    };
+                    assert_eq!(
+                        text_commands(&compiled.document),
+                        text_commands(&control.document)
+                    );
+                }
+                let links = collect(&compiled.document);
+                assert_eq!(
+                    links.destinations.contains_key("target"),
+                    name != "display-none",
+                    "{name}-{suffix}"
+                );
+                let bytes = compiled.render_to_buffer().unwrap();
+                retain_pdf(&format!("empty-destination-{name}-{suffix}"), &bytes);
+                retain_pdf(
+                    &format!("empty-destination-{name}-{suffix}-control"),
+                    &control.render_to_buffer().unwrap(),
+                );
+                assert_eq!(
+                    String::from_utf8_lossy(&bytes).contains("/Subtype /Link "),
+                    name != "display-none",
+                    "{name}-{suffix}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn pdf_links_writer_emits_actions_and_tagged_annotation_ownership() {
         for (name, profile) in [
             ("plain", crate::PdfProfile::None),

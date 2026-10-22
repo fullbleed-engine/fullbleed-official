@@ -48,8 +48,14 @@ class Server:
     def close(self):
         if self.process.poll() is None:
             if os.name == "nt":
-                subprocess.run(["taskkill", "/PID", str(self.process.pid), "/T", "/F"],
-                               capture_output=True, check=True)
+                result = subprocess.run(
+                    ["taskkill", "/PID", str(self.process.pid), "/T", "/F"],
+                    capture_output=True,
+                )
+                # The child can exit after poll() and before taskkill opens it.
+                # Still fail if termination was rejected while it remains alive.
+                if result.returncode and self.process.poll() is None:
+                    result.check_returncode()
             else:
                 self.process.send_signal(signal.SIGINT)
             self.process.wait(timeout=15)

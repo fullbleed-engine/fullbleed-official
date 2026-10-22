@@ -639,7 +639,10 @@ pub struct Canvas {
     fragmentainer_stack: Vec<Rect>,
     inline_text_paint_origin: Option<Pt>,
     navigation_active: bool,
-    navigation_scopes: Vec<bool>,
+    destination_active: bool,
+    navigation_suppressed: bool,
+    destination_names: Vec<String>,
+    navigation_scopes: Vec<(bool, bool, bool, usize)>,
     perspective_context_stack: Vec<PerspectiveContext>,
     // Descendants of an inline-axis overflow clip do not contribute to the
     // document scrollable width used by the final HTML page-fit pass. Keep
@@ -676,6 +679,9 @@ impl Canvas {
             fragmentainer_stack: Vec::new(),
             inline_text_paint_origin: None,
             navigation_active: false,
+            destination_active: false,
+            navigation_suppressed: false,
+            destination_names: Vec::new(),
             navigation_scopes: Vec::new(),
             perspective_context_stack: Vec::new(),
             html_scrollable_right_clip_depth: 0,
@@ -830,6 +836,27 @@ impl Canvas {
             }
         }
         if !layer.is_empty() {
+            if self.destination_active && !self.navigation_suppressed {
+                // A deferred effect is replayed after its source scope has
+                // closed. Retain target identities with the moved placement;
+                // the form still supplies its resolved, transformed position.
+                let mut retained =
+                    Vec::with_capacity(layer.len() + self.destination_names.len() + 2);
+                retained.push(Command::Meta {
+                    key: META_DIAGNOSTIC_SCOPE_BEGIN_KEY.into(),
+                    value: "deferred-destination".into(),
+                });
+                retained.extend(self.destination_names.iter().map(|name| Command::Meta {
+                    key: crate::link_semantics::META_DESTINATION.into(),
+                    value: name.clone(),
+                }));
+                retained.append(&mut layer);
+                retained.push(Command::Meta {
+                    key: META_DIAGNOSTIC_SCOPE_END_KEY.into(),
+                    value: "deferred-destination".into(),
+                });
+                layer = retained;
+            }
             scope.layers.push((z_index, layer));
         }
     }
@@ -1083,26 +1110,48 @@ impl Canvas {
 
     pub fn meta(&mut self, key: impl Into<String>, value: impl Into<String>) {
         let key = key.into();
+        let value = value.into();
         match key.as_str() {
-            META_DIAGNOSTIC_SCOPE_BEGIN_KEY => self.navigation_scopes.push(self.navigation_active),
+            META_DIAGNOSTIC_SCOPE_BEGIN_KEY => self.navigation_scopes.push((
+                self.navigation_active,
+                self.destination_active,
+                self.navigation_suppressed,
+                self.destination_names.len(),
+            )),
             META_DIAGNOSTIC_SCOPE_END_KEY => {
-                self.navigation_active = self.navigation_scopes.pop().unwrap_or(false);
+                let (active, destinations, suppressed, count) = self
+                    .navigation_scopes
+                    .pop()
+                    .unwrap_or((false, false, false, 0));
+                self.navigation_active = active;
+                self.destination_active = destinations;
+                self.navigation_suppressed = suppressed;
+                self.destination_names.truncate(count);
             }
-            crate::link_semantics::META_LINK_ID | crate::link_semantics::META_DESTINATION => {
+            crate::link_semantics::META_LINK_ID => {
                 self.navigation_active = true;
+            }
+            crate::link_semantics::META_DESTINATION => {
+                self.navigation_active = true;
+                self.destination_active = true;
+                self.destination_names.push(value.clone());
+            }
+            crate::link_semantics::META_NAVIGATION_SUPPRESSED => {
+                self.navigation_suppressed = value == "true"
             }
             _ => {}
         }
-        self.current.commands.push(Command::Meta {
-            key,
-            value: value.into(),
-        });
+        self.current.commands.push(Command::Meta { key, value });
     }
 
     /// Effect forms retain their enclosing source scope when replayed. Carry
-    /// only the need for geometry into the temporary canvas, not source IDs.
+    /// the need for geometry and deferred target identities into the temporary
+    /// canvas. These identities do not open another source scope on their own.
     pub(crate) fn inherit_navigation_context(&mut self, parent: &Canvas) {
         self.navigation_active = parent.navigation_active;
+        self.destination_active = parent.destination_active;
+        self.navigation_suppressed = parent.navigation_suppressed;
+        self.destination_names.clone_from(&parent.destination_names);
     }
 
     /// Decorative copies of authored content (for example CSS text shadows)
@@ -1129,6 +1178,17 @@ impl Canvas {
         for name in names {
             self.meta(crate::link_semantics::META_DESTINATION, name.clone());
         }
+        self.record_destination_point(x, y);
+        true
+    }
+
+    /// Record a resolved layout position before visibility, clipping or paint
+    /// opacity can remove its content. The first position in each source scope
+    /// owns the destination; later descendant positions cannot move it.
+    pub(crate) fn record_destination_point(&mut self, x: Pt, y: Pt) {
+        if !self.destination_active || self.navigation_suppressed {
+            return;
+        }
         let (x, y) = self
             .current_state
             .projective_transform
@@ -1138,7 +1198,6 @@ impl Canvas {
             crate::pdf_links::META_DESTINATION_POINT,
             format!("{},{}", x.to_milli_i64(), y.to_milli_i64()),
         );
-        true
     }
 
     pub(crate) fn record_link_box(&mut self, x: Pt, y: Pt, width: Pt, height: Pt) {

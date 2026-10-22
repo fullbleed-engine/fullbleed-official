@@ -70,3 +70,20 @@ matching a Chrome 155 saved PDF using the same bundled font. At the golden's
 1224-by-1584 page. The remaining invoice content and the bank-statement and
 coastal-menu baselines are unchanged. The installed inline-line-height gate
 also retains independent controls for this font size and weight.
+
+The navigation and inline-shaping update refreshes Acme and bank-statement
+baselines after reviewing the same authored HTML/CSS with the published alpha,
+the source candidate, and an independent Chromium 153 print reference. Text,
+vertical glyph positions, and page counts remain unchanged. Acme changes 791
+pixels: nine invoice-number glyphs move left by 0.025pt, and the four glyphs in
+`(8%)` move left by 0.904pt because the preceding word now advances by its shaped
+width. With Inter's default axes fixed at `opsz=14, wght=400`, the tax label's
+maximum relative horizontal glyph error against the browser reference falls
+from 0.924pt to 0.020pt.
+
+The bank statement changes 1,664 pixels in its three contact rows. Their 58 text
+glyphs move horizontally by at most 0.048pt as intrinsic widths use shaped
+advances; page two remains byte-identical. The other golden case is unchanged.
+This is a review of these specific spacing changes, not a claim that the full
+examples match browser layout. CI retains the generated PDFs, previews, and
+diagnostics even when a golden comparison fails.

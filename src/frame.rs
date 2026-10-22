@@ -115,7 +115,9 @@ impl Frame {
         let avail_width = self.rect.width;
         let avail_height = self.remaining_height();
         let cursor_y_before = self.cursor_y;
-        if avail_height <= Pt::ZERO {
+        if avail_height < Pt::ZERO
+            || (avail_height == Pt::ZERO && flowable.wrap(avail_width, Pt::ZERO).height > Pt::ZERO)
+        {
             return AddResult::Overflow(
                 flowable,
                 AddTrace {

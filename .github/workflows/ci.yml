@@ -852,6 +852,7 @@ jobs:
           FULLBLEED_INLINE_OPACITY_TEST_OUTPUT: target/python315/inline-opacity
           FULLBLEED_TABLE_LINK_TEST_OUTPUT: target/python315/table-links
           FULLBLEED_DESTINATION_VISIBILITY_TEST_OUTPUT: target/python315/destination-visibility
+          FULLBLEED_GENERAL_DESTINATION_TEST_OUTPUT: target/python315/general-destinations
         run: python -m pytest tests -q -ra --junitxml target/python315/python-tests.xml
       - name: Generate and check PDFs and previews
         shell: bash
@@ -1041,6 +1042,17 @@ jobs:
         env:
           FULLBLEED_TEST_INSTALLED_NATIVE: "1"
         run: python goldens/run_golden_suite.py --python python verify
+
+      - name: Retain rendered golden evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: golden-output-Windows
+          path: |
+            examples/acme_invoice/output/
+            examples/bank_statement/output/
+            examples/coastal_menu/output/
+          if-no-files-found: warn
 
       - name: Verify minimal per-page template flagging smoke
         run: python examples/template-flagging-smoke/run_smoke.py

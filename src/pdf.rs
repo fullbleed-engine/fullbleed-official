@@ -269,6 +269,62 @@ struct TagRecord {
     destination_sources: Vec<(usize, String)>,
 }
 
+struct UnownedDestination {
+    source: (usize, String),
+    tag_document: usize,
+    page_index: usize,
+    next_tag_index: usize,
+    parent: Option<usize>,
+}
+
+fn attach_unowned_destinations(records: &mut [TagRecord], destinations: Vec<UnownedDestination>) {
+    let mut owned = records
+        .iter()
+        .flat_map(|record| record.destination_sources.iter().cloned())
+        .collect::<std::collections::HashSet<_>>();
+    for destination in destinations {
+        if !owned.insert(destination.source.clone()) {
+            continue;
+        }
+        // Empty anchors have no content of their own. Associate them with the
+        // following semantic content, or the preceding content at the end of
+        // a page. Never cross a repeated/recipient document's namespace.
+        let find = |same_page: bool| {
+            let eligible = |record: &TagRecord| {
+                record.table_document == destination.tag_document
+                    && (!same_page || record.page_index == destination.page_index)
+            };
+            records
+                .iter()
+                .enumerate()
+                .skip(destination.next_tag_index)
+                .find(|(_, record)| eligible(record))
+                .or_else(|| {
+                    records
+                        .iter()
+                        .enumerate()
+                        .take(destination.next_tag_index)
+                        .rev()
+                        .find(|(_, record)| eligible(record))
+                })
+                .map(|(index, _)| index)
+        };
+        if let Some(mut owner) = destination
+            .parent
+            .or_else(|| find(true))
+            .or_else(|| find(false))
+        {
+            while matches!(records[owner].role.as_str(), "Span" | "Link") {
+                let Some(parent) = records[owner].parent else {
+                    break;
+                };
+                owner = parent;
+            }
+            records[owner].destination_sources.push(destination.source);
+        }
+    }
+}
+
 fn take_structure_destinations(
     pending: &mut [Option<(usize, String)>],
     needs_document_destination: &mut bool,
@@ -1379,6 +1435,7 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
 
     // Tagged PDF state
     tag_records: Vec<TagRecord>,
+    unowned_destinations: Vec<UnownedDestination>,
     page_parent_tree_keys: Vec<usize>,
     next_parent_tree_key: usize,
     active_semantic_forms: Vec<String>,
@@ -1814,6 +1871,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             compiled_flow_reject_command_pages: 0,
             compiled_flow_reject_transform_pages: 0,
             tag_records: Vec::new(),
+            unowned_destinations: Vec::new(),
             page_parent_tree_keys: Vec::new(),
             next_parent_tree_key: 0,
             active_semantic_forms: Vec::new(),
@@ -3090,6 +3148,10 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         if self.options.pdf_profile.emits_tagged_structure() {
             let uses_pdf20_structure_namespace =
                 self.options.pdf_profile.uses_pdf20_structure_namespace();
+            attach_unowned_destinations(
+                &mut self.tag_records,
+                std::mem::take(&mut self.unowned_destinations),
+            );
             let tag_records = normalize_shared_structure(normalize_definition_list_structure(
                 table_structure::normalize(normalize_figure_structure(std::mem::take(
                     &mut self.tag_records,
@@ -4344,7 +4406,15 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         } else if key == crate::canvas::META_DIAGNOSTIC_SCOPE_END_KEY {
                             if let Some((depth, destinations)) = link_scope_stack.pop() {
                                 tag_stack.truncate(depth);
-                                pending_destinations.truncate(destinations);
+                                let unowned = pending_destinations
+                                    .drain(destinations..)
+                                    .flatten()
+                                    .collect();
+                                self.retain_destination_context(
+                                    unowned,
+                                    tag_stack.last().copied().or(inherited_parent),
+                                    page_index.unwrap_or(0),
+                                );
                             }
                         } else if key == crate::link_semantics::META_DESTINATION
                             && explicit_artifact_depth == 0
@@ -5379,7 +5449,29 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         if automatic_artifact_open {
             out.push_str("EMC\n");
         }
+        self.retain_destination_context(
+            pending_destinations.into_iter().flatten().collect(),
+            inherited_parent,
+            page_index.unwrap_or(0),
+        );
         Ok(out)
+    }
+
+    fn retain_destination_context(
+        &mut self,
+        sources: Vec<(usize, String)>,
+        parent: Option<usize>,
+        page_index: usize,
+    ) {
+        let next_tag_index = self.tag_records.len();
+        self.unowned_destinations
+            .extend(sources.into_iter().map(|source| UnownedDestination {
+                source,
+                tag_document: self.current_tag_document,
+                page_index,
+                next_tag_index,
+                parent,
+            }));
     }
 
     fn ensure_offsets_len(&mut self, required_len: usize) {

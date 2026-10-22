@@ -7,6 +7,7 @@ import io
 from html.parser import HTMLParser
 import os
 from pathlib import Path
+import re
 
 import fullbleed
 import fullbleed_assets
@@ -143,6 +144,90 @@ def test_fixed_bindings_use_final_recipient_link_text():
         annotations = [ref.get_object() for ref in page["/Annots"]]
         assert annotations[0]["/Contents"] == expected
         assert ref_id(annotations[1]["/Dest"][0]) == ref_id(page)
+
+
+@pytest.mark.parametrize("profile", ["none", "pdfua1", "pdfua2"])
+@pytest.mark.parametrize("mode", ["direct", "compiled", "repeat", "reflow", "compact"])
+def test_empty_and_unpainted_destinations_preserve_layout_and_recipient_context(profile, mode):
+    labels = ["Inline", "Legacy", "Between", "Empty", "Space", "Hidden", "Transparent",
+              "Clipped", "Positioned", "Transformed", "Next", "Trailing"]
+    links = " ".join(f'<a href="#{label}">{label}</a>' for label in [*labels, "Removed"])
+    html = f'<h1>Destinations for {{{{name}}}}</h1><p>{links}</p>' + """
+<p>Before<span id="Inline"></span> after.</p>
+<p>Before <a name="Legacy"></a> after.</p>
+<a id="Between"></a><h2>Between blocks</h2>
+<div id="Empty"></div><p>After the empty block.</p>
+<p>Before <span id="Space"> </span> after.</p>
+<p id="Hidden" style="visibility:hidden">Hidden target</p>
+<p id="Transparent" style="opacity:0">Transparent target</p>
+<p id="Clipped" style="clip-path:inset(100%)">Clipped target</p>
+<span id="Positioned" style="position:absolute;left:42pt;top:88pt"></span>
+<div style="transform:translate(13pt,7pt)"><span id="Transformed"></span><p>Transformed context</p></div>
+<a id="Removed" style="display:none"></a>
+<p style="break-before:page">Next page for {{name}}</p>
+<p><a id="Next"></a>Last visible paragraph.</p><span id="Trailing"></span>
+"""
+    css = """@page{size:300pt 400pt;margin:20pt}
+body{font-family:'Noto Sans';font-size:12pt;line-height:18pt}
+p{margin:0}h1,h2{font-size:12pt;font-weight:normal;margin:0}"""
+    engine = fullbleed.PdfEngine(pdf_profile=profile, document_lang="en-US",
+                                document_title="General destinations", font_files=[font()])
+
+    def render(source):
+        if mode == "direct":
+            return engine.render_pdf(source.replace("{{name}}", "Ada"), css)
+        compiled = engine.compile_pdf(
+            source if mode in {"reflow", "compact"} else source.replace("{{name}}", "Ada"), css
+        )
+        if mode == "compiled":
+            return compiled.render_pdf()
+        if mode == "repeat":
+            return compiled.render_pdf_batch(2)
+        return compiled.render_pdf_reflow_bindings(
+            {"name": ["Ada", "Grace"]},
+            compression="compact" if mode == "compact" else "throughput",
+        )
+
+    data = render(html)
+    control = render(re.sub(r' (?:id|name)="[^"]+"', "", html))
+    document = reader(data)
+    copies = 1 if mode in {"direct", "compiled"} else 2
+    assert len(document.pages) == len(reader(control).pages) == copies * 2
+    tags = structures(document.trailer["/Root"]["/StructTreeRoot"]) if profile != "none" else {}
+    page_ids = {ref_id(page): index for index, page in enumerate(document.pages)}
+    owners_by_copy = []
+    for copy in range(copies):
+        first = copy * 2
+        annotations = [ref.get_object() for page in document.pages[first:first + 2]
+                       for ref in page.get("/Annots", [])]
+        assert set(link["/Contents"] for link in annotations) == set(labels)
+        owners = set()
+        for link in annotations:
+            label = link["/Contents"]
+            if profile == "pdfua2":
+                action = link["/A"]
+                assert action["/S"] == "/GoTo"
+                destination = action["/D"]
+                semantic = action["/SD"]
+                owner = ref_id(semantic[0])
+                owners.add(owner)
+                assert semantic[1:] == destination[1:]
+                assert ref_id(tags[owner].raw_get("/Pg")) == ref_id(destination[0])
+                if label == "Between":
+                    assert tags[owner]["/S"] == "/H2"
+                if label in {"Inline", "Legacy", "Space", "Next", "Trailing"}:
+                    assert tags[owner]["/S"] == "/P"
+            else:
+                destination = link["/Dest"]
+            expected_page = first + (label in {"Next", "Trailing"})
+            assert page_ids[ref_id(destination[0])] == expected_page
+        assert all(owners.isdisjoint(previous) for previous in owners_by_copy)
+        owners_by_copy.append(owners)
+    if directory := os.environ.get("FULLBLEED_GENERAL_DESTINATION_TEST_OUTPUT"):
+        output = Path(directory)
+        output.mkdir(parents=True, exist_ok=True)
+        (output / f"{profile}-{mode}.pdf").write_bytes(bytes(data))
+        (output / f"{profile}-{mode}-control.pdf").write_bytes(bytes(control))
 
 
 @pytest.mark.parametrize("profile", ["none", "pdfua1", "pdfua2"])

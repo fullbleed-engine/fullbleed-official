@@ -13,8 +13,8 @@ use crate::flowable::{
     FloatClear, FloatFlowable, FloatSide, FootnoteCallFlowable, GridTrackBreadth, GridTrackSize,
     ImageFlowable, InlineBackgroundFlowable, InlineBlockLayoutFlowable, JustifyContent,
     LeaderFlowable, LengthSpec, ListBulletFlowable, ListBulletKind, ListItemFlowable, MaskMode,
-    MetaFlowable, MultiColumnFlowable, OutlineLineStyle, OverlayFlowable, PageFootnoteAreaStyle,
-    PageFootnoteEntry, PaintFilterOperation, PaintFilterSpec, Paragraph,
+    MetaFlowable, MultiColumnFlowable, NavigationPointFlowable, OutlineLineStyle, OverlayFlowable,
+    PageFootnoteAreaStyle, PageFootnoteEntry, PaintFilterOperation, PaintFilterSpec, Paragraph,
     RelativePositionedFlowable, RunningElementFlowable, ScreenReaderTextFlowable, Spacer,
     SvgComponentTransferFunction, SvgFilterInput, SvgFilterNode, SvgFilterPrimitive,
     SvgFilterProgram, SvgFilterRegion, SvgFlowable, SvgMorphologyOperator, TableCell,
@@ -1857,14 +1857,17 @@ fn collect_children(
             // Only the tail decides whether the following sibling continues
             // this run. Earlier block/style boundaries already started their
             // own runs while lowering the child.
-            let separates_text = children.last().is_some_and(|item| {
-                let flowable = match item {
-                    LayoutItem::Inline { flowable, .. } | LayoutItem::Block { flowable, .. } => {
-                        flowable
-                    }
-                };
-                flowable.inline_text_run_id() != Some(identity)
-            });
+            let separates_text = children
+                .iter()
+                .rev()
+                .find_map(|item| {
+                    let flowable = match item {
+                        LayoutItem::Inline { flowable, .. }
+                        | LayoutItem::Block { flowable, .. } => flowable,
+                    };
+                    (!flowable.is_navigation_marker()).then_some(flowable)
+                })
+                .is_some_and(|flowable| flowable.inline_text_run_id() != Some(identity));
             if separates_text {
                 *run = Arc::new(());
             }
@@ -3033,6 +3036,24 @@ fn node_to_flowables_in_scope(
                         font_registry.clone(),
                     )
                 };
+                let mut out = out;
+                let only_collapsible_space = out.iter().all(|item| match item {
+                    LayoutItem::Inline { flowable, .. } => flowable.is_collapsible_inline_space(),
+                    LayoutItem::Block { .. } => false,
+                });
+                if only_collapsible_space && counters.link_semantics.destinations(node).is_some() {
+                    out.insert(
+                        0,
+                        LayoutItem::Inline {
+                            flowable: Box::new(NavigationPointFlowable),
+                            valign: VerticalAlign::Top,
+                            flex_grow: 0.0,
+                            flex_shrink: 0.0,
+                            width_spec: None,
+                            order: style.order,
+                        },
+                    );
+                }
                 let out = wrap_inline_bidi_scope(out, &style);
                 let out = if matches!(
                     style.vertical_align,
@@ -4631,6 +4652,21 @@ fn node_to_flowables_in_scope(
             // in flow and therefore keeps exactly the same Q32.32 layout geometry.
             let defer_visible_replaced_overflow = !parent_is_flex
                 && static_block_with_visible_replaced_overflow(node, resolver, &style, ancestors);
+
+            if flowables.is_empty() && counters.link_semantics.destinations(node).is_some() {
+                // Keep the normal computed box/position wrappers, but give the
+                // empty element no painted content or artificial flow height.
+                flowables = container_flowables(
+                    vec![LayoutItem::Block {
+                        flowable: Box::new(NavigationPointFlowable),
+                        flex_grow: 0.0,
+                        flex_shrink: 0.0,
+                        width_spec: None,
+                        order: 0,
+                    }],
+                    &style,
+                );
+            }
 
             // Preserve metadata-only nodes (for example <div data-fb="..."></div>) so
             // feature flags can be emitted even when the element has no visual content.
@@ -7182,6 +7218,13 @@ fn coerce_items_to_inline_run(
     font_registry: Option<Arc<FontRegistry>>,
     snap_baseline_phase: bool,
 ) -> Vec<LayoutItem> {
+    if items.iter().all(|item| match item {
+        LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => {
+            flowable.is_navigation_marker() || flowable.is_discardable_block_whitespace()
+        }
+    }) {
+        return items;
+    }
     let preserve_nested_floor = snap_baseline_phase
         && items.iter().any(|item| {
             matches!(
@@ -7199,7 +7242,10 @@ fn coerce_items_to_inline_run(
     // Rounding only their surrounding text can break baseline alignment.
     let ordinary_text_only = items.iter().all(|item| match item {
         LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => {
-            flowable.out_of_flow() || flowable.inline_x_height(Pt::ZERO).is_some()
+            flowable.out_of_flow()
+                || flowable.is_navigation_marker()
+                || flowable.forced_line_break_height().is_some()
+                || flowable.inline_x_height(Pt::ZERO).is_some()
         }
     });
     let round_integral_baseline = snap_baseline_phase
@@ -7256,10 +7302,11 @@ fn coerce_items_to_inline_run(
     let mut inline = Vec::with_capacity(item_count.saturating_mul(2) + 1);
     inline.push(make_strut());
     for (index, item) in items.into_iter().enumerate() {
-        let is_forced_break = match &item {
-            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => {
-                flowable.forced_line_break_height().is_some()
-            }
+        let (is_forced_break, is_navigation_marker) = match &item {
+            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => (
+                flowable.forced_line_break_height().is_some(),
+                flowable.is_navigation_marker(),
+            ),
         };
         let item = match item {
             LayoutItem::Inline { .. } => item,
@@ -7278,7 +7325,7 @@ fn coerce_items_to_inline_run(
                 order,
             },
         };
-        let item = if !snap_baseline_phase || is_forced_break {
+        let item = if !snap_baseline_phase || is_forced_break || is_navigation_marker {
             item
         } else {
             match item {
@@ -12924,6 +12971,22 @@ fn layout_children_to_flowables(
     )
 }
 
+fn emit_inline_markers_without_line(
+    group: &mut Vec<(Box<dyn Flowable>, VerticalAlign)>,
+    out: &mut Vec<Box<dyn Flowable>>,
+) {
+    if group
+        .iter()
+        .all(|(child, _)| child.is_discardable_block_whitespace() || child.is_navigation_marker())
+    {
+        out.extend(
+            group
+                .drain(..)
+                .filter_map(|(child, _)| child.is_navigation_marker().then_some(child)),
+        );
+    }
+}
+
 fn layout_children_to_flowables_with_options(
     items: Vec<LayoutItem>,
     forced_line_height: Option<Pt>,
@@ -12947,12 +13010,7 @@ fn layout_children_to_flowables_with_options(
                 // Formatting whitespace between blocks does not generate an
                 // anonymous box or interrupt sibling margin collapsing.
                 // Metadata/decorated wrappers remain non-discardable.
-                if inline_group
-                    .iter()
-                    .all(|(child, _)| child.is_discardable_block_whitespace())
-                {
-                    inline_group.clear();
-                }
+                emit_inline_markers_without_line(&mut inline_group, &mut out);
                 if !inline_group.is_empty() {
                     out.push(Box::new(
                         InlineBlockLayoutFlowable::new_pt(
@@ -12974,6 +13032,7 @@ fn layout_children_to_flowables_with_options(
         }
     }
 
+    emit_inline_markers_without_line(&mut inline_group, &mut out);
     if inline_group
         .iter()
         .any(|(child, _)| !child.is_discardable_block_whitespace())

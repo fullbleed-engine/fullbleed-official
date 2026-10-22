@@ -2903,6 +2903,12 @@ pub trait Flowable: FlowableClone + Send + Sync {
         false
     }
 
+    /// An empty authored destination has a position but no inline advance or
+    /// line-box contribution. Inline layout places it after shaping siblings.
+    fn is_navigation_marker(&self) -> bool {
+        false
+    }
+
     /// Authored block-flow gaps separate content boxes, not metadata carriers.
     /// Wrappers can preserve a drawable epsilon without manufacturing a gap.
     fn is_flow_spacing_item(&self, avail_width: Pt, avail_height: Pt) -> bool {
@@ -9583,6 +9589,7 @@ impl Flowable for Paragraph {
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
         let perf = perf_start();
+        canvas.record_destination_point(x, y);
         if !self.style.visible {
             perf_end("layout.text.draw", perf);
             return;
@@ -11339,6 +11346,48 @@ impl Flowable for Spacer {
     }
 }
 
+/// A referenced empty HTML element retains its position without manufacturing
+/// text, a line box, or an epsilon of normal-flow height.
+#[derive(Debug, Clone)]
+pub(crate) struct NavigationPointFlowable;
+
+impl Flowable for NavigationPointFlowable {
+    fn wrap(&self, _avail_width: Pt, _avail_height: Pt) -> Size {
+        Size {
+            width: Pt::ZERO,
+            height: Pt::ZERO,
+        }
+    }
+
+    fn intrinsic_width(&self) -> Option<Pt> {
+        Some(Pt::ZERO)
+    }
+
+    fn inline_bidi_text(&self) -> Option<Cow<'_, str>> {
+        Some(Cow::Borrowed(""))
+    }
+
+    fn split(
+        &self,
+        _avail_width: Pt,
+        _avail_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        None
+    }
+
+    fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, _avail_width: Pt, _avail_height: Pt) {
+        canvas.record_destination_point(x, y);
+    }
+
+    fn is_layout_marker(&self) -> bool {
+        true
+    }
+
+    fn is_navigation_marker(&self) -> bool {
+        true
+    }
+}
+
 /// Semantic replacement text that participates in tagged-PDF reading order
 /// without painting glyphs or consuming normal-flow geometry.
 ///
@@ -11532,6 +11581,7 @@ impl Flowable for CollapsibleSpaceFlowable {
     }
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, _avail_height: Pt) {
+        canvas.record_destination_point(x, y);
         canvas.meta(META_READING_TEXT_KEY, " ");
         canvas.record_link_box(
             x,
@@ -12163,6 +12213,7 @@ impl Flowable for ImageFlowable {
     }
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, _avail_width: Pt, _avail_height: Pt) {
+        canvas.record_destination_point(x, y);
         if !self.visible {
             return;
         }
@@ -12976,6 +13027,7 @@ impl Flowable for SvgFlowable {
     }
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
+        canvas.record_destination_point(x, y);
         if !self.visible {
             return;
         }
@@ -19721,6 +19773,9 @@ impl InlineBlockLayoutFlowable {
         let mut run_id = None;
         let mut run_start = Pt::ZERO;
         for (child, _) in &self.children {
+            if child.is_navigation_marker() {
+                continue;
+            }
             if child.out_of_flow() {
                 if let Some((_, size)) = child.float_layout_size(avail_width, huge_pt()) {
                     float_width = float_width.max(size.width.max(Pt::ZERO));
@@ -20190,6 +20245,9 @@ impl InlineBlockLayoutFlowable {
         };
 
         for (idx, (child, valign)) in self.children.iter().enumerate() {
+            if child.is_navigation_marker() {
+                continue;
+            }
             if leading_float
                 .as_ref()
                 .is_some_and(|initial| initial.idx == idx)
@@ -20401,6 +20459,88 @@ impl InlineBlockLayoutFlowable {
                 &mut total_height,
                 &mut clearance_before,
             );
+        }
+
+        // Empty anchors follow the shaped source boundary. Adding them to the
+        // line builder would otherwise create gaps, terminate a text run, or
+        // enlarge the baseline union. Insert only after those decisions.
+        for (idx, (child, _)) in self.children.iter().enumerate() {
+            if !child.is_navigation_marker() {
+                continue;
+            }
+            let previous = lines
+                .iter()
+                .enumerate()
+                .flat_map(|(line, value)| value.items.iter().map(move |item| (line, item)))
+                .filter(|(_, item)| {
+                    item.idx < idx && !self.children[item.idx].0.is_navigation_marker()
+                })
+                .max_by_key(|(_, item)| item.idx);
+            let next = lines
+                .iter()
+                .enumerate()
+                .flat_map(|(line, value)| value.items.iter().map(move |item| (line, item)))
+                .filter(|(_, item)| {
+                    item.idx > idx && !self.children[item.idx].0.is_navigation_marker()
+                })
+                .min_by_key(|(_, item)| item.idx);
+            let reference = previous
+                .map(|(line, item)| (line, item, true))
+                .or_else(|| next.map(|(line, item)| (line, item, false)));
+            let (mut line_index, mut x_off) = reference
+                .map(|(line, item, after)| {
+                    let rtl = bidi
+                        .as_ref()
+                        .and_then(|info| info.levels.get(bidi_ranges[item.idx].start))
+                        .is_some_and(|level| level.is_rtl());
+                    (
+                        line,
+                        item.x_off
+                            + if after != rtl {
+                                item.size.width
+                            } else {
+                                Pt::ZERO
+                            },
+                    )
+                })
+                .unwrap_or((0, Pt::ZERO));
+            if lines
+                .get(line_index)
+                .is_some_and(|line| line.reading_break_after && idx >= line.source_end)
+            {
+                line_index += 1;
+                x_off = Pt::ZERO;
+            }
+            if line_index == lines.len() {
+                lines.push(InlineLineLayout {
+                    clearance_before: Pt::ZERO,
+                    line_height: Pt::ZERO,
+                    alignment_height: Pt::ZERO,
+                    baseline: None,
+                    parent_font_ascent: Pt::ZERO,
+                    parent_font_descent: Pt::ZERO,
+                    items: Vec::new(),
+                    reading_break_after: false,
+                    source_end: idx + 1,
+                });
+            }
+            let line = &mut lines[line_index];
+            line.source_end = line.source_end.max(idx + 1);
+            line.items.push(InlineItemLayout {
+                idx,
+                bidi_child: None,
+                x_off,
+                size: Size {
+                    width: Pt::ZERO,
+                    height: Pt::ZERO,
+                },
+                valign: VerticalAlign::Top,
+                baseline: None,
+                inline_ascent: None,
+                x_height: None,
+                font_extents: None,
+            });
+            line.items.sort_by_key(|item| item.idx);
         }
 
         InlineLayoutCache {
@@ -28879,7 +29019,7 @@ impl ContainerFlowable {
                 .children
                 .iter()
                 .enumerate()
-                .find(|(_, child)| !child.out_of_flow())
+                .find(|(_, child)| !child.out_of_flow() && !child.is_navigation_marker())
                 .and_then(|(index, child)| {
                     if child.clear_float_side().is_some() {
                         return None;
@@ -28912,7 +29052,7 @@ impl ContainerFlowable {
                 .iter()
                 .enumerate()
                 .rev()
-                .find(|(_, child)| !child.out_of_flow())
+                .find(|(_, child)| !child.out_of_flow() && !child.is_navigation_marker())
                 .and_then(|(index, child)| {
                     child
                         .collapsible_block_margins(content_width)
@@ -29225,6 +29365,10 @@ impl ContainerFlowable {
             }
             if child.out_of_flow() {
                 child_sizes.push(None);
+                continue;
+            }
+            if child.is_navigation_marker() {
+                child_sizes.push(Some(child.wrap(content_width, child_avail_height)));
                 continue;
             }
             if let Some(clear) = child.clear_float_side() {
@@ -36809,9 +36953,11 @@ impl Flowable for ContainerFlowable {
                         kept_flow_item = true;
                     }
                     kept_height += member_height;
-                    previous_margin_bottom = member
-                        .collapsible_block_margins(content_width)
-                        .map(|(_, bottom)| bottom);
+                    if !member.is_navigation_marker() {
+                        previous_margin_bottom = member
+                            .collapsible_block_margins(content_width)
+                            .map(|(_, bottom)| bottom);
+                    }
                 }
 
                 if kept_height <= available_content_height {
@@ -37549,6 +37695,7 @@ impl Flowable for ContainerFlowable {
                 })
                 .unwrap_or((page_size, x, y));
             let mut temp = Canvas::new(filter_form_size);
+            temp.inherit_navigation_context(canvas);
             grouped.draw(&mut temp, source_x, source_y, avail_width, avail_height);
             let doc = temp.finish();
             let commands = doc
@@ -37811,6 +37958,7 @@ impl Flowable for ContainerFlowable {
                     height: border_box_height,
                 };
                 let mut source_canvas = Canvas::new(local_size);
+                source_canvas.inherit_navigation_context(canvas);
                 grouped.draw(
                     &mut source_canvas,
                     x - border_box_x,
@@ -38174,6 +38322,7 @@ impl Flowable for ContainerFlowable {
                 )
             })
             .unwrap_or(border_clip_radii);
+        canvas.record_destination_point(border_box_x, border_box_y);
         let clip_path_applied = self.apply_resolved_clip_path(canvas, x, y, &cache);
 
         let paint_self = self.state.self_visible;
@@ -38857,7 +39006,7 @@ impl Flowable for ContainerFlowable {
         for (idx, child) in self.state.children.iter().enumerate() {
             let out_of_flow = child.out_of_flow();
             let float_layout = child.float_layout_size(content_width, child_avail_height);
-            if !out_of_flow {
+            if !out_of_flow && !child.is_navigation_marker() {
                 if let Some(clear) = child.clear_float_side() {
                     let clearance = match clear {
                         FloatClear::Left => left_float_bottom,
@@ -40873,9 +41022,16 @@ impl MetaFlowable {
     }
 
     fn requires_metadata_carrier(&self) -> bool {
-        self.metadata
-            .iter()
-            .any(|(key, _)| key != META_READING_LAYOUT_KEY)
+        self.metadata.iter().any(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                META_READING_LAYOUT_KEY
+                    | crate::link_semantics::META_DESTINATION
+                    | crate::link_semantics::META_LINK_ID
+                    | crate::link_semantics::META_LINK_TARGET
+                    | crate::link_semantics::META_LINK_LABEL
+            )
+        })
     }
 
     fn record_authored_bounds(
@@ -40903,7 +41059,9 @@ impl Flowable for MetaFlowable {
     fn is_discardable_block_whitespace(&self) -> bool {
         // The reading-layout marker observes layout; it must not make an
         // otherwise collapsed space create a line box between blocks.
-        !self.requires_metadata_carrier()
+        self.metadata
+            .iter()
+            .all(|(key, _)| key == META_READING_LAYOUT_KEY)
             && self.bidi_prefix.is_empty()
             && self.bidi_suffix.is_empty()
             && self.inline_opacity.is_none()
@@ -41462,6 +41620,10 @@ impl Flowable for MetaFlowable {
 
     fn is_layout_marker(&self) -> bool {
         self.child.is_layout_marker()
+    }
+
+    fn is_navigation_marker(&self) -> bool {
+        self.child.is_navigation_marker()
     }
 
     fn is_flow_spacing_item(&self, avail_width: Pt, avail_height: Pt) -> bool {
