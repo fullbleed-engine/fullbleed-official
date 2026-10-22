@@ -1763,8 +1763,11 @@ mod tests {
         let mut nodes = Vec::new();
         collect_reading_nodes(&page.nodes, &mut nodes);
         for label in ["BILL TO", "Aster Corporation"] {
+            // These standalone block-styled spans own paragraphs in the PDF
+            // structure. Reading evidence retains that semantic role as well
+            // as the lowered block boundary and unchanged logical text.
             assert!(
-                nodes.iter().any(|node| node.role == "Span"
+                nodes.iter().any(|node| node.role == "P"
                     && node.layout.as_deref() == Some("block")
                     && ordered_text(&node.content, &node.children) == label),
                 "{nodes:#?}"

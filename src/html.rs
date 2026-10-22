@@ -118,6 +118,9 @@ struct CounterState {
     inline_source_ids: Arc<HashMap<usize, usize>>,
     inline_opacity: HashMap<usize, crate::inline_opacity::InlineOpacity>,
     inline_text_run: Option<(TextStyle, Arc<()>)>,
+    // True only while lowering content whose emitted semantic owner accepts
+    // inline text directly, such as a paragraph, heading, label or link.
+    inline_text_owner: bool,
     running_layouts: Option<crate::running_layout::RunningLayouts>,
     // A scoped lowering instruction, never a mutation of the authored DOM.
     // Inline descendants keep their own computed styles while the selected
@@ -141,6 +144,13 @@ struct CounterValue {
 }
 
 impl CounterState {
+    fn with_inline_text_owner<T>(&mut self, owner: bool, lower: impl FnOnce(&mut Self) -> T) -> T {
+        let previous = std::mem::replace(&mut self.inline_text_owner, owner);
+        let result = lower(self);
+        self.inline_text_owner = previous;
+        result
+    }
+
     fn with_target_context(
         document: &NodeRef,
         target_texts: HashMap<String, String>,
@@ -2510,20 +2520,28 @@ fn node_to_flowables(
     if node.as_element().is_some() {
         counters.select_node(node, false);
     }
-    let items = node_to_flowables_in_scope(
-        node,
-        resolver,
-        parent_style,
-        ancestors,
-        counters,
-        font_registry,
-        asset_bundle,
-        report,
-        svg_form,
-        svg_raster_fallback,
-        perf,
-        doc_id,
-    );
+    let inline_text_owner = counters.inline_text_owner
+        || counters
+            .link_semantics
+            .metadata(node)
+            .iter()
+            .any(|(key, _)| key == crate::link_semantics::META_LINK_TARGET);
+    let items = counters.with_inline_text_owner(inline_text_owner, |counters| {
+        node_to_flowables_in_scope(
+            node,
+            resolver,
+            parent_style,
+            ancestors,
+            counters,
+            font_registry,
+            asset_bundle,
+            report,
+            svg_form,
+            svg_raster_fallback,
+            perf,
+            doc_id,
+        )
+    });
     // Restoring the caller's context does not end a child's sibling scope.
     // The next element (or ::after) selects the counters that it inherits.
     (counters.context, counters.pseudo_context) = previous;
@@ -3138,6 +3156,14 @@ fn node_to_flowables_in_scope(
                 return out;
             }
 
+            // Only emitted owners establish this scope. Transparent inline
+            // and display:contents elements returned above; their tag names
+            // must not suppress a descendant's anonymous paragraph.
+            counters.inline_text_owner = match info.tag.as_str() {
+                "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => true,
+                tag => block_container_role(tag)
+                    .map_or(counters.inline_text_owner, |role| role == "Lbl"),
+            };
             let mut flowables = if let Some(text) = screen_reader_text.as_ref() {
                 vec![LayoutItem::Block {
                     flowable: Box::new(
@@ -4260,7 +4286,11 @@ fn node_to_flowables_in_scope(
                     | "footer" | "aside" | "nav" | "main" | "blockquote" | "figure"
                     | "figcaption" | "dl" | "dt" | "dd" => (|| {
                         let container_role = block_container_role(info.tag.as_str());
-                        let direct_text_role = direct_text_structure_role(info.tag.as_str());
+                        let direct_text_role = direct_text_structure_role(
+                            info.tag.as_str(),
+                            &style,
+                            counters.inline_text_owner,
+                        );
                         if is_table_container_display(style.display) {
                             table_container_flowables(
                                 node,
@@ -12752,14 +12782,28 @@ fn block_container_role(tag: &str) -> Option<&'static str> {
     }
 }
 
-fn direct_text_structure_role(tag: &str) -> &'static str {
+fn direct_text_structure_role(
+    tag: &str,
+    style: &ComputedStyle,
+    inline_text_owner: bool,
+) -> &'static str {
+    if inline_text_owner && block_container_role(tag).is_none() {
+        return "Span";
+    }
     match tag {
         "dl" | "dd" => "LBody",
         "dt" => "Lbl",
         "blockquote" => "P",
         "figcaption" => "P",
-        // Making an anchor an atomic CSS box does not make its text a
-        // paragraph. Its inline content remains a Span under the Link owner.
+        // A standalone block-styled inline element owns an anonymous
+        // paragraph. Within an emitted paragraph, heading or Link, the
+        // scoped owner above keeps its content inline. display:contents
+        // bypasses those owner scopes because it emits no container.
+        "span" | "i" | "a"
+            if matches!(style.display, DisplayMode::Block | DisplayMode::FlowRoot) =>
+        {
+            "P"
+        }
         "span" | "i" | "a" => "Span",
         _ => "P",
     }
@@ -12900,6 +12944,15 @@ fn layout_children_to_flowables_with_options(
                 flowable, valign, ..
             } => inline_group.push((flowable, valign)),
             LayoutItem::Block { flowable, .. } => {
+                // Formatting whitespace between blocks does not generate an
+                // anonymous box or interrupt sibling margin collapsing.
+                // Metadata/decorated wrappers remain non-discardable.
+                if inline_group
+                    .iter()
+                    .all(|(child, _)| child.is_discardable_block_whitespace())
+                {
+                    inline_group.clear();
+                }
                 if !inline_group.is_empty() {
                     out.push(Box::new(
                         InlineBlockLayoutFlowable::new_pt(
@@ -12921,7 +12974,10 @@ fn layout_children_to_flowables_with_options(
         }
     }
 
-    if !inline_group.is_empty() {
+    if inline_group
+        .iter()
+        .any(|(child, _)| !child.is_discardable_block_whitespace())
+    {
         out.push(Box::new(
             InlineBlockLayoutFlowable::new_pt(inline_group, Pt::ZERO, forced_line_height)
                 .with_css_pixel_line_snap(snap_line_height_to_css_pixel)

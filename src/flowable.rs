@@ -2566,6 +2566,13 @@ pub trait Flowable: FlowableClone + Send + Sync {
             && !self.is_monolithic_replaced()
     }
 
+    /// Pure collapsed text may disappear when it is the only content between
+    /// blocks. Preserve other flowables by default, including metadata,
+    /// decorations and whitespace whose CSS mode keeps it visible.
+    fn is_discardable_block_whitespace(&self) -> bool {
+        false
+    }
+
     /// Resolved vertical margins for an in-flow block that can participate in
     /// sibling margin collapsing. Inline, replaced, floating, and positioned
     /// flowables return `None`.
@@ -11467,6 +11474,10 @@ impl CollapsibleSpaceFlowable {
 }
 
 impl Flowable for CollapsibleSpaceFlowable {
+    fn is_discardable_block_whitespace(&self) -> bool {
+        true
+    }
+
     fn inline_text_run_id(&self) -> Option<usize> {
         self.inline_text_run
             .as_ref()
@@ -40793,6 +40804,16 @@ impl MetaFlowable {
 }
 
 impl Flowable for MetaFlowable {
+    fn is_discardable_block_whitespace(&self) -> bool {
+        // The reading-layout marker observes layout; it must not make an
+        // otherwise collapsed space create a line box between blocks.
+        !self.requires_metadata_carrier()
+            && self.bidi_prefix.is_empty()
+            && self.bidi_suffix.is_empty()
+            && self.inline_opacity.is_none()
+            && self.child.is_discardable_block_whitespace()
+    }
+
     fn is_inline_first_letter(&self) -> bool {
         self.child.is_inline_first_letter()
     }

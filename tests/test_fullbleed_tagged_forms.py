@@ -22,6 +22,7 @@ CASES = {
     "inline": '<div>Before <span style="opacity:0.6">Rich text <a href="https://example.invalid/report">Read report</a></span> after.</div>',
     "anonymous": '<div>Before <span style="opacity:0.6">First <div>Block inside an inline</div> Last</span> After</div>',
     "quote": '<blockquote>Before <span style="opacity:0.6">Rich quote</span> after.</blockquote>',
+    "block-span": '<div><span style="display:block">Before <span style="opacity:0.6">Rich block</span> after.</span></div>',
 }
 
 
@@ -121,7 +122,7 @@ def test_effect_form_ownership_survives_compilation_and_repeated_documents(profi
     document = PdfReader(io.BytesIO(pdf), strict=True)
     assert len(document.pages) == copies
     assert check_form_ownership(document) >= copies
-    if case in {"inline", "anonymous", "quote"}:
+    if case in {"inline", "anonymous", "quote", "block-span"}:
         def top_level(value):
             value = value.get_object()
             if isinstance(value, ArrayObject):

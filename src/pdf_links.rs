@@ -514,7 +514,7 @@ impl Collector<'_> {
                     state.stroke =
                         ((*stroke * 1000.0).round() as i32).clamp(0, 1000) as f32 / 1000.0;
                 }
-                Command::Meta { key, value } if key == META_DIAGNOSTIC_SCOPE_BEGIN_KEY => {
+                Command::Meta { key, .. } if key == META_DIAGNOSTIC_SCOPE_BEGIN_KEY => {
                     scopes.push(scope.clone())
                 }
                 Command::Meta { key, .. } if key == META_DIAGNOSTIC_SCOPE_END_KEY => {

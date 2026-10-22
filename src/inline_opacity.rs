@@ -419,6 +419,194 @@ mod tests {
     }
 
     #[test]
+    fn inline_opacity_anonymous_whitespace_does_not_interrupt_block_margins() {
+        let engine = FullBleed::builder().build().unwrap();
+        let css = "@page{size:220pt 240pt;margin:20pt}body{font-family:Helvetica;font-size:12pt;line-height:18pt}.block{margin:18pt 0;padding:10pt;border:1pt solid black}";
+        let first = r#"<div class="block">First</div>"#;
+        let second = r#"<div class="block">Second</div>"#;
+        let compact = engine
+            .render_to_buffer(&format!("{first}{second}"), css)
+            .unwrap();
+        retain_in("block-whitespace", "compact.pdf", &compact);
+        for (index, separator) in [" ", "\n  ", "<!-- formatting -->\n  ", "<span> </span>"]
+            .into_iter()
+            .enumerate()
+        {
+            let indented = engine
+                .render_to_buffer(&format!("{first}{separator}{second}"), css)
+                .unwrap();
+            retain_in(
+                "block-whitespace",
+                &format!("separated-{index}.pdf"),
+                &indented,
+            );
+            assert_eq!(compact, indented, "Formatting separator {separator:?}");
+        }
+        let preserved = format!("<section style=\"white-space:pre\">{first}\n{second}</section>");
+        let no_break = format!("<section style=\"white-space:pre\">{first}{second}</section>");
+        assert_ne!(
+            engine.render_to_buffer(&preserved, css).unwrap(),
+            engine.render_to_buffer(&no_break, css).unwrap()
+        );
+        let inline_first = r#"<span style="display:inline-block;width:20pt">A</span>"#;
+        let inline_second = r#"<span style="display:inline-block;width:20pt">B</span>"#;
+        let inline_compact = engine
+            .render_to_buffer(&format!("{inline_first}{inline_second}"), css)
+            .unwrap();
+        let inline_spaced = engine
+            .render_to_buffer(&format!("{inline_first} {inline_second}"), css)
+            .unwrap();
+        retain_in("block-whitespace", "inline-compact.pdf", &inline_compact);
+        retain_in("block-whitespace", "inline-spaced.pdf", &inline_spaced);
+        assert_ne!(
+            inline_compact, inline_spaced,
+            "Inline spaces retain their advance"
+        );
+    }
+
+    #[test]
+    fn inline_opacity_block_text_uses_its_emitted_semantic_owner() {
+        let text = r#"Before <span class="fade">Rich text</span> after."#;
+        let mut cases = Vec::new();
+        for (context, start, end) in [
+            ("root", "<div>", "</div>"),
+            ("paragraph", "<p>", "</p>"),
+            ("heading", "<h1>Document</h1><h2>", "</h2>"),
+            (
+                "link",
+                r#"<a href="https://example.invalid/report" style="display:block">"#,
+                "</a>",
+            ),
+        ] {
+            for tag in ["span", "i", "div"] {
+                cases.push((
+                    format!("{context}-{tag}"),
+                    format!("{start}<{tag} class=\"box\">{text}</{tag}>{end}"),
+                ));
+            }
+        }
+        for (name, start, end) in [
+            (
+                "contents-paragraph",
+                r#"<p style="display:contents"><span class="box">"#,
+                "</span></p>",
+            ),
+            (
+                "flex-paragraph",
+                r#"<p style="display:flex"><span>"#,
+                "</span></p>",
+            ),
+            (
+                "flow-root-span",
+                r#"<div><span style="display:flow-root">"#,
+                "</span></div>",
+            ),
+            (
+                "atomic-span",
+                r#"<div><span style="display:inline-block">"#,
+                "</span></div>",
+            ),
+            (
+                "nested-block-span",
+                r#"<div>Lead <span class="box">First <span class="box">"#,
+                "</span> Last</span> tail</div>",
+            ),
+            (
+                "definition-label",
+                r#"<dl><dt><span class="box">"#,
+                "</span></dt><dd>Definition</dd></dl>",
+            ),
+            (
+                "table-cell",
+                r#"<table><tr><th scope="col">Header</th></tr><tr><td><span class="box">"#,
+                "</span></td></tr></table>",
+            ),
+        ] {
+            cases.push((name.to_owned(), format!("{start}{text}{end}")));
+        }
+        for (profile_name, profile) in [("ua1", PdfProfile::PdfUa1), ("ua2", PdfProfile::PdfUa2)] {
+            let engine = FullBleed::builder()
+                .register_font_file("python/fullbleed_assets/fonts/NotoSans-Regular.ttf")
+                .pdf_profile(profile)
+                .document_lang("en-US")
+                .document_title("Block text ownership")
+                .build()
+                .unwrap();
+            for (name, body) in &cases {
+                for alpha in [1.0, 0.5] {
+                    let css = format!(
+                        "@page{{size:300pt 300pt;margin:16pt}}body{{font-family:'Noto Sans';font-size:12pt;line-height:18pt}}h1,h2{{font-weight:normal}}p{{margin:0}}.box{{display:block}}.fade{{opacity:{alpha}}}"
+                    );
+                    let bytes = engine.render_to_buffer(body, &css).unwrap();
+                    assert_eq!(bytes, engine.render_to_buffer(body, &css).unwrap());
+                    retain_in(
+                        "block-text-owners",
+                        &format!("{name}-{profile_name}-{alpha}.pdf"),
+                        &bytes,
+                    );
+                    let pdf = crate::pdf_native::Document::load_mem(&bytes).unwrap();
+                    let mut roles = Vec::new();
+                    for dict in pdf
+                        .objects
+                        .values()
+                        .filter_map(|object| object.as_dict().ok())
+                    {
+                        let Ok(role) = dict.get(b"S").and_then(|value| value.as_name()) else {
+                            continue;
+                        };
+                        roles.push(role);
+                        let Some(parent) = dict
+                            .get(b"P")
+                            .and_then(|value| value.as_reference())
+                            .ok()
+                            .and_then(|id| pdf.objects.get(&id))
+                            .and_then(|object| object.as_dict().ok())
+                        else {
+                            continue;
+                        };
+                        let Ok(parent_role) = parent.get(b"S").and_then(|value| value.as_name())
+                        else {
+                            continue;
+                        };
+                        assert!(
+                            !(role == b"Span" && parent_role == b"Document"),
+                            "Unowned inline text: {name}/{profile_name}/{alpha}"
+                        );
+                        assert!(
+                            !(role == b"P"
+                                && matches!(parent_role, b"P" | b"H1" | b"H2" | b"Link" | b"Lbl")),
+                            "Nested paragraph in existing inline owner: {name}/{profile_name}/{alpha}"
+                        );
+                    }
+                    if name.starts_with("heading-") {
+                        assert_eq!(roles.iter().filter(|role| **role == b"H2").count(), 1);
+                    } else if name.starts_with("root-")
+                        || matches!(
+                            name.as_str(),
+                            "contents-paragraph"
+                                | "flow-root-span"
+                                | "atomic-span"
+                                | "flex-paragraph"
+                        )
+                    {
+                        assert_eq!(
+                            roles.iter().filter(|role| **role == b"P").count(),
+                            1,
+                            "{name}/{profile_name}/{alpha}"
+                        );
+                    } else if name == "nested-block-span" {
+                        assert_eq!(
+                            roles.iter().filter(|role| **role == b"P").count(),
+                            5,
+                            "{profile_name}/{alpha}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn inline_opacity_anonymous_text_owners_do_not_reparent_figures() {
         for (profile_name, profile) in [("ua1", PdfProfile::PdfUa1), ("ua2", PdfProfile::PdfUa2)] {
             let engine = FullBleed::builder()

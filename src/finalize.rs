@@ -135,12 +135,16 @@ fn preflight_finalize_pdf(
 
 fn page_box(doc: &LoDocument, page_id: LoObjectId) -> Vec<LoObject> {
     for key in [b"CropBox".as_slice(), b"MediaBox".as_slice()] {
-        if let Ok(value) = doc.get_page_attribute(page_id, key)
-            && let Ok(value) = resolve_finalize_object(doc, value)
-            && let Ok(array) = value.as_array()
-        {
-            return array.clone();
-        }
+        let Ok(value) = doc.get_page_attribute(page_id, key) else {
+            continue;
+        };
+        let Ok(value) = resolve_finalize_object(doc, value) else {
+            continue;
+        };
+        let Ok(array) = value.as_array() else {
+            continue;
+        };
+        return array.clone();
     }
     vec![0.into(), 0.into(), 612.into(), 792.into()]
 }

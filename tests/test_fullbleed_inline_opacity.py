@@ -27,6 +27,17 @@ LAYOUT_CASES = {
 }
 
 
+@pytest.mark.parametrize("separator", [" ", "\n  ", "<!-- formatting -->\n  ", "<span> </span>"])
+def test_formatting_whitespace_preserves_collapsed_block_margins(separator):
+    runtime = engine()
+    css = CSS + ".block{margin:18pt 0;padding:10pt;border:1pt solid black}"
+    first, second = '<div class="block">First</div>', '<div class="block">Second</div>'
+    compact = bytes(runtime.render_pdf(first + second, css))
+    indented = bytes(runtime.render_pdf(first + separator + second, css))
+    assert geometry(compact) == geometry(indented)
+    assert pixels(compact).tobytes() == pixels(indented).tobytes()
+
+
 def engine():
     return fullbleed.PdfEngine(font_files=[str(fullbleed_assets.asset_path("fonts/NotoSans-Regular.ttf"))])
 
