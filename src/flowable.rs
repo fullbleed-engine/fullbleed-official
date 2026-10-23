@@ -18806,6 +18806,12 @@ impl TableFlowableData {
         let mut min_widths = vec![0i64; columns];
         let mut max_widths = vec![0i64; columns];
         let mut preferred_widths = vec![0i64; columns];
+        let mut absolute_widths = vec![0i64; columns];
+        let is_percentage_dependent = |width| match width {
+            LengthSpec::Percent(_) => true,
+            LengthSpec::Calc(calc) => calc.percent != 0.0,
+            _ => false,
+        };
 
         let ensure_span_requirement =
             |out: &mut [i64], start: usize, span: usize, required: i64| {
@@ -18860,7 +18866,8 @@ impl TableFlowableData {
                           row: &Vec<TableCell>,
                           min_out: &mut [i64],
                           max_out: &mut [i64],
-                          pref_out: &mut [i64]| {
+                          pref_out: &mut [i64],
+                          absolute_out: &mut [i64]| {
             let mut cursor_col = 0usize;
             for (cell_index, cell) in row.iter().enumerate() {
                 if cursor_col >= columns {
@@ -18887,6 +18894,12 @@ impl TableFlowableData {
                 });
                 if let Some(resolved) = resolved_preferred {
                     ensure_span_requirement(pref_out, cursor_col, col_span, resolved);
+                    if cell
+                        .preferred_width
+                        .is_some_and(|width| !is_percentage_dependent(width))
+                    {
+                        ensure_span_requirement(absolute_out, cursor_col, col_span, resolved);
+                    }
                 }
                 let padding = cell.resolved_padding(span_width);
                 let border = cell.resolved_border(span_width);
@@ -18947,8 +18960,8 @@ impl TableFlowableData {
         };
 
         if row_count >= 64 && !debug_verbose {
-            let merge = |mut a: (Vec<i64>, Vec<i64>, Vec<i64>),
-                         b: (Vec<i64>, Vec<i64>, Vec<i64>)| {
+            let merge = |mut a: (Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>),
+                         b: (Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>)| {
                 for i in 0..columns {
                     if b.0[i] > a.0[i] {
                         a.0[i] = b.0[i];
@@ -18959,35 +18972,44 @@ impl TableFlowableData {
                     if b.2[i] > a.2[i] {
                         a.2[i] = b.2[i];
                     }
+                    if b.3[i] > a.3[i] {
+                        a.3[i] = b.3[i];
+                    }
                 }
                 a
             };
-            let (min_h, max_h, pref_h) = crate::parallel::fold_reduce(
+            let (min_h, max_h, pref_h, absolute_h) = crate::parallel::fold_reduce(
                 &self.header_rows,
                 || {
                     (
                         vec![0i64; columns],
                         vec![0i64; columns],
                         vec![0i64; columns],
+                        vec![0i64; columns],
                     )
                 },
                 |mut acc, row| {
-                    update_row("header", 0, row, &mut acc.0, &mut acc.1, &mut acc.2);
+                    update_row(
+                        "header", 0, row, &mut acc.0, &mut acc.1, &mut acc.2, &mut acc.3,
+                    );
                     acc
                 },
                 &merge,
             );
-            let (min_b, max_b, pref_b) = crate::parallel::fold_reduce(
+            let (min_b, max_b, pref_b, absolute_b) = crate::parallel::fold_reduce(
                 &self.body_rows,
                 || {
                     (
                         vec![0i64; columns],
                         vec![0i64; columns],
                         vec![0i64; columns],
+                        vec![0i64; columns],
                     )
                 },
                 |mut acc, row| {
-                    update_row("body", 0, row, &mut acc.0, &mut acc.1, &mut acc.2);
+                    update_row(
+                        "body", 0, row, &mut acc.0, &mut acc.1, &mut acc.2, &mut acc.3,
+                    );
                     acc
                 },
                 &merge,
@@ -18996,6 +19018,7 @@ impl TableFlowableData {
                 min_widths[i] = min_h[i].max(min_b[i]);
                 max_widths[i] = max_h[i].max(max_b[i]);
                 preferred_widths[i] = pref_h[i].max(pref_b[i]);
+                absolute_widths[i] = absolute_h[i].max(absolute_b[i]);
             }
         } else {
             for (row_index, row) in self.header_rows.iter().enumerate() {
@@ -19006,6 +19029,7 @@ impl TableFlowableData {
                     &mut min_widths,
                     &mut max_widths,
                     &mut preferred_widths,
+                    &mut absolute_widths,
                 );
             }
             for (row_index, row) in self.body_rows.iter().enumerate() {
@@ -19016,6 +19040,7 @@ impl TableFlowableData {
                     &mut min_widths,
                     &mut max_widths,
                     &mut preferred_widths,
+                    &mut absolute_widths,
                 );
             }
         }
@@ -19024,14 +19049,19 @@ impl TableFlowableData {
             if let Some(hint) = hint {
                 let resolved = hint.resolve_width(avail_width).to_milli_i64();
                 if resolved > 0 {
-                    min_widths[column_index] = min_widths[column_index].max(resolved);
+                    if !is_percentage_dependent(hint.width) {
+                        absolute_widths[column_index] = absolute_widths[column_index].max(resolved);
+                    }
                     max_widths[column_index] = max_widths[column_index].max(resolved);
                     preferred_widths[column_index] = preferred_widths[column_index].max(resolved);
                 }
             }
         }
 
+        let mut required_widths = min_widths.clone();
         for i in 0..columns {
+            required_widths[i] = required_widths[i].max(absolute_widths[i]);
+            min_widths[i] = min_widths[i].max(required_widths[i]);
             if preferred_widths[i] > 0 {
                 min_widths[i] = min_widths[i].max(preferred_widths[i]);
                 max_widths[i] = max_widths[i].max(preferred_widths[i]);
@@ -19039,6 +19069,32 @@ impl TableFlowableData {
         }
 
         let avail = avail_width.to_milli_i64().max(1);
+        let preferred_total: i64 = min_widths.iter().sum();
+        let required_total: i64 = required_widths.iter().sum();
+        if preferred_total > avail && required_total < preferred_total {
+            // Percentage widths are preferences, not intrinsic minima. A
+            // wide word or image in one column must not force the remaining
+            // percentage columns beyond a table that can otherwise fit.
+            // Distribute the available space above the real minima toward
+            // those preferences, keeping absolute width constraints intact.
+            let budget = (avail - required_total).max(0);
+            let flexibility = preferred_total - required_total;
+            let targets = min_widths.clone();
+            let mut used = 0i64;
+            for i in 0..columns {
+                let extra = targets[i] - required_widths[i];
+                let share = (budget as i128 * extra as i128 / flexibility as i128) as i64;
+                min_widths[i] = required_widths[i] + share;
+                used += share;
+            }
+            let mut remainder = budget - used;
+            for i in 0..columns {
+                if remainder > 0 && min_widths[i] < targets[i] {
+                    min_widths[i] += 1;
+                    remainder -= 1;
+                }
+            }
+        }
         let total_min: i64 = min_widths.iter().sum();
         let total_max: i64 = max_widths.iter().sum();
 
@@ -42727,6 +42783,178 @@ impl Flowable for RelativePositionedFlowable {
         let mut snapped = self.clone();
         snapped.child = self.child.with_grid_item_block_paint_snap();
         Box::new(snapped)
+    }
+}
+
+#[cfg(test)]
+mod table_percentage_width_tests {
+    use super::*;
+
+    #[derive(Clone)]
+    struct IntrinsicBox {
+        minimum: Pt,
+        maximum: Pt,
+    }
+
+    impl Flowable for IntrinsicBox {
+        fn wrap(&self, available: Pt, _height: Pt) -> Size {
+            Size {
+                width: available.min(self.maximum).max(self.minimum),
+                height: Pt::from_f32(10.0),
+            }
+        }
+
+        fn intrinsic_width(&self) -> Option<Pt> {
+            Some(self.maximum)
+        }
+
+        fn min_content_contribution(&self, _width: Pt) -> Option<Pt> {
+            Some(self.minimum)
+        }
+
+        fn split(&self, _width: Pt, _height: Pt) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+            None
+        }
+
+        fn draw(&self, _canvas: &mut Canvas, _x: Pt, _y: Pt, _width: Pt, _height: Pt) {}
+    }
+
+    fn cell(minimum: f32, maximum: f32, width: LengthSpec) -> TableCell {
+        TableCell::new(
+            String::new(),
+            TextStyle::default(),
+            TextAlign::Left,
+            VerticalAlign::Top,
+            EdgeSizes::zero(),
+            None,
+            BorderSpec {
+                widths: EdgeSizes::zero(),
+                color: Color::BLACK,
+            },
+            None,
+            None,
+            None,
+            1,
+            Pt::from_f32(12.0),
+            None,
+            false,
+            false,
+        )
+        .with_content(Box::new(IntrinsicBox {
+            minimum: Pt::from_f32(minimum),
+            maximum: Pt::from_f32(maximum),
+        }))
+        .with_preferred_width(width, Pt::from_f32(12.0), Pt::from_f32(12.0))
+    }
+
+    fn widths(table: &TableFlowable, available: f32) -> Vec<Pt> {
+        table.data.compute_column_widths(
+            Pt::from_f32(available),
+            table.max_columns(),
+            TableLayoutMode::Auto,
+            BorderCollapseMode::Separate,
+        )
+    }
+
+    #[test]
+    fn table_percentage_preferences_yield_to_wide_intrinsic_content() {
+        let row = vec![
+            cell(30.0, 150.0, LengthSpec::Percent(0.26)),
+            cell(110.0, 110.0, LengthSpec::Percent(0.13)),
+            cell(45.0, 130.0, LengthSpec::Percent(0.19)),
+            cell(40.0, 330.0, LengthSpec::Percent(0.42)),
+        ];
+        let single = widths(&TableFlowable::new(vec![row.clone()]), 550.0);
+        let parallel = widths(&TableFlowable::new(vec![row; 64]), 550.0);
+        assert_eq!(
+            single, parallel,
+            "serial and parallel measurement must agree"
+        );
+        assert_eq!(single.iter().copied().sum::<Pt>(), Pt::from_f32(550.0));
+        for (actual, minimum) in single.iter().zip([30.0, 110.0, 45.0, 40.0]) {
+            assert!(*actual >= Pt::from_f32(minimum));
+        }
+        assert_eq!(single[1], Pt::from_f32(110.0));
+        assert!(
+            single[3] < Pt::from_f32(231.0),
+            "the wrapping column must share the space pressure"
+        );
+    }
+
+    #[test]
+    fn table_percentage_preferences_keep_feasible_authored_widths() {
+        let table = TableFlowable::new(vec![vec![
+            cell(20.0, 80.0, LengthSpec::Percent(0.3)),
+            cell(20.0, 80.0, LengthSpec::Percent(0.7)),
+        ]]);
+        assert_eq!(
+            widths(&table, 200.0),
+            vec![Pt::from_f32(60.0), Pt::from_f32(140.0)]
+        );
+    }
+
+    #[test]
+    fn table_percentage_preferences_do_not_shrink_required_absolute_sizes() {
+        let table = TableFlowable::new(vec![vec![
+            cell(20.0, 50.0, LengthSpec::Absolute(Pt::from_f32(100.0))),
+            cell(20.0, 50.0, LengthSpec::Absolute(Pt::from_f32(150.0))),
+            cell(30.0, 80.0, LengthSpec::Percent(0.5)),
+        ]]);
+        assert_eq!(
+            widths(&table, 200.0),
+            vec![Pt::from_f32(100.0), Pt::from_f32(150.0), Pt::from_f32(30.0)]
+        );
+        let intrinsic = TableFlowable::new(vec![vec![
+            cell(140.0, 140.0, LengthSpec::Percent(0.5)),
+            cell(100.0, 100.0, LengthSpec::Percent(0.5)),
+        ]]);
+        assert_eq!(
+            widths(&intrinsic, 200.0),
+            vec![Pt::from_f32(140.0), Pt::from_f32(100.0)]
+        );
+    }
+
+    #[test]
+    fn table_percentage_column_hints_can_yield_to_intrinsic_widths() {
+        let table = TableFlowable::new(vec![vec![
+            cell(120.0, 120.0, LengthSpec::Auto),
+            cell(20.0, 200.0, LengthSpec::Auto),
+        ]])
+        .with_column_width_hints(vec![
+            Some(TableColumnWidthHint::new(
+                LengthSpec::Percent(0.5),
+                Pt::from_f32(12.0),
+                Pt::from_f32(12.0),
+            )),
+            Some(TableColumnWidthHint::new(
+                LengthSpec::Percent(0.5),
+                Pt::from_f32(12.0),
+                Pt::from_f32(12.0),
+            )),
+        ]);
+        assert_eq!(
+            widths(&table, 200.0),
+            vec![Pt::from_f32(120.0), Pt::from_f32(80.0)]
+        );
+    }
+
+    #[test]
+    fn table_percentage_spans_fit_without_erasing_other_columns() {
+        let mut spanning = cell(40.0, 200.0, LengthSpec::Percent(0.7));
+        spanning.col_span = 2;
+        let table = TableFlowable::new(vec![
+            vec![spanning, cell(20.0, 80.0, LengthSpec::Percent(0.3))],
+            vec![
+                cell(100.0, 100.0, LengthSpec::Auto),
+                cell(30.0, 80.0, LengthSpec::Auto),
+                cell(20.0, 80.0, LengthSpec::Auto),
+            ],
+        ]);
+        let actual = widths(&table, 200.0);
+        assert_eq!(actual.iter().copied().sum::<Pt>(), Pt::from_f32(200.0));
+        for (actual, minimum) in actual.iter().zip([100.0, 30.0, 20.0]) {
+            assert!(*actual >= Pt::from_f32(minimum));
+        }
     }
 }
 
