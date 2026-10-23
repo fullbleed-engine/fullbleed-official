@@ -20328,8 +20328,7 @@ impl InlineBlockLayoutFlowable {
                         .windows(2)
                         .map(|items| items[1].x_off - items[0].x_off - items[0].size.width)
                         .collect();
-                    let mut cursor =
-                        text_align_offset(self.bidi_align, line_avail_width, line_width);
+                    let mut cursor = Pt::ZERO;
                     for (position, index) in order.iter().copied().enumerate() {
                         line_items[index].x_off = cursor;
                         cursor += line_items[index].size.width;
@@ -20339,8 +20338,12 @@ impl InlineBlockLayoutFlowable {
                     }
                 }
             }
+            // Physical alignment also applies to ordinary LTR inline rows,
+            // whose text does not require a bidi reordering pass. Apply it
+            // once, after any visual reordering, for both kinds of line.
+            let align_offset = text_align_offset(self.bidi_align, line_avail_width, line_width);
             for item in line_items.iter_mut() {
-                item.x_off += left_inset;
+                item.x_off += left_inset + align_offset;
             }
             let items = std::mem::take(line_items);
             lines.push(InlineLineLayout {

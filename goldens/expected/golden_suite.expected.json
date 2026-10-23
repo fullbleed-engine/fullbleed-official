@@ -1,14 +1,14 @@
 {
   "schema": "fullbleed.golden_suite.v1",
-  "generated_at_utc": "2026-10-23T03:04:07.177338+00:00",
+  "generated_at_utc": "2026-10-23T12:18:13.597688+00:00",
   "cases": {
     "acme_invoice": {
       "case_id": "acme_invoice",
       "report": "examples/acme_invoice/report.py",
       "pdf": {
         "path": "examples/acme_invoice/output/acme_sample_invoice.pdf",
-        "bytes": 93275,
-        "sha256": "91e99f07eba4a7a50746c5a26c00db5b543baa0e977baf9be2b2484502f44f9b"
+        "bytes": 93277,
+        "sha256": "034b844f4498b4a05d8466f36fcb45526c3f43caaba6cebbb32e03182f3591b8"
       },
       "png": {
         "count": 1,
@@ -16,8 +16,8 @@
           {
             "name": "acme_sample_invoice_page1.png",
             "path": "examples/acme_invoice/output/acme_sample_invoice_page1.png",
-            "bytes": 162926,
-            "sha256": "ea035412205f65c949ea9afbd61aef53864000a72e7d769920a94505d84e7901"
+            "bytes": 162884,
+            "sha256": "bfa2900ab1784f88f43bd32d0d3f31188a4ad5a626774337e36a782a4f9b9af6"
           }
         ]
       },
@@ -36,8 +36,8 @@
       "report": "examples/bank_statement/report.py",
       "pdf": {
         "path": "examples/bank_statement/output/bank_statement.pdf",
-        "bytes": 19366,
-        "sha256": "4972312a37c3a4817a4088a7c870eea9cc305166ba11fc7acf4d283d95098fb4"
+        "bytes": 19377,
+        "sha256": "191a7e862823d53fc50ebdffbf8a9a1e6aee9ddcb9add262ceb9df8aecf86618"
       },
       "png": {
         "count": 2,
@@ -45,8 +45,8 @@
           {
             "name": "bank_statement_page1.png",
             "path": "examples/bank_statement/output/bank_statement_page1.png",
-            "bytes": 198394,
-            "sha256": "8bd7d6bf01ff153a6e3baccac3ff93411e640636a307581b5255afc53f4e573c"
+            "bytes": 198484,
+            "sha256": "4a914484143150a8d15b62b16a1c74c37abca6b754ed306a002dcb518b8ca5cc"
           },
           {
             "name": "bank_statement_page2.png",
@@ -71,8 +71,8 @@
       "report": "examples/coastal_menu/report.py",
       "pdf": {
         "path": "examples/coastal_menu/output/coastal_menu.pdf",
-        "bytes": 15788,
-        "sha256": "118d7226f97e9aad5f38f2076d6fb2198ba85215a5f654d52dc28456daf67f08"
+        "bytes": 15792,
+        "sha256": "a60a9a45af09839d203a84f3ee6767e160179702681742eacda57e0f956a492d"
       },
       "png": {
         "count": 1,
@@ -80,8 +80,8 @@
           {
             "name": "coastal_menu_page1.png",
             "path": "examples/coastal_menu/output/coastal_menu_page1.png",
-            "bytes": 244975,
-            "sha256": "5eb2233354924f29a28e04de511931614584a825ac8520e14cbc6413ec7d8aec"
+            "bytes": 245058,
+            "sha256": "4eba602260dbbc6a9d772394c28e0efef11e34ff9ceee51352864f40ac831340"
           }
         ]
       },

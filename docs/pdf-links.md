@@ -3,12 +3,12 @@
 HTML anchors can provide external URLs and navigation within a document. The
 same behavior applies to anchors emitted by Python components.
 
-**Version scope:** this guide describes the unreleased navigation work in
-[PR #125](https://github.com/fullbleed-engine/fullbleed-official/pull/125), verified
-with candidate wheels. Published `2.6.0a13` predates this work; its version number
-alone does not establish support. Use a wheel built from the candidate source
-when reproducing these examples. The four-shape observations below record
-engine revision `e7ae956`.
+**Version scope:** this guide targets the **2.6.0a14** prerelease, which
+packages [PR #125](https://github.com/fullbleed-engine/fullbleed-official/pull/125).
+Stable `2.5.34` and alpha `2.6.0a13` predate these native-navigation changes.
+For an unpublished checkout, build and install its wheel before reproducing
+the examples. The retained reader observations identify their exact source
+revisions and native modules; the original four-shape observations use `e7ae956`.
 
 ## External and internal links
 

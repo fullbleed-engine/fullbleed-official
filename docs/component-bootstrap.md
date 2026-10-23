@@ -5,13 +5,13 @@ The experimental Python kit covers the 23 component families in **Bootstrap
 utility stylesheet. It uses the repository's existing, unmodified MIT-licensed
 stylesheet. Components carry that dependency; a document includes it once.
 
-The **2.6.0a13** alpha provides this kit under
+The **2.6.0a14** alpha provides this kit under
 `fullbleed.components.bootstrap`. Install it explicitly in a virtual
-environment: `python -m pip install --pre "fullbleed==2.6.0a13"`.
+environment: `python -m pip install --pre "fullbleed==2.6.0a14"`.
 Ordinary `pip install fullbleed` selects stable **2.5.34**, which includes the
 established `fullbleed.ui` API. The new kit remains experimental; see the
 [current release decision and stabilization criteria](https://docs.fullbleed.dev/guides/component-status/).
-The [alpha runbook](release/2.6.0a13-runbook.md) records the release gates and scope.
+The [alpha runbook](release/2.6.0a14-runbook.md) records the release gates and scope.
 For an unpublished checkout, build with
 `python build_backend/fullbleed_build_backend.py wheel --out dist` and install
 the printed wheel path.

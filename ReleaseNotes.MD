@@ -1,3 +1,51 @@
+# Fullbleed Release Notes - 2.6.0a14
+
+HTML anchors and component links now produce native PDF navigation. External
+URLs, email links and internal destinations survive wrapped text, images,
+transforms, page fragments and recipient-specific reflow. Tagged output retains
+the tested Link, annotation-reference and parent-tree relationships. Styled and
+unstyled component HTML exports retain their original `href` values.
+
+Inline opacity now applies to text and images as a composited group while
+preserving wrapping and pagination. Fully transparent content leaves no active
+PDF link. Empty destinations retain their normal layout behavior. Plain text,
+neutral spans and neutral links share table-cell alignment; odd and fractional
+dimensions no longer introduce baseline shifts. The preview server cleans up
+timed-out render processes and recovers on the next save.
+
+Cells containing inline text followed by block content retain inherited center
+and right alignment. This includes Common Ground's percentage labels above its
+budget bars; 56 regression cases cover both authoring paths and direct, compiled
+and reflow output.
+
+Imported-link cropping retains appearance placement and targets without drawing
+an extra border along the cut. For border-only sources, Fullbleed creates an
+explicit appearance from the declared border. Readers disagree on their source
+fallback rendering, so this is not a promise to reproduce each reader's pixels.
+The [navigation guide](docs/pdf-links.md) and
+[independent reader checks](tools/pdf_link_readers/README.md) describe the scope.
+
+The implementation in [PR #125](https://github.com/fullbleed-engine/fullbleed-official/pull/125)
+passes 1,570 native tests and 1,365 Python tests. All 426 targeted Chromium
+vertical-origin comparisons match within 0.001pt. Independent imported-border
+checks retain 63,000 analytic samples with no differences, alongside negative
+controls and the source-reader limitations. The unchanged 1,662-fixture CSS
+comparison reports 1,625 PASS, 19 FAIL and 18 REFERENCE-DISPUTED: two improvements
+against published alpha 13 and no new failing fixtures. The 29 output PNGs for
+the remaining failures are byte-identical to that baseline.
+
+This entry describes a candidate until publication completes. The
+[alpha 14 runbook](docs/release/2.6.0a14-runbook.md) requires qualification of the
+final-version wheel and public artifacts. Component authoring remains alpha;
+the existing API and ordinary stable installation remain available. Python uses
+`2.6.0a14`; Cargo source uses `2.6.0-alpha.14`.
+
+Reader hit regions can exceed some sloped painted shapes. Exact curve behavior,
+keyboard navigation, assistive-technology behavior and mouse-highlight parity
+are unqualified. Composition does not preserve imported structure trees.
+Dedicated PDF/VT validation remains unavailable. No general browser parity,
+accessibility conformance or stable-component graduation is claimed.
+
 # Fullbleed Release Notes - 2.6.0a13
 
 Styled spans and links no longer drop a paragraph's `::first-letter` styling
