@@ -1617,6 +1617,64 @@ mod tests {
     }
 
     #[test]
+    fn pdf_links_middle_table_cells_snap_absolute_baselines_with_odd_dimensions() {
+        let engine = crate::FullBleed::builder()
+            .register_font_file("python/fullbleed_assets/fonts/NotoSans-Regular.ttf")
+            .build()
+            .unwrap();
+        // Independently measured Chromium PDF baselines for the bundled font.
+        // Odd cell/line dimensions expose half-pixel alignment; the 14px face
+        // also distinguishes nearest descent from outward descent rounding.
+        for (size, line_height, height, expected_baseline) in [
+            (14, 14, 40, 18_750),
+            (14, 14, 41, 19_500),
+            (14, 14, 42, 19_500),
+            (14, 19, 40, 19_500),
+            (14, 19, 41, 19_500),
+            (14, 19, 42, 20_250),
+            (14, 21, 40, 19_500),
+            (14, 21, 41, 19_500),
+            (14, 21, 42, 20_250),
+            (16, 16, 40, 19_500),
+            (16, 16, 41, 20_250),
+            (16, 16, 42, 20_250),
+            (16, 21, 40, 19_500),
+            (16, 21, 41, 19_500),
+            (16, 21, 42, 20_250),
+            (16, 24, 40, 19_500),
+            (16, 24, 41, 20_250),
+            (16, 24, 42, 20_250),
+        ] {
+            for (variant, text) in [
+                ("plain", "Text"),
+                ("span", "<span>Text</span>"),
+                ("linked", "<a href='https://example.invalid/table'>Text</a>"),
+            ] {
+                let css = format!(
+                    "@page{{size:200px 140px;margin:0}}*{{box-sizing:border-box;margin:0;padding:0}}body{{font:{size}px/{line_height}px 'Noto Sans'}}table{{width:160px;table-layout:fixed;border-collapse:collapse}}td{{height:{height}px;vertical-align:middle}}a{{color:inherit;text-decoration:none}}"
+                );
+                let html = format!("<table><tr><td>{text}</td></tr></table>");
+                let compiled = engine.compile_document(&html, &css).unwrap();
+                assert_eq!(compiled.page_count(), 1);
+                let baselines = compiled.document.pages[0]
+                    .commands
+                    .iter()
+                    .filter_map(|command| match command {
+                        Command::DrawString { y, text, .. } => {
+                            let (_, text) = crate::text_shape::decode_shape_options(text);
+                            (text == "Text").then_some(y.to_milli_i64() + size * 750)
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                let name = format!("table-middle-odd-{size}-{line_height}-{height}-{variant}");
+                retain_pdf(&name, &compiled.render_to_buffer().unwrap());
+                assert_eq!(baselines, vec![expected_baseline], "{name}");
+            }
+        }
+    }
+
+    #[test]
     fn pdf_links_rich_table_cells_keep_breaks_and_definite_child_widths() {
         let engine = crate::FullBleed::builder()
             .register_font_file("python/fullbleed_assets/fonts/NotoSans-Regular.ttf")

@@ -153,6 +153,27 @@ cargo test --lib pdf_links_middle_table_cells_use_the_line_box_without_extra_pai
 This measures these baseline positions, not general browser or raster parity.
 The unchanged external CSS corpus remains a separate release check.
 
+The [odd and fractional dimension follow-up](observations/table-middle-fractional-baselines.json)
+adds 208 measurements, including four multipage upstream fixtures. Registered
+font extents round to the nearest CSS pixel, half-leading rounds down, and
+middle alignment rounds the final baseline after positioning the line box.
+These cases cover 14px and 16px fonts, odd and fractional line/cell heights,
+fractional cell origins, and plain/span/link variants. All measured vertical
+origins match Chromium within 0.001pt; the earlier 218 PDFs remain byte-identical.
+
+The separate 99-fixture table audit injects the pinned upstream UA stylesheet
+before authored rules. Its previous-wheel control reproduces all 99 CI PDFs
+byte for byte. With the correction, 91 remain identical and eight have smaller
+vertical-origin error, including the four multipage regressions. Text and page
+assignments are unchanged. The initial local attempt omitted that stylesheet
+and is explicitly excluded from the evidence. The new native regression is:
+
+```sh
+cargo test --lib pdf_links_middle_table_cells_snap_absolute_baselines_with_odd_dimensions
+```
+
+This focused audit does not replace the unchanged full-corpus CI comparison.
+
 ## Inspect a source link border at different zoom levels
 
 The [independent source PDF](fixtures/border-zoom.pdf) contains two frames with

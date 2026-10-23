@@ -36,8 +36,8 @@
       "report": "examples/bank_statement/report.py",
       "pdf": {
         "path": "examples/bank_statement/output/bank_statement.pdf",
-        "bytes": 19380,
-        "sha256": "52f5d20e77b65caa1ba777270a800bc1bd06c7bad1cbc7e72412a0343d2d7550"
+        "bytes": 19366,
+        "sha256": "4972312a37c3a4817a4088a7c870eea9cc305166ba11fc7acf4d283d95098fb4"
       },
       "png": {
         "count": 2,
@@ -45,8 +45,8 @@
           {
             "name": "bank_statement_page1.png",
             "path": "examples/bank_statement/output/bank_statement_page1.png",
-            "bytes": 198188,
-            "sha256": "537cfed4cd8f8e29a22bb5859b1dec28219e0ff1357ff0edaf139ad9f1856946"
+            "bytes": 198394,
+            "sha256": "8bd7d6bf01ff153a6e3baccac3ff93411e640636a307581b5255afc53f4e573c"
           },
           {
             "name": "bank_statement_page2.png",

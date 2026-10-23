@@ -3776,6 +3776,23 @@ fn text_baseline_for_table_cell_line(
     font_registry: Option<&FontRegistry>,
     line_height: Pt,
 ) -> Pt {
+    if style.css_pixel_snap_metrics {
+        let metrics = font_registry.and_then(|registry| {
+            let (primary, _) = resolve_font_stack(Some(registry), style);
+            registry.vertical_metrics(&primary, style.font_size)
+        });
+        if let Some((ascent, descent)) = metrics {
+            // A table's inline font box rounds both extents to the nearest
+            // CSS pixel. Split its leading on that grid, with the indivisible
+            // pixel below the baseline, before centering the logical line box.
+            // Outward descent rounding can add a pixel to a registered face
+            // and move every line up (for example Noto Sans at 14px).
+            let ascent = round_to_css_pixel(ascent);
+            let descent = round_to_css_pixel(descent);
+            return ascent
+                + floor_to_css_pixel_signed((line_height - ascent - descent).mul_ratio(1, 2));
+        }
+    }
     let mut baseline = text_baseline_for_line(style, font_registry, line_height);
     if css_positive_odd_pixel_leading(style, font_registry, line_height) {
         // LayoutNG table-cell line boxes put the indivisible positive leading
@@ -17347,7 +17364,23 @@ impl TableFlowable {
                         cell_y + cell_height - pad_bottom - text_block_height
                     }
                 };
-                text_y.max(cell_y + pad_top)
+                let text_y = text_y.max(cell_y + pad_top);
+                if cell.style.css_pixel_snap_metrics && matches!(cell.valign, VerticalAlign::Middle)
+                {
+                    // Odd cell/line dimensions leave a half-pixel centering
+                    // offset. Snap the final baseline, not the logical height
+                    // or a fixed paint offset, so fractional cell origins and
+                    // neutral inline wrappers keep the same phase.
+                    let baseline = text_y
+                        + text_baseline_for_table_cell_line(
+                            &cell.style,
+                            cell.font_registry.as_deref(),
+                            cell.effective_line_height(),
+                        );
+                    text_y + round_to_css_pixel(baseline) - baseline
+                } else {
+                    text_y
+                }
             };
             let collapsed_no_wrap_phase = self.uses_centered_collapsed_edges()
                 && cell.no_wrap
