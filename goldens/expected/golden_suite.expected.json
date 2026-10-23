@@ -36,8 +36,8 @@
       "report": "examples/bank_statement/report.py",
       "pdf": {
         "path": "examples/bank_statement/output/bank_statement.pdf",
-        "bytes": 19368,
-        "sha256": "825afbee9d7ef5d1a20af6e1ba8fc0d9930189d5f6dbbe20eaad913536bab6cf"
+        "bytes": 19376,
+        "sha256": "49aea68b1ba279cdea4e7a9541bb1dce0496f2eced554b0c28ef20529909d8e0"
       },
       "png": {
         "count": 2,
@@ -45,8 +45,8 @@
           {
             "name": "bank_statement_page1.png",
             "path": "examples/bank_statement/output/bank_statement_page1.png",
-            "bytes": 198249,
-            "sha256": "b7d68933bfb7dcba2156c89f37095858802c0a6e1ff33663764c99f58b6c67a4"
+            "bytes": 198191,
+            "sha256": "605bbf727893812ea02535d1ca8c47b3263f49c81c1b2dda74d6fda104879d56"
           },
           {
             "name": "bank_statement_page2.png",
@@ -59,7 +59,7 @@
       "validation": {
         "path": "examples/bank_statement/output/bank_statement_component_mount_validation.json",
         "kind": "component_mount",
-        "sha256": "76c56d8a8b94dabe2ec65da0d4ca1037a57208fe79e755fc8bf6034711974506"
+        "sha256": "351edf7563a7e29e2474c803d7ad995e74972abc4e6e50a5a95cc1305057549f"
       },
       "css_layers": {
         "path": "examples/bank_statement/output/bank_statement_css_layers.json",
