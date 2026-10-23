@@ -28881,6 +28881,37 @@ impl ContainerFlowable {
         self.clips_overflow_x() || self.clips_overflow_y()
     }
 
+    fn has_bounded_overflow_viewport(&self) -> bool {
+        if !self.clips_any_overflow() {
+            return false;
+        }
+        // Clipping paint does not by itself make a box monolithic. In
+        // particular, an auto-height table must continue onto later pages.
+        // Retain the existing viewport behavior when the author bounds the
+        // block size, including max-height, line clamping, and an aspect ratio
+        // with a definite width. Paint clipping still applies to each fragment.
+        let has_height = |height| {
+            !matches!(
+                height,
+                LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+            )
+        };
+        has_height(self.state.height)
+            || has_height(self.state.max_height)
+            || (self.state.line_clamp.is_some() && self.state.line_clamp_line_height > Pt::ZERO)
+            || (self.state.aspect_ratio.is_some()
+                && !matches!(
+                    self.state.width,
+                    LengthSpec::Auto
+                        | LengthSpec::Inherit
+                        | LengthSpec::Initial
+                        | LengthSpec::Content
+                        | LengthSpec::MinContent
+                        | LengthSpec::MaxContent
+                        | LengthSpec::FitContent
+                ))
+    }
+
     pub fn with_float_containment(mut self, contain_floats: bool) -> Self {
         self.state.contain_floats = contain_floats;
         self
@@ -36271,7 +36302,7 @@ impl Flowable for ContainerFlowable {
         &self,
         avail_width: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
-        if self.clips_any_overflow() {
+        if self.has_bounded_overflow_viewport() {
             return None;
         }
         let (_, _, _, content_width, _) = self.resolve_box(avail_width);
@@ -36925,10 +36956,9 @@ impl Flowable for ContainerFlowable {
         avail_height: Pt,
         context: SplitContext,
     ) -> Result<(Box<dyn Flowable>, Box<dyn Flowable>), SplitFailure> {
-        // CSS overflow clipping establishes a monolithic box for page
-        // fragmentation. Descendant forced breaks stay inside the clipped
-        // formatting context instead of splitting the outer box into pages.
-        if self.clips_any_overflow() {
+        // Only a bounded overflow viewport suppresses descendant breaks.
+        // Unbounded clipped containers fragment normally and clip each part.
+        if self.has_bounded_overflow_viewport() {
             return Err(SplitFailure::new("clipped_container", Vec::new()));
         }
         if let Some(fragments) = self.split_fixed_height(avail_width, avail_height) {
@@ -43834,7 +43864,7 @@ mod grid_and_transform_regression_tests {
     }
 
     #[test]
-    fn overflow_clip_suppresses_descendant_forced_page_breaks() {
+    fn bounded_overflow_suppresses_descendant_forced_page_breaks() {
         let first = ContainerFlowable::new_pt(Vec::new(), Pt::from_f32(12.0), Pt::from_f32(12.0))
             .with_height(LengthSpec::Absolute(Pt::from_f32(20.0)));
         let second = ContainerFlowable::new_pt(Vec::new(), Pt::from_f32(12.0), Pt::from_f32(12.0))
@@ -43850,12 +43880,66 @@ mod grid_and_transform_regression_tests {
         )
         .with_overflow_hidden(true);
 
-        assert!(
+        for bounded in [
             clipped
-                .split(Pt::from_f32(100.0), Pt::from_f32(100.0))
-                .is_none(),
-            "a clipped formatting context is monolithic for page fragmentation"
+                .clone()
+                .with_height(LengthSpec::Absolute(Pt::from_f32(60.0))),
+            clipped
+                .clone()
+                .with_max_height(LengthSpec::Absolute(Pt::from_f32(60.0))),
+            clipped.clone().with_line_clamp(Some(2), Pt::from_f32(15.0)),
+            clipped
+                .clone()
+                .with_width(LengthSpec::Absolute(Pt::from_f32(60.0)))
+                .with_aspect_ratio(Some(1.0)),
+        ] {
+            assert!(
+                bounded
+                    .split(Pt::from_f32(100.0), Pt::from_f32(100.0))
+                    .is_none(),
+                "a bounded clipped viewport must not expose hidden content on later pages"
+            );
+        }
+
+        let (first, second) = clipped
+            .split(Pt::from_f32(100.0), Pt::from_f32(100.0))
+            .expect("an auto-height clipped container must honor the descendant page break");
+        assert_eq!(
+            first.wrap(Pt::from_f32(100.0), huge_pt()).height,
+            Pt::from_f32(100.0)
         );
+        assert_eq!(
+            second.wrap(Pt::from_f32(100.0), huge_pt()).height,
+            Pt::from_f32(20.0)
+        );
+    }
+
+    #[test]
+    fn auto_height_overflow_splits_at_natural_child_boundaries() {
+        for mode in [OverflowMode::Hidden, OverflowMode::Clip] {
+            let container = ContainerFlowable::new_pt(
+                vec![
+                    Box::new(Spacer::new_pt(Pt::from_f32(60.0))),
+                    Box::new(Spacer::new_pt(Pt::from_f32(60.0))),
+                ],
+                Pt::from_f32(12.0),
+                Pt::from_f32(12.0),
+            )
+            .with_overflow_modes(mode, mode);
+            let (first, second) = container
+                .split(Pt::from_f32(100.0), Pt::from_f32(100.0))
+                .expect("clipping must not push the second child below the page edge");
+            // A sliced non-final container fills its fragmentainer; the
+            // second child keeps its full height in the continuation.
+            assert_eq!(
+                first.wrap(Pt::from_f32(100.0), huge_pt()).height,
+                Pt::from_f32(100.0)
+            );
+            assert_eq!(
+                second.wrap(Pt::from_f32(100.0), huge_pt()).height,
+                Pt::from_f32(60.0)
+            );
+        }
     }
 
     #[test]
