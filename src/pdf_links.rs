@@ -411,22 +411,8 @@ impl Collector<'_> {
             return (width, pt(ascent), pt(descent));
         }
         let (_, clean) = crate::text_shape::decode_shape_options(text);
-        let width = crate::base14_metrics::font(&state.font)
-            .map(|font| {
-                let width = clean
-                    .chars()
-                    .filter_map(|ch| {
-                        font.glyph_by_unicode(ch)
-                            .or_else(|| font.glyph_by_unicode('?'))
-                    })
-                    .fold(Pt::ZERO, |sum, glyph| {
-                        sum + state.size.mul_ratio(i32::from(glyph.width), 1000)
-                    });
-                // Match the used per-glyph advances of built-in-font inline
-                // words. A separate floating-point sum leaves sub-millipoint
-                // gaps between their activation and the following space box.
-                pt(width)
-            })
+        let width = crate::base14_metrics::measure_text_width(&state.font, state.size, clean)
+            .map(pt)
             .unwrap_or(0.0);
         // CSS's standard-font line box metrics; embedded fonts use their own
         // hhea metrics above. These bounds describe the text box, not glyph ink.
@@ -1453,6 +1439,242 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn pdf_links_preserved_cell_lines_obey_authored_pagination() {
+        let engine = crate::FullBleed::builder()
+            .register_font_file("python/fullbleed_assets/fonts/NotoSans-Regular.ttf")
+            .build()
+            .unwrap();
+        let words = (1..=10)
+            .map(|index| format!("Line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for whitespace in ["pre", "pre-wrap", "pre-line", "break-spaces"] {
+            for (orphans, widows, first_lines) in [(1, 1, 9), (2, 2, 8), (3, 4, 6)] {
+                for linked in [false, true] {
+                    let content = if linked {
+                        format!("<a href='https://example.invalid/report'>{words}</a>")
+                    } else {
+                        words.clone()
+                    };
+                    let html = format!("<table><tr><td>{content}</td></tr></table>");
+                    let css = format!(
+                        "@page{{size:200pt 200pt;margin:16pt}}body{{font-family:'Noto Sans';font-size:12pt;line-height:18pt}}table{{width:100%;border-collapse:collapse}}td{{padding:0;white-space:{whitespace};orphans:{orphans};widows:{widows}}}"
+                    );
+                    let compiled = engine.compile_document(&html, &css).unwrap();
+                    let name = format!(
+                        "cell-widows-{whitespace}-{orphans}-{widows}-{}",
+                        if linked { "linked" } else { "plain" }
+                    );
+                    retain_pdf(&name, &compiled.render_to_buffer().unwrap());
+                    let lines = compiled
+                        .document
+                        .pages
+                        .iter()
+                        .map(|page| {
+                            page.commands
+                                .iter()
+                                .filter_map(|command| match command {
+                                    Command::DrawString { y, text, .. }
+                                        if !text.trim().is_empty() =>
+                                    {
+                                        Some(y.to_milli_i64())
+                                    }
+                                    _ => None,
+                                })
+                                .collect::<std::collections::BTreeSet<_>>()
+                                .len()
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(lines, vec![first_lines, 10 - first_lines], "{name}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pdf_links_rich_table_cells_keep_breaks_and_definite_child_widths() {
+        let engine = crate::FullBleed::builder()
+            .register_font_file("python/fullbleed_assets/fonts/NotoSans-Regular.ttf")
+            .build()
+            .unwrap();
+        let painted_lines = |document: &Document| {
+            document
+                .pages
+                .iter()
+                .map(|page| {
+                    let mut lines = std::collections::BTreeMap::<i64, String>::new();
+                    for command in &page.commands {
+                        if let Command::DrawString { y, text, .. } = command {
+                            let (_, clean) = crate::text_shape::decode_shape_options(text);
+                            lines
+                                .entry(y.to_milli_i64())
+                                .or_default()
+                                .extend(clean.chars().filter(|ch| !ch.is_whitespace()));
+                        }
+                    }
+                    lines.into_values().collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        let words = "Wide WWW narrow iii numbers 123. Read the full report. ".repeat(18);
+        let mut failures = Vec::new();
+        for family in ["Helvetica", "Courier", "Noto Sans"] {
+            let css = format!(
+                "@page{{size:200pt 200pt;margin:16pt}}body{{font-family:'{family}';font-size:12pt;line-height:18pt}}table{{width:100%;border-collapse:collapse}}td{{padding:0}}a{{color:inherit;text-decoration:none}}"
+            );
+            let plain_html = format!("<table><tr><td>{words}</td></tr></table>");
+            let linked_html = format!(
+                "<table><tr><td><a href='https://example.invalid/report'>{words}</a></td></tr></table>"
+            );
+            let plain = engine.compile_document(&plain_html, &css).unwrap();
+            let linked = engine.compile_document(&linked_html, &css).unwrap();
+            let name = format!("rich-table-wrap-{}", family.replace(' ', "-"));
+            retain_pdf(&format!("{name}-plain"), &plain.render_to_buffer().unwrap());
+            retain_pdf(
+                &format!("{name}-linked"),
+                &linked.render_to_buffer().unwrap(),
+            );
+            if plain.page_count() != linked.page_count()
+                || linked.page_count() <= 1
+                || painted_lines(&plain.document) != painted_lines(&linked.document)
+            {
+                failures.push(format!(
+                    "{family}: plain {} pages, linked {} pages",
+                    plain.page_count(),
+                    linked.page_count()
+                ));
+            }
+        }
+        for (name, content) in [
+            ("fixed", "<div style='width:240pt'>Fixed</div>"),
+            (
+                "nested-fixed",
+                "<div><div style='width:240pt'>Fixed</div></div>",
+            ),
+            ("minimum", "<div style='min-width:240pt'>Fixed</div>"),
+            (
+                "nowrap",
+                "<span style='white-space:nowrap'>1234567890 1234567890 1234567890 1234567890</span>",
+            ),
+        ] {
+            let html = format!(
+                "<table><tr><td>{content}</td><td><a href='https://example.invalid/after'>After</a></td></tr></table>"
+            );
+            let css = "@page{size:200pt 200pt;margin:16pt}body{font-family:Courier;font-size:12pt;line-height:18pt}table{width:100%;border-collapse:collapse}td{padding:0}";
+            let compiled = engine.compile_document(&html, css).unwrap();
+            retain_pdf(
+                &format!("rich-table-width-{name}"),
+                &compiled.render_to_buffer().unwrap(),
+            );
+            let after_x = compiled.document.pages[0]
+                .commands
+                .iter()
+                .find_map(|command| match command {
+                    Command::DrawString { x, text, .. } if text == "After" => Some(pt(*x)),
+                    _ => None,
+                })
+                .expect("following column text is painted even when it overflows the page");
+            if after_x < 256.0 {
+                failures.push(format!(
+                    "{name}: following column starts at {} before the definite child ends",
+                    after_x
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "Rich table sizing: {failures:#?}");
+    }
+
+    #[test]
+    fn pdf_links_do_not_change_standard_font_wrapping() {
+        let engine = crate::FullBleed::builder()
+            .register_font_file("python/fullbleed_assets/fonts/NotoSans-Regular.ttf")
+            .build()
+            .unwrap();
+        let text = "Wide WWW narrow iii numbers 123. Read the full report. ".repeat(18);
+        let mut mismatches = Vec::new();
+        for family in [
+            "Helvetica",
+            "Helvetica-Bold",
+            "Helvetica-Oblique",
+            "Helvetica-BoldOblique",
+            "Times-Roman",
+            "Times-Bold",
+            "Times-Italic",
+            "Times-BoldItalic",
+            "Courier",
+            "Courier-Bold",
+            "Courier-Oblique",
+            "Courier-BoldOblique",
+            "Symbol",
+            "ZapfDingbats",
+            "Noto Sans",
+        ] {
+            for size in ["12", "12.337"] {
+                let name = format!("standard-font-wrap-{}-{size}", family.replace(' ', "-"));
+                let css = format!(
+                    "@page{{size:200pt 200pt;margin:16pt}}body{{font-family:'{family}';font-size:{size}pt;line-height:18pt}}p{{margin:0}}a{{color:inherit;text-decoration:none}}"
+                );
+                let plain_html = format!("<p>{text}</p>");
+                let linked_html =
+                    format!("<p><a href='https://example.invalid/report'>{text}</a></p>");
+                let plain = engine.compile_document(&plain_html, &css).unwrap();
+                let linked = engine.compile_document(&linked_html, &css).unwrap();
+                retain_pdf(&format!("{name}-plain"), &plain.render_to_buffer().unwrap());
+                retain_pdf(
+                    &format!("{name}-linked"),
+                    &linked.render_to_buffer().unwrap(),
+                );
+                if let Some(directory) = std::env::var_os("FULLBLEED_LINK_TEST_OUTPUT") {
+                    let directory = std::path::PathBuf::from(directory);
+                    std::fs::write(directory.join(format!("{name}-plain.html")), &plain_html)
+                        .unwrap();
+                    std::fs::write(directory.join(format!("{name}-linked.html")), &linked_html)
+                        .unwrap();
+                    std::fs::write(directory.join(format!("{name}.css")), &css).unwrap();
+                }
+                let lines = |document: &Document| {
+                    let mut rows = std::collections::BTreeMap::<(usize, i64), String>::new();
+                    for (page_index, page) in document.pages.iter().enumerate() {
+                        for command in &page.commands {
+                            if let Command::DrawString { y, text, .. } = command {
+                                let (_, text) = crate::text_shape::decode_shape_options(text);
+                                rows.entry((page_index, y.to_milli_i64()))
+                                    .or_default()
+                                    .push_str(text);
+                            }
+                        }
+                    }
+                    rows.into_iter()
+                        .map(|(position, text)| {
+                            (
+                                position,
+                                // Collapsed inline spaces are geometry/metadata;
+                                // whole paragraphs can paint them in a string.
+                                text.chars()
+                                    .filter(|ch| !ch.is_whitespace())
+                                    .collect::<String>(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                };
+                if plain.page_count() != linked.page_count()
+                    || lines(&plain.document) != lines(&linked.document)
+                {
+                    mismatches.push(format!(
+                        "{name}: plain {} pages, linked {} pages",
+                        plain.page_count(),
+                        linked.page_count()
+                    ));
+                }
+            }
+        }
+        assert!(
+            mismatches.is_empty(),
+            "Adding a link changed line layout: {mismatches:#?}"
+        );
     }
 
     #[test]

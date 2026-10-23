@@ -2492,6 +2492,13 @@ pub trait Flowable: FlowableClone + Send + Sync {
         self.intrinsic_width()
     }
 
+    /// Minimum outer width contributed to intrinsic parent sizing. Unlike a
+    /// flex item's content-size suggestion, this includes authored child width
+    /// constraints. Auto table columns use it without making rich text atomic.
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.flex_min_content_width(avail_width)
+    }
+
     /// Minimum outer main-axis width used by flex constraint resolution.
     fn flex_min_main_width(&self, _avail_width: Pt) -> Option<Pt> {
         None
@@ -2998,6 +3005,10 @@ impl Flowable for FootnoteCallFlowable {
 
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.call.flex_min_content_width(avail_width)
+    }
+
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.call.min_content_contribution(avail_width)
     }
 
     fn flex_max_content_width(&self, avail_width: Pt) -> Option<Pt> {
@@ -7064,7 +7075,12 @@ impl Paragraph {
 
     fn measure_initial_letter_width(&self, style: &TextStyle, text: &str) -> Pt {
         let Some(registry) = self.font_registry.as_deref() else {
-            return style.font_size.mul_ratio(3, 5);
+            let (primary, _) = resolve_font_stack(None, style);
+            return ceil_to_css_pixel(crate::font::measure_unregistered_text_width(
+                &primary,
+                style.font_size,
+                text,
+            ));
         };
         let Some(font_name) = self.text_style_primary_font(style) else {
             return style.font_size.mul_ratio(3, 5);
@@ -7121,34 +7137,6 @@ impl Paragraph {
                 log_perf_counts("layout.text.width", &[("cache_miss", 1)]);
             }
             return value;
-        }
-        if self.measure_inline_word {
-            let (primary, _, _) =
-                resolve_font_stack_with_ranges(self.font_registry.as_deref(), &self.style);
-            let registered = self
-                .font_registry
-                .as_deref()
-                .is_some_and(|registry| registry.resolve(&primary).is_some());
-            if !registered {
-                // A whole built-in-font string paints with the PDF font's real
-                // advances even when legacy paragraph measurement is heuristic.
-                // Separate words must use those same advances, otherwise each
-                // heuristic surplus becomes a visibly oversized inter-word gap.
-                if let Some(font) = crate::base14_metrics::font(&primary) {
-                    let base = text.chars().try_fold(Pt::ZERO, |sum, ch| {
-                        font.glyph_by_unicode(ch).map(|glyph| {
-                            sum + self.style.font_size.mul_ratio(i32::from(glyph.width), 1000)
-                        })
-                    });
-                    if let Some(base) = base {
-                        let value = text_width_with_spacing(base, &self.style, text);
-                        if let Ok(mut cache) = self.width_cache.lock() {
-                            cache.insert(text, value);
-                        }
-                        return value;
-                    }
-                }
-            }
         }
         if let Some(registry) = &self.font_registry {
             let (primary, fallbacks, unicode_ranges) =
@@ -7216,9 +7204,9 @@ impl Paragraph {
             }
             value
         } else {
-            let char_width = (self.style.font_size * 0.6).max(Pt::from_f32(1.0));
-            let count = text.chars().count();
-            let base = char_width * (count as i32);
+            let (primary, _) = resolve_font_stack(None, &self.style);
+            let base =
+                crate::font::measure_unregistered_text_width(&primary, self.style.font_size, text);
             let value = text_width_with_spacing(base, &self.style, text);
             if let Ok(mut cache) = self.width_cache.lock() {
                 cache.insert(text, value);
@@ -10646,6 +10634,10 @@ impl Flowable for CssLineBoxFlowable {
         self.child.flex_min_content_width(avail_width)
     }
 
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.child.min_content_contribution(avail_width)
+    }
+
     fn flex_max_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child.flex_max_content_width(avail_width)
     }
@@ -10981,6 +10973,10 @@ impl Flowable for CssPixelHeightFlowable {
 
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child.flex_min_content_width(avail_width)
+    }
+
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.child.min_content_contribution(avail_width)
     }
 
     fn flex_max_content_width(&self, avail_width: Pt) -> Option<Pt> {
@@ -13511,6 +13507,7 @@ pub struct BorderSpec {
 pub struct TableCell {
     pub text: String,
     pub style: TextStyle,
+    pagination: Pagination,
     pub align: TextAlign,
     pub valign: VerticalAlign,
     pub padding: EdgeSizes,
@@ -13597,6 +13594,7 @@ impl TableCell {
             valign,
             padding,
             background,
+            pagination: Pagination::default(),
             border_colors: ResolvedEdgeColors::uniform(border.color),
             border_opacities: ResolvedEdgeOpacities::uniform(1.0),
             border,
@@ -13646,6 +13644,11 @@ impl TableCell {
 
     pub(crate) fn with_content(mut self, content: Box<dyn Flowable>) -> Self {
         self.content = Some(content);
+        self
+    }
+
+    pub(crate) fn with_pagination(mut self, pagination: Pagination) -> Self {
+        self.pagination = pagination;
         self
     }
 
@@ -13940,9 +13943,9 @@ impl TableCell {
             }
             value
         } else {
-            let char_width = (self.style.font_size * 0.6).max(Pt::from_f32(1.0));
-            let count = text.chars().count();
-            let base = char_width * (count as i32);
+            let (primary, _) = resolve_font_stack(None, &self.style);
+            let base =
+                crate::font::measure_unregistered_text_width(&primary, self.style.font_size, text);
             let value = text_width_with_spacing(base, &self.style, text);
             if let Ok(mut cache) = self.width_cache.lock() {
                 cache.insert(text, value);
@@ -15406,12 +15409,22 @@ impl TableFlowable {
             } else {
                 let lines = cell.layout_lines(content_width);
                 let line_height = cell.effective_line_height();
-                let count = if line_height > Pt::ZERO {
+                let mut count = if line_height > Pt::ZERO {
                     (content_height.to_milli_i64() / line_height.to_milli_i64()).max(0) as usize
                 } else {
                     0
                 }
                 .min(lines.len());
+                if count < lines.len() {
+                    count = count.min(
+                        lines
+                            .len()
+                            .saturating_sub(cell.pagination.resolved_widows()),
+                    );
+                    if count < cell.pagination.resolved_orphans() {
+                        count = 0;
+                    }
+                }
                 if count == 0 && !cell.text.is_empty() {
                     if let Some(source) = &cell.authoring_source_id {
                         blocked_sources.push(source.to_string());
@@ -18839,10 +18852,13 @@ impl TableFlowableData {
                 let extra = padding.left + padding.right + horizontal_border;
                 let (min_text, max_text) = if let Some(content) = cell.content.as_ref() {
                     let intrinsic = content.intrinsic_width().unwrap_or(Pt::ZERO);
+                    let minimum = content
+                        .min_content_contribution(span_width)
+                        .unwrap_or(intrinsic);
                     let wrapped = content
                         .wrap(span_width.max(Pt::from_f32(1.0)), huge_pt())
                         .width;
-                    (intrinsic, wrapped.max(intrinsic))
+                    (minimum, wrapped.max(intrinsic).max(minimum))
                 } else {
                     (cell.min_word_width(), cell.max_line_width())
                 };
@@ -19643,6 +19659,10 @@ impl Flowable for InlineBackgroundFlowable {
         self.child.flex_min_content_width(avail_width)
     }
 
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.child.min_content_contribution(avail_width)
+    }
+
     fn flex_max_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child.flex_max_content_width(avail_width)
     }
@@ -19793,6 +19813,15 @@ impl InlineBlockLayoutFlowable {
     }
 
     fn intrinsic_inline_width(&self, min_content: bool, avail_width: Pt) -> Option<Pt> {
+        self.intrinsic_inline_width_with_contributions(min_content, avail_width, false)
+    }
+
+    fn intrinsic_inline_width_with_contributions(
+        &self,
+        min_content: bool,
+        avail_width: Pt,
+        contributions: bool,
+    ) -> Option<Pt> {
         let min_content = min_content && !self.no_wrap;
         let mut line_width = Pt::ZERO;
         let mut content_width = Pt::ZERO;
@@ -19829,7 +19858,14 @@ impl InlineBlockLayoutFlowable {
             if self.css_pixel_snap && run_id.is_some() && next_run != run_id {
                 line_width = run_start + ceil_to_css_layout_unit(line_width - run_start);
             }
-            let mut width = if min_content {
+            let mut width = if contributions {
+                let minimum = child.min_content_contribution(avail_width)?;
+                if min_content {
+                    minimum
+                } else {
+                    child.intrinsic_width()?.max(minimum)
+                }
+            } else if min_content {
                 child.flex_min_content_width(avail_width)?
             } else {
                 child.intrinsic_width()?
@@ -20863,6 +20899,10 @@ impl Flowable for InlineBlockLayoutFlowable {
         self.intrinsic_inline_width(true, avail_width)
     }
 
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.intrinsic_inline_width_with_contributions(true, avail_width, true)
+    }
+
     fn flex_max_content_width(&self, _avail_width: Pt) -> Option<Pt> {
         self.intrinsic_width()
     }
@@ -21220,6 +21260,24 @@ mod inline_baseline_tests {
         assert_eq!(layout.lines[0].clearance_before, Pt::from_f32(30.0));
         assert_eq!(layout.total_height, Pt::from_f32(54.0));
         assert_eq!(story.first_baseline(width), Some(Pt::from_f32(39.0)));
+    }
+
+    #[test]
+    fn standard_font_measurement_agrees_with_and_without_a_registry() {
+        let style = TextStyle {
+            font_name: "Helvetica".into(),
+            font_size: Pt::from_f32(12.0),
+            ..TextStyle::default()
+        };
+        for registry in [None, Some(Arc::new(crate::font::FontRegistry::new()))] {
+            for inline in [false, true] {
+                let paragraph = Paragraph::new("Wi 1")
+                    .with_style(style.clone())
+                    .with_font_registry(registry.clone())
+                    .with_inline_word_measurement(inline);
+                assert_eq!(paragraph.measure_text_width("Wi 1"), Pt::from_f32(24.0));
+            }
+        }
     }
 
     #[test]
@@ -36438,6 +36496,71 @@ impl Flowable for ContainerFlowable {
         Some((border_box_width + margin.left + margin.right).max(Pt::ZERO))
     }
 
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        let mut child_minimum = Pt::ZERO;
+        for child in &self.state.children {
+            if !child.out_of_flow() {
+                child_minimum = child_minimum.max(child.min_content_contribution(avail_width)?);
+            }
+        }
+        let minimum = (child_minimum + self.flex_outer_width_minimum(avail_width)).max(Pt::ZERO);
+        let resolve = |spec: LengthSpec| -> Option<Pt> {
+            match spec {
+                LengthSpec::Absolute(_)
+                | LengthSpec::Em(_)
+                | LengthSpec::Rem(_)
+                | LengthSpec::Calc(CalcLength { percent: 0.0, .. })
+                | LengthSpec::Clamped(ClampedLength {
+                    value: CalcLength { percent: 0.0, .. },
+                    ..
+                })
+                | LengthSpec::FontRelative(FontRelativeLength {
+                    base: CalcLength { percent: 0.0, .. },
+                    ..
+                }) => {
+                    let width = spec.resolve_width(
+                        avail_width,
+                        self.state.font_size,
+                        self.state.root_font_size,
+                    );
+                    Some(
+                        self.flex_outer_width_for_basis(width, avail_width)
+                            .max(Pt::ZERO),
+                    )
+                }
+                LengthSpec::MinContent => Some(minimum),
+                LengthSpec::MaxContent | LengthSpec::Content => self.intrinsic_width(),
+                LengthSpec::FitContent => {
+                    Some(self.intrinsic_width()?.min(avail_width.max(minimum)))
+                }
+                // A percentage depending on this column cannot establish its
+                // own minimum during the table's intrinsic sizing pass.
+                _ => None,
+            }
+        };
+        let transferred = self
+            .state
+            .aspect_ratio
+            .filter(|_| {
+                matches!(
+                    self.state.height,
+                    LengthSpec::Absolute(_)
+                        | LengthSpec::Em(_)
+                        | LengthSpec::Rem(_)
+                        | LengthSpec::Calc(CalcLength { percent: 0.0, .. })
+                )
+            })
+            .and_then(|_| self.intrinsic_width());
+        let mut width = resolve(self.state.width).or(transferred).unwrap_or(minimum);
+        if let Some(maximum) = resolve(self.state.max_width) {
+            width = width.min(maximum);
+        }
+        if let Some(minimum) = resolve(self.state.min_width) {
+            width = width.max(minimum);
+        }
+        Some(width.max(Pt::ZERO))
+    }
+
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         let mut max_child = Pt::ZERO;
         for child in &self.state.children {
@@ -40433,6 +40556,10 @@ impl Flowable for ClearFlowable {
         self.child.flex_min_content_width(avail_width)
     }
 
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.child.min_content_contribution(avail_width)
+    }
+
     fn flex_max_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child.flex_max_content_width(avail_width)
     }
@@ -40780,6 +40907,12 @@ impl Flowable for ExpandedWidthFlowable {
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child
             .flex_min_content_width(self.expanded_width(avail_width))
+            .map(|width| self.collapse_width_contribution(width))
+    }
+
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.child
+            .min_content_contribution(self.expanded_width(avail_width))
             .map(|width| self.collapse_width_contribution(width))
     }
 
@@ -41592,6 +41725,10 @@ impl Flowable for MetaFlowable {
 
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child.flex_min_content_width(avail_width)
+    }
+
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.child.min_content_contribution(avail_width)
     }
 
     fn flex_max_content_width(&self, avail_width: Pt) -> Option<Pt> {
@@ -42434,6 +42571,10 @@ impl Flowable for RelativePositionedFlowable {
 
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child.flex_min_content_width(avail_width)
+    }
+
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.child.min_content_contribution(avail_width)
     }
 
     fn flex_max_content_width(&self, avail_width: Pt) -> Option<Pt> {

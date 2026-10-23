@@ -534,6 +534,126 @@ def test_wrapped_spaces_form_one_continuous_link_region_per_line(profile, mode):
         viewed.close()
 
 
+@pytest.mark.parametrize("family", ["Helvetica", "Times-Roman", "Courier", "Noto Sans"])
+@pytest.mark.parametrize("size", ["12", "12.337"])
+@pytest.mark.parametrize("mode", ["direct", "compiled", "compact"])
+@pytest.mark.parametrize("context", ["paragraph", "cell"])
+def test_standard_font_wrapping_is_unchanged_when_text_becomes_a_link(family, size, mode, context):
+    import pypdfium2 as pdfium
+
+    engine = fullbleed.PdfEngine(font_files=[font()])
+    words = "Wide WWW narrow iii numbers 123. Read the full report. " * 18
+    css = (
+        "@page{size:200pt 200pt;margin:16pt}"
+        f"body{{font-family:'{family}';font-size:{size}pt;line-height:18pt}}"
+        "p{margin:0}a{color:inherit;text-decoration:none}"
+        "table{width:100%;border-collapse:collapse}td{padding:0}"
+    )
+
+    def render(linked):
+        text = "{{words}}"
+        if linked:
+            text = '<a href="https://example.invalid/report">' + text + "</a>"
+        html = "<p>" + text + "</p>" if context == "paragraph" else "<table><tr><td>" + text + "</td></tr></table>"
+        if mode == "direct":
+            data = engine.render_pdf(html.replace("{{words}}", words), css)
+        elif mode == "compiled":
+            data = engine.compile_pdf(html.replace("{{words}}", words), css).render_pdf()
+        else:
+            data = engine.compile_pdf(html, css).render_pdf_reflow_bindings(
+                {"words": [words, words]}, compression="compact",
+            )
+        if output := os.environ.get("FULLBLEED_STANDARD_FONT_TEST_OUTPUT"):
+            directory = Path(output)
+            directory.mkdir(parents=True, exist_ok=True)
+            name = f"standard-wrap-{context}-{family}-{size}-{mode}-{'linked' if linked else 'plain'}"
+            (directory / f"{name}.pdf").write_bytes(bytes(data))
+        viewed = pdfium.PdfDocument(bytes(data))
+        try:
+            assert len(viewed) > 1, "The comparison must cover page boundaries"
+            lines = []
+            for page in viewed:
+                extracted = page.get_textpage()
+                try:
+                    lines.append([
+                        " ".join(line.split())
+                        for line in extracted.get_text_range().splitlines() if line.strip()
+                    ])
+                finally:
+                    extracted.close()
+                    page.close()
+            return lines
+        finally:
+            viewed.close()
+
+    assert render(False) == render(True), "A link must preserve every line and page break"
+
+
+@pytest.mark.parametrize("family", ["Helvetica", "Times-Roman", "Courier", "Symbol", "ZapfDingbats"])
+def test_standard_font_family_case_preserves_the_pdf_font_and_glyphs(family):
+    import pypdfium2 as pdfium
+
+    engine = fullbleed.PdfEngine()
+
+    def inspect(spelling):
+        data = engine.render_pdf(
+            "<p>Wide WWW narrow iii. Read the full report.</p>",
+            f"@page{{size:240pt 240pt;margin:16pt}}body{{font-family:'{spelling}';font-size:12.337pt}}p{{margin:0}}",
+        )
+        fonts = reader(data).pages[0]["/Resources"]["/Font"].values()
+        assert "/" + family in {str(ref.get_object()["/BaseFont"]) for ref in fonts}
+        document = pdfium.PdfDocument(bytes(data))
+        page = document[0]
+        text = page.get_textpage()
+        try:
+            return [(text.get_text_range(i, 1), text.get_charbox(i)) for i in range(text.count_chars())]
+        finally:
+            text.close()
+            page.close()
+            document.close()
+
+    assert inspect(family) == inspect(family.swapcase())
+
+
+@pytest.mark.parametrize("orphans,widows,first_page_lines", [(1, 1, 9), (2, 2, 8), (3, 4, 6)])
+@pytest.mark.parametrize("white_space", ["pre", "pre-wrap", "pre-line", "break-spaces"])
+def test_plain_and_linked_table_cells_obey_the_same_widow_rules(orphans, widows, first_page_lines, white_space):
+    import pypdfium2 as pdfium
+
+    engine = fullbleed.PdfEngine(font_files=[font()])
+    words = "\n".join(f"Line {i}" for i in range(1, 11))
+    css = (
+        "@page{size:200pt 200pt;margin:16pt}body{font-family:'Noto Sans';font-size:12pt;line-height:18pt}"
+        "table{width:100%;border-collapse:collapse}"
+        f"td{{padding:0;white-space:{white_space};orphans:{orphans};widows:{widows}}}"
+    )
+    results = []
+    for linked in [False, True]:
+        content = '<a href="https://example.invalid/report">' + words + "</a>" if linked else words
+        data = engine.render_pdf("<table><tr><td>" + content + "</td></tr></table>", css)
+        if output := os.environ.get("FULLBLEED_STANDARD_FONT_TEST_OUTPUT"):
+            directory = Path(output)
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / f"table-widows-{white_space}-{orphans}-{widows}-{'linked' if linked else 'plain'}.pdf").write_bytes(bytes(data))
+        document = pdfium.PdfDocument(bytes(data))
+        pages = []
+        try:
+            for page in document:
+                text = page.get_textpage()
+                try:
+                    pages.append([line.strip() for line in text.get_text_range().splitlines() if line.strip()])
+                finally:
+                    text.close()
+                    page.close()
+        finally:
+            document.close()
+        results.append(pages)
+    assert results[0] == results[1]
+    assert len(results[0]) == 2
+    assert len(results[0][0]) == first_page_lines
+    assert [line for page in results[0] for line in page] == words.splitlines()
+
+
 @pytest.mark.parametrize("component", [Link, Button])
 def test_component_links_preserve_pdf_actions_and_both_html_exports(component):
     url = "https://example.invalid/documents?format=pdf&source=author"

@@ -8394,7 +8394,7 @@ fn output_intent_object(oi: &OutputIntent, icc_id: usize, profile: PdfProfile) -
 }
 
 fn font_object(name: &str) -> String {
-    let base = sanitize_font_name(name);
+    let base = sanitize_font_name(crate::base14_metrics::canonical_name(name).unwrap_or(name));
     format!(
         "<< /Type /Font /Subtype /Type1 /BaseFont /{} /Encoding /WinAnsiEncoding >>",
         base
@@ -9874,70 +9874,25 @@ fn encode_winansi_pdf_string(input: &str) -> WinAnsiEncoded {
     let mut replaced = 0usize;
     let mut fallbacks = 0usize;
     for ch in input.chars() {
-        // Common ASCII fallbacks for symbols that are not WinAnsi.
-        match ch {
-            '\u{2265}' => {
-                out.push('>');
-                out.push('=');
-                fallbacks += 1;
-                continue;
+        let encoded = crate::pdf_encodings::encode_win_ansi_char(ch);
+        replaced += usize::from(matches!(
+            encoded,
+            crate::pdf_encodings::WinAnsiChar::Replacement
+        ));
+        fallbacks += usize::from(matches!(
+            encoded,
+            crate::pdf_encodings::WinAnsiChar::AsciiFallback(_)
+        ));
+        for &byte in encoded.bytes() {
+            match byte {
+                b'\\' => out.push_str("\\\\"),
+                b'(' => out.push_str("\\("),
+                b')' => out.push_str("\\)"),
+                b'\n' => out.push_str("\\n"),
+                b'\r' => out.push_str("\\r"),
+                b if b < 0x20 || b >= 0x7f => out.push_str(&format!("\\{:03o}", b)),
+                b => out.push(b as char),
             }
-            '\u{2264}' => {
-                out.push('<');
-                out.push('=');
-                fallbacks += 1;
-                continue;
-            }
-            _ => {}
-        }
-
-        let byte = match ch {
-            // ASCII
-            '\u{0000}'..='\u{007F}' => ch as u8,
-            // Latin-1
-            '\u{00A0}'..='\u{00FF}' => ch as u8,
-            // WinAnsi extensions (cp1252)
-            '\u{20AC}' => 0x80,
-            '\u{201A}' => 0x82,
-            '\u{0192}' => 0x83,
-            '\u{201E}' => 0x84,
-            '\u{2026}' => 0x85,
-            '\u{2020}' => 0x86,
-            '\u{2021}' => 0x87,
-            '\u{02C6}' => 0x88,
-            '\u{2030}' => 0x89,
-            '\u{0160}' => 0x8A,
-            '\u{2039}' => 0x8B,
-            '\u{0152}' => 0x8C,
-            '\u{017D}' => 0x8E,
-            '\u{2018}' => 0x91,
-            '\u{2019}' => 0x92,
-            '\u{201C}' => 0x93,
-            '\u{201D}' => 0x94,
-            '\u{2022}' => 0x95,
-            '\u{2013}' => 0x96,
-            '\u{2014}' => 0x97,
-            '\u{02DC}' => 0x98,
-            '\u{2122}' => 0x99,
-            '\u{0161}' => 0x9A,
-            '\u{203A}' => 0x9B,
-            '\u{0153}' => 0x9C,
-            '\u{017E}' => 0x9E,
-            '\u{0178}' => 0x9F,
-            _ => {
-                replaced += 1;
-                b'?'
-            }
-        };
-
-        match byte {
-            b'\\' => out.push_str("\\\\"),
-            b'(' => out.push_str("\\("),
-            b')' => out.push_str("\\)"),
-            b'\n' => out.push_str("\\n"),
-            b'\r' => out.push_str("\\r"),
-            b if b < 0x20 || b >= 0x7f => out.push_str(&format!("\\{:03o}", b)),
-            b => out.push(b as char),
         }
     }
 

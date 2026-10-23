@@ -1575,7 +1575,7 @@ fn anonymous_table_cell_run_flowables(
                 font_registry.clone(),
                 false,
             );
-            let mut flowables = layout_children_to_flowables(items, None);
+            let mut flowables = layout_cell_children_to_flowables(items, &cell_style);
             if flowables.is_empty() {
                 None
             } else if flowables.len() == 1 {
@@ -1653,6 +1653,7 @@ fn anonymous_table_cell_run_flowables(
         )
         .with_row_min_height(min_height)
         .with_hide_empty_cells(cell_style.empty_cells_hide)
+        .with_pagination(cell_style.pagination)
         .with_self_visible(cell_style.visibility.paints())
         .with_overflow_hidden(matches!(
             cell_style.overflow,
@@ -2107,13 +2108,25 @@ fn text_node_to_flowables(
             order: 0,
         });
     }
-    let fragments: Vec<&str> = if word_fragments {
+    let line_fragments = inline_context
+        && cleaned.contains('\n')
+        && matches!(parent_style.writing_mode, WritingModeMode::HorizontalTb);
+    let fragments: Vec<&str> = if line_fragments {
+        cleaned.split('\n').collect()
+    } else if word_fragments {
         cleaned.split(' ').collect()
     } else {
         vec![cleaned.as_str()]
     };
     for (index, &fragment) in fragments.iter().enumerate() {
-        if index > 0 {
+        if index > 0 && line_fragments {
+            // Preserved source line feeds participate in the shared inline
+            // context like <br>, so they can be paginated and retain their
+            // owning link/reading scope instead of becoming one tall atom.
+            items.push(inline_item(Box::new(ForcedLineBreakFlowable::new(
+                text_style.line_height,
+            ))));
+        } else if index > 0 {
             items.push(inline_item(Box::new(
                 CollapsibleSpaceFlowable::with_shaping_context(
                     text_style.clone(),
@@ -12971,6 +12984,23 @@ fn layout_children_to_flowables(
     )
 }
 
+fn layout_cell_children_to_flowables(
+    items: Vec<LayoutItem>,
+    style: &ComputedStyle,
+) -> Vec<Box<dyn Flowable>> {
+    layout_children_to_flowables_with_options(
+        items,
+        None,
+        no_wrap(style),
+        true,
+        false,
+        style.direction,
+        text_align_from_style(style),
+        style.pagination,
+        None,
+    )
+}
+
 fn emit_inline_markers_without_line(
     group: &mut Vec<(Box<dyn Flowable>, VerticalAlign)>,
     out: &mut Vec<Box<dyn Flowable>>,
@@ -15425,7 +15455,7 @@ fn table_row_flowable_from_cells(
             perf,
             doc_id,
         );
-        let mut cell_flowables = layout_children_to_flowables(cell_items, None);
+        let mut cell_flowables = layout_cell_children_to_flowables(cell_items, &cell_style);
         let cell_flowable: Box<dyn Flowable> = if cell_flowables.is_empty() {
             Box::new(
                 ContainerFlowable::new_pt(
@@ -17235,7 +17265,7 @@ fn table_flowable(
                     cell_items
                 };
 
-                let mut cell_flowables = layout_children_to_flowables(cell_items, None);
+                let mut cell_flowables = layout_cell_children_to_flowables(cell_items, &cell_style);
                 cell_content = if cell_flowables.is_empty() {
                     None
                 } else if cell_flowables.len() == 1 {
@@ -17508,6 +17538,7 @@ fn table_flowable(
                         .map(Arc::<str>::from),
                 )
                 .with_hide_empty_cells(cell_style.empty_cells_hide)
+                .with_pagination(cell_style.pagination)
                 .with_establishes_abs_containing_block(establishes_abs_containing_block(cell_style))
                 .with_overflow_hidden(matches!(
                     cell_style.overflow,

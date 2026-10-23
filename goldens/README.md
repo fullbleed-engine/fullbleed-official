@@ -87,3 +87,15 @@ advances; page two remains byte-identical. The other golden case is unchanged.
 This is a review of these specific spacing changes, not a claim that the full
 examples match browser layout. CI retains the generated PDFs, previews, and
 diagnostics even when a golden comparison fails.
+
+The Standard 14 measurement correction refreshes only the coastal-menu baseline.
+Its title is painted in Times-Roman, but the old paragraph heuristic used
+0.6em per character when sizing and centering its table cells. Independent
+MuPDF font metrics put the second title line's centered offset at 65.526pt;
+the candidate uses 65.501pt, reducing the previous 27.761pt error to 0.025pt.
+The title rises 18pt and the following right-panel content rises 14.25pt.
+Text, fonts, font sizes, page count, and the left and center panels are unchanged.
+All 65,293 changed pixels lie in the right panel, within `(1708, 262, 2352, 1026)`
+on the 2448-by-1224 preview. Acme and both bank-statement pages remain unchanged.
+These relative alignment and reviewed layout changes do not establish full
+browser parity or correct the title table's existing absolute placement.

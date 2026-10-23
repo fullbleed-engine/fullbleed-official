@@ -15277,8 +15277,9 @@ mod tests {
     #[test]
     fn pagination_emits_page_break_trigger_event() {
         let log_path = temp_log_path("page_break_trigger");
-        let html = "<!doctype html><html><body><p>one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty.</p><p>one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty.</p><p>one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty.</p></body></html>";
-        let css = "body { margin: 0; font-size: 14px; line-height: 1.2; }";
+        let html = "<!doctype html><html><body><p>First</p><p>Second</p><p>Third</p></body></html>";
+        // Exercise automatic page overflow independently of font advances.
+        let css = "body { margin: 0; font-size: 14px; line-height: 1.2; } p { height: 80pt; margin: 0; break-inside: avoid; }";
         let engine = FullBleed::builder()
             .page_size(Size::from_inches(3.0, 3.0))
             .margin_all(18.0)

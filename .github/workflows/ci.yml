@@ -854,6 +854,7 @@ jobs:
           FULLBLEED_DESTINATION_VISIBILITY_TEST_OUTPUT: target/python315/destination-visibility
           FULLBLEED_GENERAL_DESTINATION_TEST_OUTPUT: target/python315/general-destinations
           FULLBLEED_LINK_SPACE_TEST_OUTPUT: target/python315/link-spaces
+          FULLBLEED_STANDARD_FONT_TEST_OUTPUT: target/python315/standard-fonts
         run: python -m pytest tests -q -ra --junitxml target/python315/python-tests.xml
       - name: Generate and check PDFs and previews
         shell: bash
