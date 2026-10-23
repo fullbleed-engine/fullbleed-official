@@ -539,7 +539,9 @@ def test_wrapped_spaces_form_one_continuous_link_region_per_line(profile, mode):
 @pytest.mark.parametrize("mode", ["direct", "compiled", "compact"])
 @pytest.mark.parametrize("context", ["paragraph", "cell"])
 def test_standard_font_wrapping_is_unchanged_when_text_becomes_a_link(family, size, mode, context):
+    import ctypes
     import pypdfium2 as pdfium
+    import pypdfium2.raw as raw
 
     engine = fullbleed.PdfEngine(font_files=[font()])
     words = "Wide WWW narrow iii numbers 123. Read the full report. " * 18
@@ -572,6 +574,7 @@ def test_standard_font_wrapping_is_unchanged_when_text_becomes_a_link(family, si
         try:
             assert len(viewed) > 1, "The comparison must cover page boundaries"
             lines = []
+            origins = []
             for page in viewed:
                 extracted = page.get_textpage()
                 try:
@@ -579,14 +582,87 @@ def test_standard_font_wrapping_is_unchanged_when_text_becomes_a_link(family, si
                         " ".join(line.split())
                         for line in extracted.get_text_range().splitlines() if line.strip()
                     ])
+                    if context == "cell":
+                        page_origins = []
+                        for index in range(extracted.count_chars()):
+                            char = extracted.get_text_range(index, 1)
+                            if not char or char.isspace():
+                                continue
+                            x, y = ctypes.c_double(), ctypes.c_double()
+                            assert raw.FPDFText_GetCharOrigin(extracted, index, ctypes.byref(x), ctypes.byref(y))
+                            page_origins.append((char, x.value, y.value))
+                        origins.append(page_origins)
                 finally:
                     extracted.close()
                     page.close()
-            return lines
+            return lines, origins
         finally:
             viewed.close()
 
-    assert render(False) == render(True), "A link must preserve every line and page break"
+    plain_lines, plain_origins = render(False)
+    linked_lines, linked_origins = render(True)
+    assert plain_lines == linked_lines, "A link must preserve every line and page break"
+    assert len(plain_origins) == len(linked_origins)
+    for plain_page, linked_page in zip(plain_origins, linked_origins):
+        assert [char for char, _, _ in plain_page] == [char for char, _, _ in linked_page]
+        for plain, linked in zip(plain_page, linked_page):
+            # Protect the cell's baseline policy. Fractional-size Base-14
+            # word-position rounding is independent of this vertical fix.
+            assert plain[2] == pytest.approx(linked[2], abs=0.001), "A neutral link must not move table baselines"
+
+
+@pytest.mark.parametrize("valign", ["baseline", "top", "middle", "bottom"])
+@pytest.mark.parametrize("whitespace", ["normal", "nowrap", "pre"])
+@pytest.mark.parametrize("borders", ["collapse", "separate"])
+@pytest.mark.parametrize("mode", ["direct", "compiled", "compact"])
+def test_neutral_table_wrappers_preserve_cell_alignment(valign, whitespace, borders, mode):
+    import ctypes
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as raw
+
+    engine = fullbleed.PdfEngine(font_files=[font()])
+    css = (
+        "@page{size:200pt 200pt;margin:16pt}"
+        "body{font-family:'Noto Sans';font-size:12pt;line-height:18pt}"
+        f"table{{width:100%;border-collapse:{borders}}}"
+        f"td{{padding:0;height:72pt;vertical-align:{valign};white-space:{whitespace}}}"
+        "a{color:inherit;text-decoration:none}"
+    )
+
+    def render(wrapper):
+        html = "<table><tr><td>" + wrapper.format("{{words}}") + "</td></tr></table>"
+        if mode == "direct":
+            data = engine.render_pdf(html.replace("{{words}}", "Text"), css)
+        elif mode == "compiled":
+            data = engine.compile_pdf(html.replace("{{words}}", "Text"), css).render_pdf()
+        else:
+            data = engine.compile_pdf(html, css).render_pdf_reflow_bindings(
+                {"words": ["Text", "Text"]}, compression="compact",
+            )
+        viewed = pdfium.PdfDocument(bytes(data))
+        try:
+            assert len(viewed) == (2 if mode == "compact" else 1)
+            positions = []
+            for page in viewed:
+                text = page.get_textpage()
+                try:
+                    assert text.get_text_range().strip() == "Text"
+                    for index in range(text.count_chars()):
+                        if text.get_text_range(index, 1).isspace():
+                            continue
+                        x, y = ctypes.c_double(), ctypes.c_double()
+                        assert raw.FPDFText_GetCharOrigin(text, index, ctypes.byref(x), ctypes.byref(y))
+                        positions.extend([x.value, y.value])
+                finally:
+                    text.close()
+                    page.close()
+            return positions
+        finally:
+            viewed.close()
+
+    expected = render("{}")
+    assert render("<span>{}</span>") == pytest.approx(expected, abs=0.001)
+    assert render('<a href="https://example.invalid/report">{}</a>') == pytest.approx(expected, abs=0.001)
 
 
 @pytest.mark.parametrize("family", ["Helvetica", "Times-Roman", "Courier", "Symbol", "ZapfDingbats"])

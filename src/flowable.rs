@@ -13554,6 +13554,7 @@ pub struct TableCell {
     cached_line_height: Pt,
     preserve_whitespace: bool,
     no_wrap: bool,
+    fragment_line_breaks: bool,
     layout_cache: Arc<Mutex<TextLayoutCache>>,
     width_cache: Arc<Mutex<TextWidthCache>>,
 }
@@ -13637,6 +13638,7 @@ impl TableCell {
             cached_line_height,
             preserve_whitespace,
             no_wrap,
+            fragment_line_breaks: false,
             layout_cache: Arc::new(Mutex::new(TextLayoutCache::default())),
             width_cache: Arc::new(Mutex::new(TextWidthCache::default())),
         }
@@ -14023,7 +14025,7 @@ impl TableCell {
                 return lines;
             }
         }
-        if self.no_wrap {
+        if self.no_wrap || self.fragment_line_breaks {
             let mut line_layouts = Vec::new();
             for line in self.text.split('\n') {
                 let width = if line.is_empty() {
@@ -15441,8 +15443,11 @@ impl TableFlowable {
                         .map(|line| line.text.as_str())
                         .collect::<Vec<_>>()
                         .join("\n");
-                    head.no_wrap = true;
-                    tail.no_wrap = true;
+                    // These are already resolved lines, not authored nowrap
+                    // content. Preserve their breaks without selecting the
+                    // nowrap-specific cell paint phase on every new page.
+                    head.fragment_line_breaks = true;
+                    tail.fragment_line_breaks = true;
                     consumed = true;
                 }
             }
@@ -17318,6 +17323,56 @@ impl TableFlowable {
 
             let content_width = (col_width - pad_left - pad_right).max(Pt::ZERO);
             let content_height = (cell_height - pad_top - pad_bottom).max(Pt::ZERO);
+            let positive_odd_pixel_leading = css_positive_odd_pixel_leading(
+                &cell.style,
+                cell.font_registry.as_deref(),
+                cell.effective_line_height(),
+            );
+            // Plain and structured inline text share the cell's alignment and
+            // paint phase. Wrapping text in a span or link must not center a
+            // baseline-aligned cell or change its authored nowrap behavior.
+            let inline_content_y = |text_block_height: Pt| {
+                let text_y = match cell.valign {
+                    VerticalAlign::Baseline
+                    | VerticalAlign::BaselineShift(_)
+                    | VerticalAlign::Top
+                    | VerticalAlign::TextTop => cell_y + pad_top,
+                    VerticalAlign::Middle => {
+                        let has_middle_slack = content_height > text_block_height;
+                        let collapse_nowrap_phase =
+                            self.uses_centered_collapsed_edges() && cell.no_wrap;
+                        let tight_separated_nowrap_phase = !self.uses_centered_collapsed_edges()
+                            && row_gap > Pt::ZERO
+                            && cell.no_wrap
+                            && !has_middle_slack;
+                        let phase = if tight_separated_nowrap_phase {
+                            // Retain the tight separated cell's upper phase;
+                            // the content-box clamp still owns its top edge.
+                            -Pt::from_f32(0.25)
+                        } else if positive_odd_pixel_leading
+                            && (has_middle_slack || collapse_nowrap_phase)
+                        {
+                            Pt::ZERO
+                        } else {
+                            Pt::from_f32(0.5)
+                        };
+                        cell_y
+                            + pad_top
+                            + (content_height - text_block_height).mul_ratio(1, 2)
+                            + phase
+                    }
+                    VerticalAlign::Bottom | VerticalAlign::TextBottom => {
+                        cell_y + cell_height - pad_bottom - text_block_height
+                    }
+                };
+                text_y.max(cell_y + pad_top)
+            };
+            let collapsed_no_wrap_phase = self.uses_centered_collapsed_edges()
+                && cell.no_wrap
+                && matches!(
+                    cell.valign,
+                    VerticalAlign::Baseline | VerticalAlign::BaselineShift(_) | VerticalAlign::Top
+                );
             if cell.overflow_hidden {
                 canvas.save_state();
                 canvas.clip_rect(
@@ -17331,23 +17386,46 @@ impl TableFlowable {
             if let Some(content) = cell.content.as_ref() {
                 let wrapped = content.wrap(content_width, content_height);
                 let draw_h = wrapped.height.min(content_height).max(Pt::ZERO);
-                let draw_y = match cell.valign {
-                    VerticalAlign::Top | VerticalAlign::TextTop => cell_y + pad_top,
-                    // A table cell whose first in-flow child does not expose a
-                    // line baseline uses the child box for baseline alignment.
-                    // With no competing row baseline, browsers distribute the
-                    // remaining block-axis space around that box.
-                    VerticalAlign::Baseline
-                    | VerticalAlign::BaselineShift(_)
-                    | VerticalAlign::Middle => {
-                        cell_y + pad_top + (content_height - draw_h).mul_ratio(1, 2)
-                    }
-                    VerticalAlign::Bottom | VerticalAlign::TextBottom => {
-                        cell_y + cell_height - pad_bottom - draw_h
+                let draw_y = if cell.inline_content_phase {
+                    inline_content_y(draw_h)
+                } else {
+                    match cell.valign {
+                        VerticalAlign::Top | VerticalAlign::TextTop => cell_y + pad_top,
+                        // A table cell whose first in-flow child does not expose a
+                        // line baseline uses the child box for baseline alignment.
+                        // With no competing row baseline, browsers distribute the
+                        // remaining block-axis space around that box.
+                        VerticalAlign::Baseline
+                        | VerticalAlign::BaselineShift(_)
+                        | VerticalAlign::Middle => {
+                            cell_y + pad_top + (content_height - draw_h).mul_ratio(1, 2)
+                        }
+                        VerticalAlign::Bottom | VerticalAlign::TextBottom => {
+                            cell_y + cell_height - pad_bottom - draw_h
+                        }
                     }
                 };
                 let draw_y = if cell.inline_content_phase {
-                    draw_y - Pt::from_f32(0.5)
+                    // Inline children expose ordinary line-box baselines.
+                    // Apply the same font-metric policy as a plain-text cell;
+                    // a fixed offset makes a neutral span or link move text.
+                    let line_height = cell.effective_line_height();
+                    draw_y
+                        + text_baseline_for_table_cell_line(
+                            &cell.style,
+                            cell.font_registry.as_deref(),
+                            line_height,
+                        )
+                        - text_baseline_for_line(
+                            &cell.style,
+                            cell.font_registry.as_deref(),
+                            line_height,
+                        )
+                        - if collapsed_no_wrap_phase {
+                            Pt::from_f32(0.25)
+                        } else {
+                            Pt::ZERO
+                        }
                 } else {
                     draw_y
                 };
@@ -17388,11 +17466,6 @@ impl TableFlowable {
                 };
                 let line_height = cell.effective_line_height();
                 let text_block_height = line_height * (lines.len() as i32);
-                let positive_odd_pixel_leading = css_positive_odd_pixel_leading(
-                    &cell.style,
-                    cell.font_registry.as_deref(),
-                    line_height,
-                );
                 let has_middle_slack = content_height > text_block_height;
                 if table_debug_enabled() && table_debug_verbose_enabled() {
                     eprintln!(
@@ -17407,49 +17480,7 @@ impl TableFlowable {
                         has_middle_slack,
                     );
                 }
-                let text_y = match cell.valign {
-                    VerticalAlign::Baseline
-                    | VerticalAlign::BaselineShift(_)
-                    | VerticalAlign::Top
-                    | VerticalAlign::TextTop => cell_y + pad_top,
-                    VerticalAlign::Middle => {
-                        let collapse_nowrap_phase =
-                            self.uses_centered_collapsed_edges() && cell.no_wrap;
-                        let tight_separated_nowrap_phase = !self.uses_centered_collapsed_edges()
-                            && row_gap > Pt::ZERO
-                            && cell.no_wrap
-                            && !has_middle_slack;
-                        let phase = if tight_separated_nowrap_phase {
-                            // A tight anonymous row in the separated-border
-                            // model retains the quarter-point upper paint phase
-                            // after its outer spacing is resolved. Adding the
-                            // ordinary half-point middle-slack phase moves the
-                            // glyph run down by one full CSS pixel.
-                            -Pt::from_f32(0.25)
-                        } else if positive_odd_pixel_leading
-                            && (has_middle_slack || collapse_nowrap_phase)
-                        {
-                            Pt::ZERO
-                        } else {
-                            Pt::from_f32(0.5)
-                        };
-                        cell_y
-                            + pad_top
-                            + (content_height - text_block_height).mul_ratio(1, 2)
-                            + phase
-                    }
-                    VerticalAlign::Bottom | VerticalAlign::TextBottom => {
-                        cell_y + cell_height - pad_bottom - text_block_height
-                    }
-                };
-                let collapsed_no_wrap_phase = self.uses_centered_collapsed_edges()
-                    && cell.no_wrap
-                    && matches!(
-                        cell.valign,
-                        VerticalAlign::Baseline
-                            | VerticalAlign::BaselineShift(_)
-                            | VerticalAlign::Top
-                    );
+                let text_y = inline_content_y(text_block_height);
 
                 if paint_self {
                     canvas.set_fill_color(cell.style.color);
@@ -17459,7 +17490,7 @@ impl TableFlowable {
                             .with_style(cell.style.clone())
                             .with_font_registry(cell.font_registry.clone())
                     });
-                    let mut cursor_y = text_y.max(cell_y + pad_top);
+                    let mut cursor_y = text_y;
                     for line in lines.iter() {
                         let line_width = line.width.min(content_width);
                         let text_x = cell_x

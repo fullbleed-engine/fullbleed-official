@@ -1453,6 +1453,7 @@ mod tests {
             .join("\n");
         for whitespace in ["pre", "pre-wrap", "pre-line", "break-spaces"] {
             for (orphans, widows, first_lines) in [(1, 1, 9), (2, 2, 8), (3, 4, 6)] {
+                let mut plain_baselines = None;
                 for linked in [false, true] {
                     let content = if linked {
                         format!("<a href='https://example.invalid/report'>{words}</a>")
@@ -1469,7 +1470,7 @@ mod tests {
                         if linked { "linked" } else { "plain" }
                     );
                     retain_pdf(&name, &compiled.render_to_buffer().unwrap());
-                    let lines = compiled
+                    let baselines = compiled
                         .document
                         .pages
                         .iter()
@@ -1485,10 +1486,71 @@ mod tests {
                                     _ => None,
                                 })
                                 .collect::<std::collections::BTreeSet<_>>()
-                                .len()
                         })
                         .collect::<Vec<_>>();
+                    let lines = baselines.iter().map(|line| line.len()).collect::<Vec<_>>();
                     assert_eq!(lines, vec![first_lines, 10 - first_lines], "{name}");
+                    if linked {
+                        assert_eq!(plain_baselines.as_ref(), Some(&baselines), "{name}");
+                    } else {
+                        plain_baselines = Some(baselines);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pdf_links_neutral_table_wrappers_preserve_cell_alignment() {
+        let engine = crate::FullBleed::builder()
+            .register_font_file("python/fullbleed_assets/fonts/NotoSans-Regular.ttf")
+            .build()
+            .unwrap();
+        for family in ["Helvetica", "Courier", "Noto Sans"] {
+            for valign in ["baseline", "top", "middle", "bottom"] {
+                for whitespace in ["normal", "nowrap", "pre"] {
+                    for borders in ["collapse", "separate"] {
+                        let css = format!(
+                            "@page{{size:200pt 200pt;margin:16pt}}body{{font-family:'{family}';font-size:12pt;line-height:18pt}}table{{width:100%;border-collapse:{borders}}}td{{padding:0;height:72pt;vertical-align:{valign};white-space:{whitespace}}}a{{color:inherit;text-decoration:none}}"
+                        );
+                        let mut plain_baselines = None;
+                        for (variant, content) in [
+                            ("plain", "Text"),
+                            ("span", "<span>Text</span>"),
+                            (
+                                "linked",
+                                "<a href='https://example.invalid/report'>Text</a>",
+                            ),
+                        ] {
+                            let html = format!("<table><tr><td>{content}</td></tr></table>");
+                            let compiled = engine.compile_document(&html, &css).unwrap();
+                            assert_eq!(compiled.page_count(), 1);
+                            let baselines = compiled.document.pages[0]
+                                .commands
+                                .iter()
+                                .filter_map(|command| {
+                                    if let Command::DrawString { y, text, .. } = command {
+                                        let (_, text) =
+                                            crate::text_shape::decode_shape_options(text);
+                                        (text == "Text").then_some(*y)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect::<Vec<_>>();
+                            let name = format!(
+                                "table-alignment-{}-{valign}-{whitespace}-{borders}-{variant}",
+                                family.replace(' ', "-")
+                            );
+                            retain_pdf(&name, &compiled.render_to_buffer().unwrap());
+                            assert_eq!(baselines.len(), 1, "{name}");
+                            if variant == "plain" {
+                                plain_baselines = Some(baselines);
+                            } else {
+                                assert_eq!(plain_baselines.as_ref(), Some(&baselines), "{name}");
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1515,37 +1577,52 @@ mod tests {
                                 .extend(clean.chars().filter(|ch| !ch.is_whitespace()));
                         }
                     }
-                    lines.into_values().collect::<Vec<_>>()
+                    lines.into_iter().collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>()
         };
-        let words = "Wide WWW narrow iii numbers 123. Read the full report. ".repeat(18);
         let mut failures = Vec::new();
         for family in ["Helvetica", "Courier", "Noto Sans"] {
-            let css = format!(
-                "@page{{size:200pt 200pt;margin:16pt}}body{{font-family:'{family}';font-size:12pt;line-height:18pt}}table{{width:100%;border-collapse:collapse}}td{{padding:0}}a{{color:inherit;text-decoration:none}}"
-            );
-            let plain_html = format!("<table><tr><td>{words}</td></tr></table>");
-            let linked_html = format!(
-                "<table><tr><td><a href='https://example.invalid/report'>{words}</a></td></tr></table>"
-            );
-            let plain = engine.compile_document(&plain_html, &css).unwrap();
-            let linked = engine.compile_document(&linked_html, &css).unwrap();
-            let name = format!("rich-table-wrap-{}", family.replace(' ', "-"));
-            retain_pdf(&format!("{name}-plain"), &plain.render_to_buffer().unwrap());
-            retain_pdf(
-                &format!("{name}-linked"),
-                &linked.render_to_buffer().unwrap(),
-            );
-            if plain.page_count() != linked.page_count()
-                || linked.page_count() <= 1
-                || painted_lines(&plain.document) != painted_lines(&linked.document)
-            {
-                failures.push(format!(
-                    "{family}: plain {} pages, linked {} pages",
-                    plain.page_count(),
-                    linked.page_count()
-                ));
+            for (suffix, line_height, margin, repeat) in [
+                ("", "18", "16", 18),
+                ("-short", "18", "16", 1),
+                ("-tight", "12", "16", 18),
+                ("-fractional-origin", "18.75", "16.25", 18),
+            ] {
+                let words =
+                    "Wide WWW narrow iii numbers 123. Read the full report. ".repeat(repeat);
+                let css = format!(
+                    "@page{{size:200pt 200pt;margin:{margin}pt}}body{{font-family:'{family}';font-size:12pt;line-height:{line_height}pt}}table{{width:100%;border-collapse:collapse}}td{{padding:0}}a{{color:inherit;text-decoration:none}}"
+                );
+                let plain_html = format!("<table><tr><td>{words}</td></tr></table>");
+                let plain = engine.compile_document(&plain_html, &css).unwrap();
+                let name = format!("rich-table-wrap-{}{suffix}", family.replace(' ', "-"));
+                retain_pdf(&format!("{name}-plain"), &plain.render_to_buffer().unwrap());
+                for (variant, content) in [
+                    (
+                        "linked",
+                        format!("<a href='https://example.invalid/report'>{words}</a>"),
+                    ),
+                    ("span", format!("<span>{words}</span>")),
+                ] {
+                    let html = format!("<table><tr><td>{content}</td></tr></table>");
+                    let rich = engine.compile_document(&html, &css).unwrap();
+                    retain_pdf(
+                        &format!("{name}-{variant}"),
+                        &rich.render_to_buffer().unwrap(),
+                    );
+                    if plain.page_count() != rich.page_count()
+                        || (repeat > 1 && rich.page_count() <= 1)
+                        || painted_lines(&plain.document) != painted_lines(&rich.document)
+                    {
+                        failures.push(format!(
+                            "{name}-{variant}: plain {} pages, rich {} pages; line positions differ: {}",
+                            plain.page_count(),
+                            rich.page_count(),
+                            painted_lines(&plain.document) != painted_lines(&rich.document)
+                        ));
+                    }
+                }
             }
         }
         for (name, content) in [

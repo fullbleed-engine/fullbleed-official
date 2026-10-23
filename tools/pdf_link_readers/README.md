@@ -115,3 +115,24 @@ The [recorded observation](observations/imported-border-cut.json) includes the
 before/after counts, native-module identity, source hashes, and a separate
 Poppler reference check. The public alpha version number alone does not
 identify the candidate used for these observations.
+
+## Check table text positions
+
+The [table observation](observations/table-text-baselines.json) records controls
+for plain text, neutral spans, and neutral links. They cover page breaks,
+preserved line feeds, tall cells, vertical alignment, and both border models.
+The public-API regressions use PDFium to measure glyph origins after direct,
+compiled, and compact reflow rendering:
+
+```sh
+FULLBLEED_TEST_INSTALLED_NATIVE=1 python -m pytest tests/test_fullbleed_links.py -k 'standard_font_wrapping_is_unchanged or neutral_table_wrappers_preserve_cell_alignment'
+```
+
+Install the candidate wheel and the repository's test requirements first. The
+environment flag selects the installed native module instead of an older local
+build. These checks compare line/page breaks and baselines to within 0.001pt;
+the tall-cell controls also compare horizontal origins. Fractional-size Base-14
+text retains small horizontal rounding differences recorded in the observation.
+These checks do not establish identical rasterization in every PDF reader.
+The observation retains the corresponding native checks and known pixel
+differences for the sampled fonts.
