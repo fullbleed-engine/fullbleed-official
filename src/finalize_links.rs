@@ -948,14 +948,13 @@ mod tests {
                 let is_inactive = kind == "inactive-artwork";
                 assert_eq!(
                     annotation.get(b"Subtype").unwrap().as_name().unwrap(),
-                    if is_inactive {
-                        b"Stamp".as_slice()
-                    } else {
-                        b"Link".as_slice()
-                    }
+                    b"Link"
                 );
                 assert_eq!(annotation.get(b"A").is_err(), is_inactive);
-                if !is_inactive {
+                if is_inactive {
+                    assert_eq!(annotation.get(b"F").unwrap().as_i64().unwrap(), 64);
+                    assert!(annotation.get(b"QuadPoints").is_err());
+                } else {
                     let points = numbers(annotation.get(b"QuadPoints").unwrap());
                     assert!(
                         points

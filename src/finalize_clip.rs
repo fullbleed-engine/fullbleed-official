@@ -417,9 +417,16 @@ pub(super) fn annotation(
     annotation.set("AP", appearances);
     annotation.set("Rect", array(&clipped));
     if !active {
-        // Preserve artwork that extends beyond a now-fully-clipped activation
-        // region without leaving an invisible link or action behind.
-        annotation.set("Subtype", "Stamp");
+        // Keep the original annotation handler: converting Link to Stamp can
+        // introduce a popup note or change which readers draw the appearance.
+        // ReadOnly permits the remaining artwork without mouse interaction.
+        let flags = match annotation.get(b"F") {
+            Ok(value) => resolve_finalize_object(doc, value)?
+                .as_i64()
+                .map_err(pdf_err)?,
+            Err(_) => 0,
+        };
+        annotation.set("F", flags | 64);
         for key in [b"A".as_slice(), b"AA", b"Dest", b"QuadPoints", b"H"] {
             annotation.remove(key);
         }

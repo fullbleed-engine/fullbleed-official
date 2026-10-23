@@ -8,7 +8,10 @@ import base64
 import fullbleed
 import fullbleed_assets
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import DictionaryObject, RectangleObject
+from pypdf.generic import (
+    ArrayObject, DecodedStreamObject, DictionaryObject, NameObject, NumberObject,
+    RectangleObject, TextStringObject,
+)
 import pytest
 
 
@@ -181,6 +184,85 @@ def test_imported_overlay_link_rect_and_quads_are_clipped_to_its_cropbox(tmp_pat
     assert points and len(points)%8 == 0
     assert all(rect[0]-1e-4 <= x <= rect[2]+1e-4 and rect[1]-1e-4 <= y <= rect[3]+1e-4
                for x,y in zip(points[::2],points[1::2]))
+
+
+@pytest.mark.parametrize("method", ["compose", "stamp"])
+@pytest.mark.parametrize("flags", ["absent", "direct", "indirect"])
+def test_fully_clipped_link_retains_readonly_artwork_without_becoming_a_note(tmp_path, method, flags):
+    import pypdfium2 as pdfium
+    from pypdfium2 import raw
+
+    template, overlay, out = [tmp_path / name for name in ("template.pdf", "overlay.pdf", "out.pdf")]
+    blank = PdfWriter()
+    blank.add_blank_page(200, 200)
+    blank.write(template)
+    source = PdfWriter()
+    source.pdf_header = "%PDF-1.7"
+    page = source.add_blank_page(200, 200)
+    page.cropbox = RectangleObject([30, 0, 200, 200])
+    appearance = DecodedStreamObject()
+    appearance.set_data(b"1 0 0 rg 0 0 40 20 re f")
+    appearance.update({NameObject("/Type"): NameObject("/XObject"),
+                       NameObject("/Subtype"): NameObject("/Form"),
+                       NameObject("/BBox"): RectangleObject([0, 0, 40, 20]),
+                       NameObject("/Resources"): DictionaryObject()})
+    appearance_ref = source._add_object(appearance)
+    action = DictionaryObject({NameObject("/S"): NameObject("/URI"),
+                               NameObject("/URI"): TextStringObject("https://example.invalid/removed")})
+    annotation = DictionaryObject({
+        NameObject("/Type"): NameObject("/Annot"),
+        NameObject("/Subtype"): NameObject("/Link"),
+        NameObject("/Rect"): RectangleObject([10, 20, 50, 40]),
+        NameObject("/QuadPoints"): ArrayObject([NumberObject(v) for v in [10, 20, 20, 20, 20, 40, 10, 40]]),
+        NameObject("/Border"): ArrayObject([NumberObject(0)] * 3),
+        NameObject("/Contents"): TextStringObject("This link must not become a popup note"),
+        NameObject("/H"): NameObject("/I"),
+        NameObject("/A"): action,
+        NameObject("/AA"): DictionaryObject({NameObject("/U"): action}),
+        NameObject("/AP"): DictionaryObject({NameObject(key): appearance_ref for key in ("/N", "/R", "/D")}),
+    })
+    original_flags = 0 if flags == "absent" else 4 | 128  # Print and Locked.
+    if flags != "absent":
+        value = NumberObject(original_flags)
+        annotation[NameObject("/F")] = source._add_object(value) if flags == "indirect" else value
+    if flags == "indirect":
+        del annotation["/A"]
+        annotation[NameObject("/Dest")] = ArrayObject([page.indirect_reference, NameObject("/Fit")])
+    source.add_annotation(0, annotation)
+    source.write(overlay)
+    if method == "compose":
+        fullbleed.finalize_compose_pdf([("tpl", str(template))], [("tpl", 0, 0, 12.0, 18.0)],
+                                      str(overlay), str(out), annotation_mode="none")
+    else:
+        fullbleed.finalize_stamp_pdf(str(template), str(overlay), str(out), dx=12.0, dy=18.0)
+
+    result = PdfReader(out, strict=True)
+    retained, = annotations(result.pages[0])
+    assert retained["/Subtype"] == "/Link", "Changing to Stamp invents popup-note behavior"
+    assert int(retained["/F"]) == original_flags | 64  # ReadOnly keeps artwork without interaction.
+    assert not any(key in retained for key in ("/A", "/AA", "/Dest", "/QuadPoints", "/H"))
+    assert set(retained["/AP"]) == {"/N", "/R", "/D"}
+    assert list(map(float, retained["/Rect"])) == pytest.approx([42, 38, 62, 58])
+
+    pieces = []
+    for path, crop in [(overlay, (0, 320, 40, 360)), (out, (84, 284, 124, 324))]:
+        with pdfium.PdfDocument(path) as document:
+            viewed = document[0]
+            try:
+                bitmap = viewed.render(scale=2, draw_annots=True)
+                try:
+                    pieces.append(bitmap.to_pil().convert("RGB").crop(crop).copy())
+                finally:
+                    bitmap.close()
+                if path == out:
+                    link = raw.FPDFLink_GetLinkAtPoint(viewed, 50, 48)
+                    # A reader may enumerate the retained Link object; it must have no target.
+                    assert not link or not raw.FPDFLink_GetAction(link)
+                    assert not link or not raw.FPDFLink_GetDest(document, link)
+            finally:
+                viewed.close()
+    assert set(pieces[0].getdata()) == {(255, 0, 0)}, "The source reader must actually draw the appearance"
+    assert pieces[0].tobytes() == pieces[1].tobytes()
 
 
 def test_stamping_preserves_existing_template_link_owners_and_semantic_destinations(tmp_path):

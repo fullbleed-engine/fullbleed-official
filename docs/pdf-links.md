@@ -5,9 +5,10 @@ same behavior applies to anchors emitted by Python components.
 
 **Version scope:** this guide describes the unreleased navigation work in
 [PR #125](https://github.com/fullbleed-engine/fullbleed-official/pull/125), verified
-on source revision `e7ae956`. Published `2.6.0a13` predates this work; its version
-number alone does not establish support. Use a wheel built from the candidate
-source when reproducing these examples.
+with candidate wheels. Published `2.6.0a13` predates this work; its version number
+alone does not establish support. Use a wheel built from the candidate source
+when reproducing these examples. The four-shape observations below record
+engine revision `e7ae956`.
 
 ## External and internal links
 
@@ -111,7 +112,12 @@ different inputs to this process.
 
 The reviewed PDF.js specimens preserve explicit appearance streams through
 composition and stamping, including artwork whose active region is fully
-clipped. Imported links without appearance streams still show visual differences
+clipped. When no active region remains, composition retains the original Link
+type, sets its ReadOnly flag, and removes actions and destinations. This keeps
+the artwork without converting it to a stamp that can open a popup note. A
+reader API may still enumerate the retained Link object; it has no active target.
+
+Imported links without appearance streams still show visual differences
 for dashed, rounded, beveled, inset, and underline borders. MuPDF's omission of
 an ordinary Link appearance is not evidence that an appearance was preserved.
 
