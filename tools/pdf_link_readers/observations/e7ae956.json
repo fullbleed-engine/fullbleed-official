@@ -1,0 +1,254 @@
+{
+  "schema": "fullbleed.link-reader-observation.v1",
+  "source_commit": "e7ae9564f4d2c3c81a178cb06f726c3363c31ba5",
+  "wheel_sha256": "4d7f7c3b4cdf06101abca23fac96d6ade5d0dea77d7ecf1e9f4272ba192c7765",
+  "observed_at": "2026-10-23T03:42:02.178443+00:00",
+  "status": "differences",
+  "exit_code": 2,
+  "scope": "Four authored shapes, 5pt grid, excluding points within 1.5pt of boundaries. Paint, standard PDF QuadPoints, PDFium hit API and PDF.js DOM/clicks are separate observations. This is not an accessibility, conformance, or exact-curve-boundary test.",
+  "input_manifest": {
+    "schema": "fullbleed.link-reader-inputs.v1",
+    "runtime": {
+      "version": "2.6.0a13",
+      "native_sha256": "e598a429f34b360d8138bccb16df7865b9b594224356a6c8be8a06190280d7b1",
+      "build_features": {
+        "schema": "fullbleed.build_features.v1",
+        "python": true,
+        "svg_raster": true,
+        "compiled_reflow": true,
+        "explicit_table_headers": true,
+        "logical_table_pagination": true,
+        "bundled_standard_font_previews": true,
+        "embedded_stylesheets": true,
+        "compiled_flow_compression_modes": [
+          "throughput",
+          "compact"
+        ]
+      }
+    },
+    "generator_sha256": "b0c082f6991096d65a63f748a457a13284b03f1c69a9dab30fb1836fdaee9c8b",
+    "cases": [
+      {
+        "name": "rectangle",
+        "files": {
+          "rectangle.html": "1b3f817ec7e9f6674fb29746596e903fd8629c5100ff5a8cc7bd17361b8f1820",
+          "rectangle.css": "fb3d34cf42110b865f7700962b5ab9c96384cdb55e506e99c289e1697a5644c5",
+          "rectangle.pdf": "9dad83ea155fb716c15e0c5c228db6e094ddae5bea7a553a11bf9185c226d826",
+          "rectangle.png": "780c776a83c7dd97148008c2e4013281c8ca02f74a60966ecb7886d86386da22"
+        }
+      },
+      {
+        "name": "rotated",
+        "files": {
+          "rotated.html": "f7a0cf2acdc10e0cd55c2e15c1f835f9e2418fd166a6373f4aba19e702449dc4",
+          "rotated.css": "0828923b3955a7aaebaf33646470840db1e482923af229961625907dd58bf424",
+          "rotated.pdf": "e5be7a25e5b9f853b41d1426641d9d2fc317585f81ad54cce520f20590ffeb7f",
+          "rotated.png": "48543b3935dfdf8568a5e677ff2a19fd59477785e649587682f4b8f2361ba10a"
+        }
+      },
+      {
+        "name": "triangle",
+        "files": {
+          "triangle.html": "5e25665083162f2f7a0527f4698128ea44e329cdf4523da7509d5e9d70f4a936",
+          "triangle.css": "eabd9193cf74d50e1d3123cb2cf5e005e2ed4a068107ad77dc9f8f560ca76274",
+          "triangle.pdf": "e7d21bd49780ce8df40d1dfe34890fffd2f3f74d9a4bd03394fe92e82a77f1c9",
+          "triangle.png": "685d29959d260bcf3b15c8ddb93d50d5fcf1ac892f79e2fe542771f591c5267d"
+        }
+      },
+      {
+        "name": "circle",
+        "files": {
+          "circle.html": "94ed881145b78f56a27bcad873f6b2d6e69d4b8de2cff92881aa4302c8178a25",
+          "circle.css": "99d1438e84ed09954bc4ef0b732cc03a3f4615aa35eae5c9b4ed1f772fdc5258",
+          "circle.pdf": "2c50cc4c3b547eccf9ba6dfd79d4346fe7d1318657efe1cee27963bd499b5d1e",
+          "circle.png": "cd87300a9278961ac82f981d70ffdd370e2ea63d6c7a3ab4aeff4b4df68c0efd"
+        }
+      }
+    ]
+  },
+  "readers": {
+    "pdfium": "146.0.7665.0",
+    "pdfjs": "6.4.299",
+    "python_packages": {
+      "pypdf": "6.1.1",
+      "pypdfium2": "5.4.0",
+      "Pillow": "10.2.0",
+      "playwright": "1.63.0"
+    },
+    "chromium": "153.0.8010.12"
+  },
+  "harness_sha256": {
+    "check.py": "cf97da4897b3cf991b22eca66d92ebf09610a60ce31fbe8c298641d69e31c056",
+    "viewer.html": "6fc3372221966b40a9a866afb96134f690637d547d1c7d18ec9831cb79eca04d",
+    "pdfjs-lock.json": "761471e0964236328eb92705bec673a591a9f3528ae42d4a0c4da92a3ee75a2f"
+  },
+  "cases": [
+    {
+      "name": "rectangle",
+      "samples": 1441,
+      "mismatches": {
+        "geometry": 0,
+        "paint": 0,
+        "pdfium": 0,
+        "pdfjs": 0
+      },
+      "pdf_sha256": "9dad83ea155fb716c15e0c5c228db6e094ddae5bea7a553a11bf9185c226d826",
+      "clicks": [
+        {
+          "point": [
+            45,
+            65
+          ],
+          "expected": true,
+          "clicked": [
+            "https://example.invalid/rectangle"
+          ]
+        },
+        {
+          "point": [
+            5,
+            5
+          ],
+          "expected": false,
+          "clicked": []
+        }
+      ]
+    },
+    {
+      "name": "rotated",
+      "samples": 1487,
+      "mismatches": {
+        "geometry": 0,
+        "paint": 0,
+        "pdfium": 197,
+        "pdfjs": 197
+      },
+      "pdf_sha256": "e5be7a25e5b9f853b41d1426641d9d2fc317585f81ad54cce520f20590ffeb7f",
+      "clicks": [
+        {
+          "point": [
+            105,
+            80
+          ],
+          "expected": true,
+          "clicked": [
+            "https://example.invalid/rotated"
+          ]
+        },
+        {
+          "point": [
+            5,
+            5
+          ],
+          "expected": false,
+          "clicked": []
+        },
+        {
+          "point": [
+            20,
+            80
+          ],
+          "expected": false,
+          "clicked": [
+            "https://example.invalid/rotated"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "triangle",
+      "samples": 1461,
+      "mismatches": {
+        "geometry": 0,
+        "paint": 0,
+        "pdfium": 81,
+        "pdfjs": 72
+      },
+      "pdf_sha256": "e7d21bd49780ce8df40d1dfe34890fffd2f3f74d9a4bd03394fe92e82a77f1c9",
+      "clicks": [
+        {
+          "point": [
+            45,
+            70
+          ],
+          "expected": true,
+          "clicked": [
+            "https://example.invalid/triangle"
+          ]
+        },
+        {
+          "point": [
+            5,
+            5
+          ],
+          "expected": false,
+          "clicked": []
+        },
+        {
+          "point": [
+            50,
+            65
+          ],
+          "expected": false,
+          "clicked": [
+            "https://example.invalid/triangle"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "circle",
+      "samples": 1485,
+      "mismatches": {
+        "geometry": 0,
+        "paint": 0,
+        "pdfium": 0,
+        "pdfjs": 0
+      },
+      "pdf_sha256": "2c50cc4c3b547eccf9ba6dfd79d4346fe7d1318657efe1cee27963bd499b5d1e",
+      "clicks": [
+        {
+          "point": [
+            75,
+            75
+          ],
+          "expected": true,
+          "clicked": [
+            "https://example.invalid/circle"
+          ]
+        },
+        {
+          "point": [
+            5,
+            5
+          ],
+          "expected": false,
+          "clicked": []
+        }
+      ]
+    }
+  ],
+  "evidence_sha256": {
+    "check.py": "cf97da4897b3cf991b22eca66d92ebf09610a60ce31fbe8c298641d69e31c056",
+    "circle-pdfium.png": "91c92d213392395cdb8b86b9e50923cafa9d259720c5f2075dd72eae5b31489b",
+    "circle-pdfjs.png": "dab9f4036b9107297c51545579695f73b6200d4f46208b9b8acb8bdc6b0b17e1",
+    "circle-points.json": "db5808c2cc54b51a34ee7080132ffd1b1ea18cd9bf55b5a52aaad0c887fd28e4",
+    "circle.pdf": "2c50cc4c3b547eccf9ba6dfd79d4346fe7d1318657efe1cee27963bd499b5d1e",
+    "inputs.json": "deed883801be8c9f2fbd05df292fa9221179dffe629a18fa6d5e5a94b202d8ed",
+    "pdfjs-lock.json": "761471e0964236328eb92705bec673a591a9f3528ae42d4a0c4da92a3ee75a2f",
+    "rectangle-pdfium.png": "5a5e60a64424c04df65bdff6e2ae3ecf03349db113770fa64cc853a832a0ca6c",
+    "rectangle-pdfjs.png": "b645eaa1a8a7500b2f86b8d80dde2f65bdfa34ebd1a413ca65ce7ba405f5e800",
+    "rectangle-points.json": "158974cd7ff3a1c6db77918254d64a0bdd9b9e80ce0124697af0d71527a7bf20",
+    "rectangle.pdf": "9dad83ea155fb716c15e0c5c228db6e094ddae5bea7a553a11bf9185c226d826",
+    "report.json": "e9f021e66ecf57391939f1cd85db6c6f0b389dd10bb9d79280f8234cf2cf3212",
+    "rotated-pdfium.png": "9977b467712d92d0ac0fcd660fce5f5c8d48989da64b2d8933c7a1544cd99439",
+    "rotated-pdfjs.png": "6756500069eac9ce936147f6f8c91cf934b07ee987c0afde12942ea177878cee",
+    "rotated-points.json": "759654ce032d226e0ba7e32b1eafdf486a5d87b2eeddef2dd4bfea5e5a675e06",
+    "rotated.pdf": "e5be7a25e5b9f853b41d1426641d9d2fc317585f81ad54cce520f20590ffeb7f",
+    "triangle-pdfium.png": "d4282c23df66cdaf0d7c25e2580e91c976eb9f682e589e61f3685049ea54ab5f",
+    "triangle-pdfjs.png": "c0ba8d0a926a25b34863f2b745517967374624f2ecc052c01ea60b101542a9ac",
+    "triangle-points.json": "175016f24de5d3296b587c6df80d97608cdef9f0d72665e9177f552e2e13966c",
+    "triangle.pdf": "e7d21bd49780ce8df40d1dfe34890fffd2f3f74d9a4bd03394fe92e82a77f1c9",
+    "viewer.html": "6fc3372221966b40a9a866afb96134f690637d547d1c7d18ec9831cb79eca04d"
+  }
+}

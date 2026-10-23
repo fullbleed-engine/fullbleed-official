@@ -16,6 +16,10 @@ engine applies static `<style>` elements in HTML. See
 [embedded stylesheets](embedded-stylesheets.md) for a complete-document example,
 stylesheet precedence, print media, and compiled rendering boundaries.
 
+For external URLs and internal document navigation, see [PDF links](pdf-links.md).
+That guide identifies the unreleased candidate and its measured reader limits;
+the published alpha's version number alone does not establish link support.
+
 ## `fullbleed.ui` (component-first authoring)
 
 Start with [Build PDFs with Python components](component-authoring.md) for named
