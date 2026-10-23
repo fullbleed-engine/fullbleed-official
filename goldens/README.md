@@ -100,16 +100,17 @@ on the 2448-by-1224 preview. Acme and both bank-statement pages remain unchanged
 These relative alignment and reviewed layout changes do not establish full
 browser parity or correct the title table's existing absolute placement.
 
-The shared table-cell baseline/alignment correction in `25ab00a` refreshes the
-bank statement's first page. Its three contact rows move down 1pt: 58 text
-glyphs and seven SVG paths. The bank icon's six SVG paths move down 0.5pt.
+The shared table-cell baseline/alignment correction refreshes the bank
+statement's first page. Middle alignment centers the logical line box without
+adding another paint offset. Compared with the preceding `fd23a92` baseline,
+58 contact-text glyphs and 13 SVG paths in the header move down 0.5pt.
 All other glyph origins and vector paths remain unchanged. The change affects
-4,946 preview pixels, confined to `(77, 78, 1150, 192)` on the 1224-by-1584
-first page. Text, page count, and page dimensions are unchanged; the second
-page's preview remains byte-identical. Both images were visually reviewed.
+4,093 preview pixels, confined to `(77, 78, 1150, 191)` on the 1224-by-1584
+first page. Text, fonts, page count, and page dimensions are unchanged; the
+second page's preview remains byte-identical. Both first-page images were
+visually reviewed.
 
-The isolated installed-wheel rendering reproduces the exact PDF and both PNGs
-retained by [Windows CI](https://github.com/fullbleed-engine/fullbleed-official/actions/runs/39914202584).
-Acme and coastal-menu baselines are unchanged. This refresh records the
-reviewed effect of removing the old table paint offsets; it does not claim
-that the complete bank statement matches browser layout.
+The installed-wheel examples were rendered into isolated output directories.
+Acme and coastal-menu PDFs and previews remain byte-identical to their
+baselines. This refresh records the reviewed table alignment change; it does
+not claim that the complete bank statement matches browser layout.

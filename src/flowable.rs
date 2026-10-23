@@ -17338,28 +17338,10 @@ impl TableFlowable {
                     | VerticalAlign::Top
                     | VerticalAlign::TextTop => cell_y + pad_top,
                     VerticalAlign::Middle => {
-                        let has_middle_slack = content_height > text_block_height;
-                        let collapse_nowrap_phase =
-                            self.uses_centered_collapsed_edges() && cell.no_wrap;
-                        let tight_separated_nowrap_phase = !self.uses_centered_collapsed_edges()
-                            && row_gap > Pt::ZERO
-                            && cell.no_wrap
-                            && !has_middle_slack;
-                        let phase = if tight_separated_nowrap_phase {
-                            // Retain the tight separated cell's upper phase;
-                            // the content-box clamp still owns its top edge.
-                            -Pt::from_f32(0.25)
-                        } else if positive_odd_pixel_leading
-                            && (has_middle_slack || collapse_nowrap_phase)
-                        {
-                            Pt::ZERO
-                        } else {
-                            Pt::from_f32(0.5)
-                        };
-                        cell_y
-                            + pad_top
-                            + (content_height - text_block_height).mul_ratio(1, 2)
-                            + phase
+                        // Center the logical line box. Its paint baseline is
+                        // already resolved below; adding a separate paint
+                        // offset here shifts both tight and tall cells down.
+                        cell_y + pad_top + (content_height - text_block_height).mul_ratio(1, 2)
                     }
                     VerticalAlign::Bottom | VerticalAlign::TextBottom => {
                         cell_y + cell_height - pad_bottom - text_block_height

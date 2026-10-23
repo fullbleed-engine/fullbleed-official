@@ -137,6 +137,22 @@ These checks do not establish identical rasterization in every PDF reader.
 The observation retains the corresponding native checks and known pixel
 differences for the sampled fonts.
 
+The [middle-alignment observation](observations/table-middle-baselines.json)
+compares 216 plain/span/link controls and two exact upstream fixtures with
+Chromium's printed baselines. It covers two registered fonts, three line
+heights, tight and tall cells, both border models, and normal/nowrap text.
+Removing an extra cell paint offset corrects a 0.5pt downward shift in 158
+cases; all 218 then match the measured vertical origins within 0.001pt.
+The retained record includes parameters, font hashes, reader identity, PDF
+hashes, and each comparison. The bundled-font regression is reproducible with:
+
+```sh
+cargo test --lib pdf_links_middle_table_cells_use_the_line_box_without_extra_paint_offset
+```
+
+This measures these baseline positions, not general browser or raster parity.
+The unchanged external CSS corpus remains a separate release check.
+
 ## Inspect a source link border at different zoom levels
 
 The [independent source PDF](fixtures/border-zoom.pdf) contains two frames with
