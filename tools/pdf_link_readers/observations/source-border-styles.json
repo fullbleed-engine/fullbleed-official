@@ -1,0 +1,548 @@
+{
+  "started_at": "2026-10-23T04:36:34.937919+00:00",
+  "status": "observed",
+  "cases": [
+    {
+      "name": "beveled",
+      "input_sha256": "2c90776cb698049d172488011badd5813607a23d9f04c3de7d019fa18858dcd2",
+      "annotation_rect_at_2x": [
+        20,
+        280,
+        140,
+        360
+      ],
+      "pdfjs_annotations": [
+        {
+          "id": "5R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 3,
+            "dashArray": [
+              4,
+              2
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "hasAppearance": false,
+          "url": "https://example.invalid/border-control"
+        }
+      ],
+      "observations": {
+        "pdfjs": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 0,
+          "paint_bbox": null,
+          "png_sha256": "0b0d9d8b2ea2be381e1eb3003b2bff4140580807efc297e37575a00fda09188c"
+        },
+        "pdfium": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 0,
+          "paint_bbox": null,
+          "png_sha256": "8cf7fdeb3d441e1a03017497d0aa77ed63ab9cc0c872ffd71fb040775fced0ee"
+        },
+        "poppler": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 2400,
+          "paint_bbox": [
+            17,
+            277,
+            143,
+            363
+          ],
+          "png_sha256": "e8cc179d07c7788490f36ba5b13c673e5e9297ba758dd6ca85c42a8c1c4199d6"
+        }
+      },
+      "fixture": "fixtures/border-styles/beveled.pdf"
+    },
+    {
+      "name": "dashed",
+      "input_sha256": "28bdb9eae8473972cff074d3645121c23d3aab357bb4b5ceb68be59a4759c55b",
+      "annotation_rect_at_2x": [
+        20,
+        280,
+        140,
+        360
+      ],
+      "pdfjs_annotations": [
+        {
+          "id": "5R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 2,
+            "dashArray": [
+              4,
+              2
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "hasAppearance": false,
+          "url": "https://example.invalid/border-control"
+        }
+      ],
+      "observations": {
+        "pdfjs": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 900,
+          "paint_bbox": [
+            20,
+            280,
+            140,
+            360
+          ],
+          "png_sha256": "0013f4c011bab0b21f733748e19c432bd4d41bed1cc9a0ef396c11567a554d76"
+        },
+        "pdfium": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 0,
+          "paint_bbox": null,
+          "png_sha256": "8cf7fdeb3d441e1a03017497d0aa77ed63ab9cc0c872ffd71fb040775fced0ee"
+        },
+        "poppler": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 1616,
+          "paint_bbox": [
+            17,
+            277,
+            143,
+            363
+          ],
+          "png_sha256": "7cea9348f504bd6ec08aa7754db553f5a017253eab1c17b3c1334b1333be6a1e"
+        }
+      },
+      "fixture": "fixtures/border-styles/dashed.pdf"
+    },
+    {
+      "name": "explicit-appearance",
+      "input_sha256": "1b9cdae834cf74a8dde031aa92b5f04859aab25feb9d6ce82ea0d1c0ebd2b164",
+      "annotation_rect_at_2x": [
+        20,
+        280,
+        140,
+        360
+      ],
+      "pdfjs_annotations": [
+        {
+          "id": "6R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 1,
+            "dashArray": [
+              4,
+              2
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "hasAppearance": true,
+          "url": "https://example.invalid/border-control"
+        }
+      ],
+      "observations": {
+        "pdfjs": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 9600,
+          "paint_bbox": [
+            20,
+            280,
+            140,
+            360
+          ],
+          "png_sha256": "23b9fac50ddb6fc173bb4dd5a929a8a3276d3311aa3b624c3b74379710659326"
+        },
+        "pdfium": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 9600,
+          "paint_bbox": [
+            20,
+            280,
+            140,
+            360
+          ],
+          "png_sha256": "c18b0de2f4484593bce7d061d7b4e01d051094d39544db9a43caa48c019a5d16"
+        },
+        "poppler": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 10836,
+          "paint_bbox": [
+            17,
+            277,
+            143,
+            363
+          ],
+          "png_sha256": "273156d527dd20656c7fd81c3069fe2f5021f4391dd7453a9f98d6e70e7a4da5"
+        }
+      },
+      "fixture": "fixtures/border-styles/explicit-appearance.pdf"
+    },
+    {
+      "name": "inset",
+      "input_sha256": "cd52fe2775f7532eaa58a5185170f4382dc148ede0aac67d96c46b9e7189d162",
+      "annotation_rect_at_2x": [
+        20,
+        280,
+        140,
+        360
+      ],
+      "pdfjs_annotations": [
+        {
+          "id": "5R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 4,
+            "dashArray": [
+              4,
+              2
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "hasAppearance": false,
+          "url": "https://example.invalid/border-control"
+        }
+      ],
+      "observations": {
+        "pdfjs": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 0,
+          "paint_bbox": null,
+          "png_sha256": "0b0d9d8b2ea2be381e1eb3003b2bff4140580807efc297e37575a00fda09188c"
+        },
+        "pdfium": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 0,
+          "paint_bbox": null,
+          "png_sha256": "8cf7fdeb3d441e1a03017497d0aa77ed63ab9cc0c872ffd71fb040775fced0ee"
+        },
+        "poppler": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 2400,
+          "paint_bbox": [
+            17,
+            277,
+            143,
+            363
+          ],
+          "png_sha256": "e8cc179d07c7788490f36ba5b13c673e5e9297ba758dd6ca85c42a8c1c4199d6"
+        }
+      },
+      "fixture": "fixtures/border-styles/inset.pdf"
+    },
+    {
+      "name": "rounded",
+      "input_sha256": "aa3af4f689e688533b85dc6db5985106763b137b0fa95bfe3dc09be78b234a9e",
+      "annotation_rect_at_2x": [
+        20,
+        280,
+        140,
+        360
+      ],
+      "pdfjs_annotations": [
+        {
+          "id": "5R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 1,
+            "dashArray": [
+              3
+            ],
+            "horizontalCornerRadius": 8,
+            "verticalCornerRadius": 8
+          },
+          "hasAppearance": false,
+          "url": "https://example.invalid/border-control"
+        }
+      ],
+      "observations": {
+        "pdfjs": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 1180,
+          "paint_bbox": [
+            20,
+            280,
+            140,
+            360
+          ],
+          "png_sha256": "950e30053ab1a03a61047ee33d2852f935e65c7a21ee4fdf1f94a8c03c4c6f2a"
+        },
+        "pdfium": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 0,
+          "paint_bbox": null,
+          "png_sha256": "8cf7fdeb3d441e1a03017497d0aa77ed63ab9cc0c872ffd71fb040775fced0ee"
+        },
+        "poppler": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 2400,
+          "paint_bbox": [
+            17,
+            277,
+            143,
+            363
+          ],
+          "png_sha256": "e8cc179d07c7788490f36ba5b13c673e5e9297ba758dd6ca85c42a8c1c4199d6"
+        }
+      },
+      "fixture": "fixtures/border-styles/rounded.pdf"
+    },
+    {
+      "name": "solid",
+      "input_sha256": "a6cafd3baffc85aafb0f628d46464a112d02c7abadf7571b45cded26c7043520",
+      "annotation_rect_at_2x": [
+        20,
+        280,
+        140,
+        360
+      ],
+      "pdfjs_annotations": [
+        {
+          "id": "5R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 1,
+            "dashArray": [
+              4,
+              2
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "hasAppearance": false,
+          "url": "https://example.invalid/border-control"
+        }
+      ],
+      "observations": {
+        "pdfjs": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 1164,
+          "paint_bbox": [
+            20,
+            280,
+            140,
+            360
+          ],
+          "png_sha256": "8d8d3f318560b494445dcf5bc12f1d72de4121ca9aeb512810a52f6a2233a517"
+        },
+        "pdfium": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 0,
+          "paint_bbox": null,
+          "png_sha256": "8cf7fdeb3d441e1a03017497d0aa77ed63ab9cc0c872ffd71fb040775fced0ee"
+        },
+        "poppler": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 2400,
+          "paint_bbox": [
+            17,
+            277,
+            143,
+            363
+          ],
+          "png_sha256": "e8cc179d07c7788490f36ba5b13c673e5e9297ba758dd6ca85c42a8c1c4199d6"
+        }
+      },
+      "fixture": "fixtures/border-styles/solid.pdf"
+    },
+    {
+      "name": "underline",
+      "input_sha256": "c06bf161c26b43297113b1df9a53396d3bec89f3df78213abe37d820ec845cf6",
+      "annotation_rect_at_2x": [
+        20,
+        280,
+        140,
+        360
+      ],
+      "pdfjs_annotations": [
+        {
+          "id": "5R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 5,
+            "dashArray": [
+              4,
+              2
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "hasAppearance": false,
+          "url": "https://example.invalid/border-control"
+        }
+      ],
+      "observations": {
+        "pdfjs": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 360,
+          "paint_bbox": [
+            20,
+            357,
+            140,
+            360
+          ],
+          "png_sha256": "a00d0a869b92eeb546a91abd15494f228760995692f0750bfe3234cbef94075f"
+        },
+        "pdfium": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 0,
+          "paint_bbox": null,
+          "png_sha256": "8cf7fdeb3d441e1a03017497d0aa77ed63ab9cc0c872ffd71fb040775fced0ee"
+        },
+        "poppler": {
+          "size": [
+            400,
+            400
+          ],
+          "nonwhite_pixels": 720,
+          "paint_bbox": [
+            20,
+            357,
+            140,
+            363
+          ],
+          "png_sha256": "39f770cd7922c83970f61bd3cc39d6657b2ac943f8db7e59fa77dfcfee244cee"
+        }
+      },
+      "fixture": "fixtures/border-styles/underline.pdf"
+    }
+  ],
+  "errors": [],
+  "warnings": [
+    "Warning: Unimplemented border style: beveled",
+    "Warning: Unimplemented border style: inset"
+  ],
+  "readers": {
+    "pdfium": "146.0.7665.0",
+    "pdfjs": "6.4.299",
+    "poppler": "22.02.0 / Ubuntu 22.02.0-2ubuntu0.15",
+    "chromium": "153.0.8010.12"
+  },
+  "source_only": true,
+  "scope": "These are pypdf-authored source PDFs, before Fullbleed composition. The observed differences establish reader limitations, not a passing engine-preservation test.",
+  "spec_reference": "https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/pdfreference1.6.pdf#page=597",
+  "spec_summary": "Section 8.4.3 places borders fully inside Rect; Table 8.13 specifies border widths in points and distinguishes solid, dashed, beveled, inset, and underline styles. Rounded-corner dimensions are in Border, Table 8.11.",
+  "completed_at": "2026-10-23T04:36:40.459169+00:00"
+}

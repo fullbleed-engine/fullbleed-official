@@ -1,0 +1,523 @@
+{
+  "at": "2026-10-23T08:51:49.062184+00:00",
+  "status": "observed",
+  "pdfjs": "6.4.299",
+  "pdfjs_files": {
+    "build/pdf.mjs": "dd13af821c9c3e1778653340d6539a1ba07bc56cba40073a4c727864cf0c232a",
+    "build/pdf.worker.mjs": "07ceb740d746e5d9012fcf9f27d5c7dea09f7d2f5e74f5c8109e5787551a2333",
+    "web/pdf_viewer.mjs": "2e112bf95cf962bcc9d3ace10d5bc74b3c5095245baa3eacd6bbbb9fc9a940a3",
+    "web/pdf_viewer.css": "1f3c7c3c692d4da2334d0386d2286ec040a37db8654e02b8704b11262bc9bf49"
+  },
+  "packages": {
+    "playwright": "1.63.0",
+    "pypdf": "6.1.1",
+    "Pillow": "10.2.0"
+  },
+  "observations": [
+    {
+      "name": "dashed",
+      "scale": 1,
+      "pdf_sha256": "ea9571dbd9a2e8e3f124353ef390d5f3571d3ea2844a385af809ff31c1621260",
+      "png_sha256": "605b320dbe8ee35ee6ce6d66abcaea0bfd0e0a806cac95f99ab8e2c2b4289f30",
+      "visible_pixels": 204,
+      "styles": [
+        {
+          "width": "60px",
+          "height": "40px",
+          "borderWidth": "3px",
+          "borderStyle": "dashed",
+          "borderRadius": "0px",
+          "borderColor": "rgb(255, 0, 0)"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "5R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [
+            10,
+            60,
+            70,
+            60,
+            10,
+            20,
+            70,
+            20
+          ],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 2,
+            "dashArray": [
+              4,
+              2
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "hasAppearance": false,
+          "url": "https://example.invalid/cut-border/dashed"
+        }
+      ],
+      "console": [],
+      "fixture": "fixtures/border-styles/dash/dashed.pdf"
+    },
+    {
+      "name": "appearance",
+      "scale": 1,
+      "pdf_sha256": "99de2975e75b2b2b0539d34ad809120e85d97da1cf56b34c6cc0b3ba7e466e3d",
+      "png_sha256": "4fe52d2feaf07537ef6ab1250aee24eac20c0631fdcf5fe1caaef9d626a3c21a",
+      "visible_pixels": 452,
+      "styles": [
+        {
+          "width": "60px",
+          "height": "40px",
+          "borderWidth": "3px",
+          "borderStyle": "solid",
+          "borderRadius": "0px",
+          "borderColor": "rgb(255, 0, 0)"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "6R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [
+            10,
+            60,
+            70,
+            60,
+            10,
+            20,
+            70,
+            20
+          ],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 1,
+            "dashArray": [
+              4,
+              2
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "hasAppearance": true,
+          "url": "https://example.invalid/cut-border/appearance"
+        }
+      ],
+      "console": [],
+      "fixture": "fixtures/border-styles/dash/appearance.pdf"
+    },
+    {
+      "name": "dashed-long",
+      "scale": 1,
+      "pdf_sha256": "825a3d0b1612167e4b1781b9448654aa8c935b2aed03581b4f3fb7d9e3c6cd66",
+      "png_sha256": "605b320dbe8ee35ee6ce6d66abcaea0bfd0e0a806cac95f99ab8e2c2b4289f30",
+      "visible_pixels": 204,
+      "styles": [
+        {
+          "width": "60px",
+          "height": "40px",
+          "borderWidth": "3px",
+          "borderStyle": "dashed",
+          "borderRadius": "0px",
+          "borderColor": "rgb(255, 0, 0)"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "4R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [
+            10,
+            60,
+            70,
+            60,
+            10,
+            20,
+            70,
+            20
+          ],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 2,
+            "dashArray": [
+              12,
+              1
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "hasAppearance": false,
+          "url": "https://example.invalid/cut-border/dashed"
+        }
+      ],
+      "console": [],
+      "fixture": "fixtures/border-styles/dash/dashed-long.pdf"
+    },
+    {
+      "name": "dashed",
+      "scale": 2,
+      "pdf_sha256": "ea9571dbd9a2e8e3f124353ef390d5f3571d3ea2844a385af809ff31c1621260",
+      "png_sha256": "15c2bb977f5872b84ec826d089df37046809f7a0480978e137e7162eca6911db",
+      "visible_pixels": 450,
+      "styles": [
+        {
+          "width": "120px",
+          "height": "80px",
+          "borderWidth": "3px",
+          "borderStyle": "dashed",
+          "borderRadius": "0px",
+          "borderColor": "rgb(255, 0, 0)"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "5R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [
+            10,
+            60,
+            70,
+            60,
+            10,
+            20,
+            70,
+            20
+          ],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 2,
+            "dashArray": [
+              4,
+              2
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "hasAppearance": false,
+          "url": "https://example.invalid/cut-border/dashed"
+        }
+      ],
+      "console": [],
+      "fixture": "fixtures/border-styles/dash/dashed.pdf"
+    },
+    {
+      "name": "appearance",
+      "scale": 2,
+      "pdf_sha256": "99de2975e75b2b2b0539d34ad809120e85d97da1cf56b34c6cc0b3ba7e466e3d",
+      "png_sha256": "d50f4a379acdb8ff12d7c71bde06fd69ff8be7bb3eaa272fb0e945beb9397c16",
+      "visible_pixels": 1322,
+      "styles": [
+        {
+          "width": "120px",
+          "height": "80px",
+          "borderWidth": "3px",
+          "borderStyle": "solid",
+          "borderRadius": "0px",
+          "borderColor": "rgb(255, 0, 0)"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "6R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [
+            10,
+            60,
+            70,
+            60,
+            10,
+            20,
+            70,
+            20
+          ],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 1,
+            "dashArray": [
+              4,
+              2
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "hasAppearance": true,
+          "url": "https://example.invalid/cut-border/appearance"
+        }
+      ],
+      "console": [],
+      "fixture": "fixtures/border-styles/dash/appearance.pdf"
+    },
+    {
+      "name": "dashed-long",
+      "scale": 2,
+      "pdf_sha256": "825a3d0b1612167e4b1781b9448654aa8c935b2aed03581b4f3fb7d9e3c6cd66",
+      "png_sha256": "15c2bb977f5872b84ec826d089df37046809f7a0480978e137e7162eca6911db",
+      "visible_pixels": 450,
+      "styles": [
+        {
+          "width": "120px",
+          "height": "80px",
+          "borderWidth": "3px",
+          "borderStyle": "dashed",
+          "borderRadius": "0px",
+          "borderColor": "rgb(255, 0, 0)"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "4R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [
+            10,
+            60,
+            70,
+            60,
+            10,
+            20,
+            70,
+            20
+          ],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 2,
+            "dashArray": [
+              12,
+              1
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "hasAppearance": false,
+          "url": "https://example.invalid/cut-border/dashed"
+        }
+      ],
+      "console": [],
+      "fixture": "fixtures/border-styles/dash/dashed-long.pdf"
+    },
+    {
+      "name": "dashed",
+      "scale": 3,
+      "pdf_sha256": "ea9571dbd9a2e8e3f124353ef390d5f3571d3ea2844a385af809ff31c1621260",
+      "png_sha256": "9fc5f9261777c2f4ed9f0b781bf49611af1dad4e2e519352963ff5bf180386b6",
+      "visible_pixels": 684,
+      "styles": [
+        {
+          "width": "180px",
+          "height": "120px",
+          "borderWidth": "3px",
+          "borderStyle": "dashed",
+          "borderRadius": "0px",
+          "borderColor": "rgb(255, 0, 0)"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "5R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [
+            10,
+            60,
+            70,
+            60,
+            10,
+            20,
+            70,
+            20
+          ],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 2,
+            "dashArray": [
+              4,
+              2
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "hasAppearance": false,
+          "url": "https://example.invalid/cut-border/dashed"
+        }
+      ],
+      "console": [],
+      "fixture": "fixtures/border-styles/dash/dashed.pdf"
+    },
+    {
+      "name": "appearance",
+      "scale": 3,
+      "pdf_sha256": "99de2975e75b2b2b0539d34ad809120e85d97da1cf56b34c6cc0b3ba7e466e3d",
+      "png_sha256": "a99e46a85c824f2143fe1c3f3610408bf58a226adc5f54d67e296d943efe879c",
+      "visible_pixels": 2592,
+      "styles": [
+        {
+          "width": "180px",
+          "height": "120px",
+          "borderWidth": "3px",
+          "borderStyle": "solid",
+          "borderRadius": "0px",
+          "borderColor": "rgb(255, 0, 0)"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "6R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [
+            10,
+            60,
+            70,
+            60,
+            10,
+            20,
+            70,
+            20
+          ],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 1,
+            "dashArray": [
+              4,
+              2
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "hasAppearance": true,
+          "url": "https://example.invalid/cut-border/appearance"
+        }
+      ],
+      "console": [],
+      "fixture": "fixtures/border-styles/dash/appearance.pdf"
+    },
+    {
+      "name": "dashed-long",
+      "scale": 3,
+      "pdf_sha256": "825a3d0b1612167e4b1781b9448654aa8c935b2aed03581b4f3fb7d9e3c6cd66",
+      "png_sha256": "9fc5f9261777c2f4ed9f0b781bf49611af1dad4e2e519352963ff5bf180386b6",
+      "visible_pixels": 684,
+      "styles": [
+        {
+          "width": "180px",
+          "height": "120px",
+          "borderWidth": "3px",
+          "borderStyle": "dashed",
+          "borderRadius": "0px",
+          "borderColor": "rgb(255, 0, 0)"
+        }
+      ],
+      "annotations": [
+        {
+          "id": "4R",
+          "subtype": "Link",
+          "rect": [
+            10,
+            20,
+            70,
+            60
+          ],
+          "quadPoints": [
+            10,
+            60,
+            70,
+            60,
+            10,
+            20,
+            70,
+            20
+          ],
+          "borderStyle": {
+            "width": 3,
+            "rawWidth": 3,
+            "style": 2,
+            "dashArray": [
+              12,
+              1
+            ],
+            "horizontalCornerRadius": 0,
+            "verticalCornerRadius": 0
+          },
+          "hasAppearance": false,
+          "url": "https://example.invalid/cut-border/dashed"
+        }
+      ],
+      "console": [],
+      "fixture": "fixtures/border-styles/dash/dashed-long.pdf"
+    }
+  ],
+  "errors": [],
+  "chromium": "153.0.8010.12",
+  "dash_comparisons": [
+    {
+      "scale": 1,
+      "identical_pixels": true
+    },
+    {
+      "scale": 2,
+      "identical_pixels": true
+    },
+    {
+      "scale": 3,
+      "identical_pixels": true
+    }
+  ],
+  "scope": "Independent source PDFs only: border-style parsing and PDF.js annotation-layer presentation at three scales. No Fullbleed PDFs generated; not a Fullbleed appearance-parity or accessibility qualification.",
+  "harness_sha256": "2c51f2645d41fa571422f20e7b02ae6853dd7a9e0818e0a23f8baa3c5379e865",
+  "completed_at": "2026-10-23T08:51:52.687470+00:00"
+}

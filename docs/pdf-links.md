@@ -124,9 +124,21 @@ type, sets its ReadOnly flag, and removes actions and destinations. This keeps
 the artwork without converting it to a stamp that can open a popup note. A
 reader API may still enumerate the retained Link object; it has no active target.
 
-Imported links without appearance streams still show visual differences
-for dashed, rounded, beveled, inset, and underline borders. MuPDF's omission of
-an ordinary Link appearance is not evidence that an appearance was preserved.
+When a cropped source link has no appearance stream, Fullbleed creates one
+from its declared border dimensions and style. This fixes the artwork's
+position before clipping. It can change how the border looks compared with
+the original reader-generated border. For imported artwork whose exact
+appearance matters, supply an explicit appearance stream and check the final
+PDF in the intended readers.
+
+The [border geometry check](../tools/pdf_link_readers/README.md#check-declared-border-geometry)
+measures the generated appearances against independent source dimensions.
+Across eight axis-aligned specimens, composition and stamping produce the
+same pixels. The solid, underline, bevel, and inset masks have no differences
+at 63,000 sampled points. The check also verifies the declared 3pt stroke,
+4pt/2pt dash pattern, sampled rounded corners, opposed bevel/inset shading,
+and the absence of an extra edge at the crop. These observations do not
+establish exact curve rasterization or general imported-PDF parity.
 
 One difference is independently reproducible before composition: the official
 PDF.js 6.4.299 viewer and its 6.5.316 online demo keep a source link's 3pt border
@@ -134,10 +146,18 @@ at 3 CSS pixels as the page zoom changes. The
 [small source PDF and measurements](../tools/pdf_link_readers/README.md#inspect-a-source-link-border-at-different-zoom-levels)
 compare that annotation with a 3pt page stroke. Fullbleed does not generate
 this control, so this observation identifies a reader-side scaling difference;
-it does not settle the other imported-border differences.
+it does not establish border preservation by Fullbleed.
 
-These imported-border differences remain open release work. Do not infer
-appearance parity from successful destination checks or from a reader that
-does not draw the source annotation. Retaining the stored highlight mode does
-not establish identical mouse-highlight behavior across readers. See
+The retained [source-only controls](../tools/pdf_link_readers/README.md#source-reader-differences)
+also show why a reader's fallback pixels are not a universal reference.
+PDFium 146 omits the six border-only controls while drawing the explicit
+appearance control. PDF.js 6.4.299 omits bevel/inset borders and renders two
+different dash arrays identically. Poppler 22.02.0 draws the solid, rounded,
+beveled, and inset controls identically, with paint extending outside their
+declared rectangles. These are measured compatibility limits; the release
+does not promise to reproduce each reader's fallback behavior.
+
+Do not infer appearance parity from successful destination checks or from a
+reader that does not draw the source annotation. Retaining the stored highlight
+mode does not establish identical mouse-highlight behavior across readers. See
 [PDF templates](pdf-templates.md) for the composition API and scope.

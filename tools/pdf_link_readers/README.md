@@ -116,6 +116,70 @@ before/after counts, native-module identity, source hashes, and a separate
 Poppler reference check. The public alpha version number alone does not
 identify the candidate used for these observations.
 
+## Check declared border geometry
+
+The crop check above detects a new edge at the cut. This separate check measures
+the appearance against the independent source's declared dimensions, without
+using a viewer-generated source border as its pixel reference:
+
+```sh
+python tools/pdf_link_readers/border_geometry.py --inputs target/imported-border-inputs --out target/imported-border-geometry
+```
+
+Use the same optional reader environment and generated inputs described above.
+The checker verifies the input hashes, retains the PDFs, and renders the explicit
+appearances in PDFium at eight pixels per point. It checks the visible rectangle,
+disabled fallback border, stored target/highlight, stroke width, dash lengths,
+sampled rounded corners, and opposed bevel/inset shading. Analytic masks derive
+from the source's rectangle, 3pt width, 40pt crop and 12pt/18pt placement. They
+sample every 0.5pt, staying 0.25pt from the expected straight edges.
+
+The [recorded observation](observations/imported-border-geometry.json) retains
+63,000 mask samples with no differences and identical composition/stamping
+pixels for all eight cases. All 24 input PDFs match the independently reviewed
+crop-edge specimens byte for byte. Deliberately changing a stroke width, dash
+pattern or fallback border makes the checker return **2**. An input hash
+mismatch returns **1**. A complete matching observation returns **0**.
+
+This qualifies these axis-aligned RGB specimens. Rounded corners receive
+sampled checks, not exact curve-raster proof. The bevel/inset check establishes
+shading direction, not a prescribed shading-color formula. The explicit
+appearance case checks clipping bounds and matching composition/stamping output;
+its source preservation is covered by the separate crop/reader controls.
+Mouse-highlight appearance, keyboard navigation and assistive technology remain
+unqualified. No existing reader mismatch is changed into a passing result.
+
+## Source-reader differences
+
+The [independent source PDFs](fixtures/border-styles) and
+[recorded source observations](observations/source-border-styles.json) use pypdf
+to author the annotations before any Fullbleed operation. Open the PDF controls
+in the pinned reader versions to inspect the differences. The explicit appearance
+control makes sure a reader can paint annotation artwork:
+
+| Reader | Observed source behavior |
+| --- | --- |
+| PDFium 146.0.7665.0 | Omits all six border-only controls; paints the explicit appearance. |
+| PDF.js 6.4.299 | Omits beveled and inset borders, reporting unimplemented styles. Its 3pt border remains 3 CSS pixels when zoom changes. |
+| Poppler 22.02.0, Ubuntu 22.02.0-2ubuntu0.15 | Solid, rounded, beveled and inset controls have identical pixels. Paint extends outside the declared rectangle. |
+
+The [dash controls](fixtures/border-styles/dash) change only `/BS /D` from
+`[4 2]` to `[12 1]`. PDF.js parses both arrays correctly but produces identical
+pixels for them at viewport scales 1, 2 and 3. The
+[dash observations](observations/source-border-dashes.json) retain the input
+hashes, parsed values, computed CSS, reader identity and screenshot hashes.
+The separate [zoom reproduction](#inspect-a-source-link-border-at-different-zoom-levels)
+includes a page-stroke control and an upstream report.
+
+The PDF reference places borders inside the annotation rectangle, with widths
+in points, and distinguishes the five border styles in
+[ISO 32000-1 section 12.5.4, table 166](https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/PDF32000_2008.pdf#page=394).
+Fullbleed's generated appearance preserves those declared dimensions in the
+sampled fixtures; it does not reproduce every reader's source fallback pixels.
+These source-only observations establish reader differences, not a passed
+Fullbleed preservation test. Keep them separate from the geometry and crop
+checks above.
+
 ## Check table text positions
 
 The [table observation](observations/table-text-baselines.json) records controls
@@ -173,6 +237,12 @@ cargo test --lib pdf_links_middle_table_cells_snap_absolute_baselines_with_odd_d
 ```
 
 This focused audit does not replace the unchanged full-corpus CI comparison.
+The [completed candidate corpus review](observations/link-candidate-corpus.json)
+retains 1,625 PASS, 19 FAIL and 18 REFERENCE-DISPUTED results across all 1,662
+unchanged fixtures. Two failures improve against the published alpha 13; no
+new fixtures fail. The 29 output PNGs for the remaining 19 failures are
+byte-identical to that baseline. The upstream all-pass gate remains failing;
+its references, comparator and thresholds are unchanged.
 
 ## Inspect a source link border at different zoom levels
 

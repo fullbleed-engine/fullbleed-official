@@ -1,0 +1,69 @@
+%PDF-1.3
+%‚„œ”
+1 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+2 0 obj
+<<
+/Type /Pages
+/Count 1
+/Kids [ 3 0 R ]
+>>
+endobj
+3 0 obj
+<<
+/Type /Page
+/Resources <<
+>>
+/MediaBox [ 0.0 0.0 200 200 ]
+/Parent 2 0 R
+/CropBox [ 40 0.0 200 200 ]
+/Annots [ 4 0 R ]
+>>
+endobj
+4 0 obj
+<<
+/Type /Annot
+/Subtype /Link
+/Rect [ 10 20 70 60 ]
+/QuadPoints [ 10 20 70 20 70 60 10 60 ]
+/F 4
+/H /I
+/C [ 1 0 0 ]
+/A <<
+/S /URI
+/URI (https\072\057\057example\056invalid\057cut\055border\057dashed)
+>>
+/BS <<
+/W 3
+/S /D
+/D [ 12 1 ]
+>>
+/P 3 0 R
+>>
+endobj
+5 0 obj
+<<
+/Producer (pypdf)
+>>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000123 00000 n 
+0000000263 00000 n 
+0000000527 00000 n 
+trailer
+<<
+/Size 6
+/Root 1 0 R
+/Info 5 0 R
+>>
+startxref
+566
+%%EOF

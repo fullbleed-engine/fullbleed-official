@@ -1,0 +1,634 @@
+{
+  "schema": "fullbleed.imported-border-geometry.v1",
+  "status": "passed",
+  "started_at": "2026-10-23T10:33:49.251151+00:00",
+  "cases": [
+    {
+      "name": "solid",
+      "variants": [
+        {
+          "variant": "compose",
+          "pdf_sha256": "fd5890829a4bda33deaa7f9e28e756663349689540ff27b80b47bc48867d312a",
+          "png_sha256": "60ba207b2611cd64b12982bf521b31efacebabec72bf40f62f275e62f067dead",
+          "paint_bbox_pixels": [
+            416,
+            976,
+            656,
+            1296
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true,
+          "analytic_mask_samples": 6300,
+          "analytic_mask_mismatches": 0,
+          "solid_color_mismatches": 0,
+          "declared_stroke_widths_pt": [
+            3.0
+          ]
+        },
+        {
+          "variant": "stamp",
+          "pdf_sha256": "714704f22dc403806cd4d738b457f3ba6d1da9087ffeea9589f7d6a253227aa7",
+          "png_sha256": "60ba207b2611cd64b12982bf521b31efacebabec72bf40f62f275e62f067dead",
+          "paint_bbox_pixels": [
+            416,
+            976,
+            656,
+            1296
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true,
+          "analytic_mask_samples": 6300,
+          "analytic_mask_mismatches": 0,
+          "solid_color_mismatches": 0,
+          "declared_stroke_widths_pt": [
+            3.0
+          ]
+        }
+      ],
+      "compose_and_stamp_pixels_identical": true
+    },
+    {
+      "name": "dashed",
+      "variants": [
+        {
+          "variant": "compose",
+          "pdf_sha256": "2d604145870affb3c50f1fcca040aece64488efcd904aa42d548225ebef29533",
+          "png_sha256": "0d16c383c7b76b0e8ff65dc26030a1d5731be088eb669411991277a4456e6e11",
+          "paint_bbox_pixels": [
+            416,
+            976,
+            656,
+            1296
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true,
+          "declared_stroke_widths_pt": [
+            3.0
+          ],
+          "measured_bottom_edge_runs": [
+            {
+              "painted": false,
+              "pixels": 12,
+              "points": 1.5
+            },
+            {
+              "painted": true,
+              "pixels": 32,
+              "points": 4.0
+            },
+            {
+              "painted": false,
+              "pixels": 16,
+              "points": 2.0
+            },
+            {
+              "painted": true,
+              "pixels": 32,
+              "points": 4.0
+            },
+            {
+              "painted": false,
+              "pixels": 16,
+              "points": 2.0
+            },
+            {
+              "painted": true,
+              "pixels": 32,
+              "points": 4.0
+            },
+            {
+              "painted": false,
+              "pixels": 16,
+              "points": 2.0
+            },
+            {
+              "painted": true,
+              "pixels": 32,
+              "points": 4.0
+            },
+            {
+              "painted": false,
+              "pixels": 16,
+              "points": 2.0
+            },
+            {
+              "painted": true,
+              "pixels": 4,
+              "points": 0.5
+            }
+          ]
+        },
+        {
+          "variant": "stamp",
+          "pdf_sha256": "0a0ce188c67770a9c510036651641e207c46677af4e80b68486d22c33f91a218",
+          "png_sha256": "0d16c383c7b76b0e8ff65dc26030a1d5731be088eb669411991277a4456e6e11",
+          "paint_bbox_pixels": [
+            416,
+            976,
+            656,
+            1296
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true,
+          "declared_stroke_widths_pt": [
+            3.0
+          ],
+          "measured_bottom_edge_runs": [
+            {
+              "painted": false,
+              "pixels": 12,
+              "points": 1.5
+            },
+            {
+              "painted": true,
+              "pixels": 32,
+              "points": 4.0
+            },
+            {
+              "painted": false,
+              "pixels": 16,
+              "points": 2.0
+            },
+            {
+              "painted": true,
+              "pixels": 32,
+              "points": 4.0
+            },
+            {
+              "painted": false,
+              "pixels": 16,
+              "points": 2.0
+            },
+            {
+              "painted": true,
+              "pixels": 32,
+              "points": 4.0
+            },
+            {
+              "painted": false,
+              "pixels": 16,
+              "points": 2.0
+            },
+            {
+              "painted": true,
+              "pixels": 32,
+              "points": 4.0
+            },
+            {
+              "painted": false,
+              "pixels": 16,
+              "points": 2.0
+            },
+            {
+              "painted": true,
+              "pixels": 4,
+              "points": 0.5
+            }
+          ]
+        }
+      ],
+      "compose_and_stamp_pixels_identical": true
+    },
+    {
+      "name": "rounded",
+      "variants": [
+        {
+          "variant": "compose",
+          "pdf_sha256": "b8c73ac6962aec211cb4eef6d80e41ff192e04594c5e0aa5b44cc0834f847ffb",
+          "png_sha256": "d9795a4023abf17e7df39b497b9685193b03fdc9ecb2fe7a11ff787cbce29878",
+          "paint_bbox_pixels": [
+            416,
+            976,
+            656,
+            1296
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true,
+          "declared_stroke_widths_pt": [
+            3.0
+          ],
+          "rounded_corner_and_edge_samples_match": true
+        },
+        {
+          "variant": "stamp",
+          "pdf_sha256": "5a15051a760915932b431c84cac5a680ff3aab28d90208cb148ca42202694439",
+          "png_sha256": "d9795a4023abf17e7df39b497b9685193b03fdc9ecb2fe7a11ff787cbce29878",
+          "paint_bbox_pixels": [
+            416,
+            976,
+            656,
+            1296
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true,
+          "declared_stroke_widths_pt": [
+            3.0
+          ],
+          "rounded_corner_and_edge_samples_match": true
+        }
+      ],
+      "compose_and_stamp_pixels_identical": true
+    },
+    {
+      "name": "beveled",
+      "variants": [
+        {
+          "variant": "compose",
+          "pdf_sha256": "2361f3689630e96146e51371cba38b2cea2bbb13ecd2b50dc586e3f60004478f",
+          "png_sha256": "700372967da8894b7081e5af04c72465363f76927135d0e056b95d1826754e5c",
+          "paint_bbox_pixels": [
+            416,
+            976,
+            656,
+            1296
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true,
+          "analytic_mask_samples": 6300,
+          "analytic_mask_mismatches": 0,
+          "solid_color_mismatches": 0,
+          "top_edge_rgb": [
+            255,
+            128,
+            128
+          ],
+          "bottom_edge_rgb": [
+            128,
+            0,
+            0
+          ],
+          "opposed_shading_direction_verified": true
+        },
+        {
+          "variant": "stamp",
+          "pdf_sha256": "cd25b4758e0184833953c62d9939035d4ecd1c3cb1a39730409b2b683879cc81",
+          "png_sha256": "700372967da8894b7081e5af04c72465363f76927135d0e056b95d1826754e5c",
+          "paint_bbox_pixels": [
+            416,
+            976,
+            656,
+            1296
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true,
+          "analytic_mask_samples": 6300,
+          "analytic_mask_mismatches": 0,
+          "solid_color_mismatches": 0,
+          "top_edge_rgb": [
+            255,
+            128,
+            128
+          ],
+          "bottom_edge_rgb": [
+            128,
+            0,
+            0
+          ],
+          "opposed_shading_direction_verified": true
+        }
+      ],
+      "compose_and_stamp_pixels_identical": true
+    },
+    {
+      "name": "inset",
+      "variants": [
+        {
+          "variant": "compose",
+          "pdf_sha256": "148b55a1ae5ad4faffdd5305b85376b775b4ced14810072e376181d17176f813",
+          "png_sha256": "759a9be04a830819cb863f9221874485ea7479d8e5a2e112b94d0ec33e2317e9",
+          "paint_bbox_pixels": [
+            416,
+            976,
+            656,
+            1296
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true,
+          "analytic_mask_samples": 6300,
+          "analytic_mask_mismatches": 0,
+          "solid_color_mismatches": 0,
+          "top_edge_rgb": [
+            128,
+            0,
+            0
+          ],
+          "bottom_edge_rgb": [
+            255,
+            128,
+            128
+          ],
+          "opposed_shading_direction_verified": true
+        },
+        {
+          "variant": "stamp",
+          "pdf_sha256": "123fb9991efc862a8740d92890347c10986964e29467c92f152b9c013453ef2a",
+          "png_sha256": "759a9be04a830819cb863f9221874485ea7479d8e5a2e112b94d0ec33e2317e9",
+          "paint_bbox_pixels": [
+            416,
+            976,
+            656,
+            1296
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true,
+          "analytic_mask_samples": 6300,
+          "analytic_mask_mismatches": 0,
+          "solid_color_mismatches": 0,
+          "top_edge_rgb": [
+            128,
+            0,
+            0
+          ],
+          "bottom_edge_rgb": [
+            255,
+            128,
+            128
+          ],
+          "opposed_shading_direction_verified": true
+        }
+      ],
+      "compose_and_stamp_pixels_identical": true
+    },
+    {
+      "name": "underline",
+      "variants": [
+        {
+          "variant": "compose",
+          "pdf_sha256": "6c3ae12242d2b95689b7044289aac62aff206610dcaf7e75ae078af3fdfa0d0a",
+          "png_sha256": "8dbcb7b5a74919db9de36b3dde6f59fd6ce380b9a12d4ff83d36d4eef0760e1c",
+          "paint_bbox_pixels": [
+            416,
+            1272,
+            656,
+            1296
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true,
+          "analytic_mask_samples": 6300,
+          "analytic_mask_mismatches": 0,
+          "solid_color_mismatches": 0,
+          "declared_stroke_widths_pt": [
+            3.0
+          ]
+        },
+        {
+          "variant": "stamp",
+          "pdf_sha256": "3bd29a81b50c50a7bba7de768ebbdc6415a0ab228fdbd144d7f511c99bfe9905",
+          "png_sha256": "8dbcb7b5a74919db9de36b3dde6f59fd6ce380b9a12d4ff83d36d4eef0760e1c",
+          "paint_bbox_pixels": [
+            416,
+            1272,
+            656,
+            1296
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true,
+          "analytic_mask_samples": 6300,
+          "analytic_mask_mismatches": 0,
+          "solid_color_mismatches": 0,
+          "declared_stroke_widths_pt": [
+            3.0
+          ]
+        }
+      ],
+      "compose_and_stamp_pixels_identical": true
+    },
+    {
+      "name": "solid-outline",
+      "variants": [
+        {
+          "variant": "compose",
+          "pdf_sha256": "ed4d9c42cd785f9f3bbbf6ac1b2d148c18be1a9d52e5c643e5dc82e7a4a3a4c5",
+          "png_sha256": "60ba207b2611cd64b12982bf521b31efacebabec72bf40f62f275e62f067dead",
+          "paint_bbox_pixels": [
+            416,
+            976,
+            656,
+            1296
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true,
+          "analytic_mask_samples": 6300,
+          "analytic_mask_mismatches": 0,
+          "solid_color_mismatches": 0,
+          "declared_stroke_widths_pt": [
+            3.0
+          ]
+        },
+        {
+          "variant": "stamp",
+          "pdf_sha256": "17f04be53cfcf2ff502d3759bdeee795b89a784c9d9a51bf0315308eea6e89d9",
+          "png_sha256": "60ba207b2611cd64b12982bf521b31efacebabec72bf40f62f275e62f067dead",
+          "paint_bbox_pixels": [
+            416,
+            976,
+            656,
+            1296
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true,
+          "analytic_mask_samples": 6300,
+          "analytic_mask_mismatches": 0,
+          "solid_color_mismatches": 0,
+          "declared_stroke_widths_pt": [
+            3.0
+          ]
+        }
+      ],
+      "compose_and_stamp_pixels_identical": true
+    },
+    {
+      "name": "appearance",
+      "variants": [
+        {
+          "variant": "compose",
+          "pdf_sha256": "743e7db430fef3b02fd9a30f016c622ee294aaae1b9e8b54a9c39d095ccfdd79",
+          "png_sha256": "2789992af11f005f849a4f2fd4a74b026122db513a6c0acfb275ede3f8a17146",
+          "paint_bbox_pixels": [
+            496,
+            1096,
+            656,
+            1176
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true
+        },
+        {
+          "variant": "stamp",
+          "pdf_sha256": "05be0a082ca6dad2a643426467c5e7dcf7e7fff56d650543fcaf8841504beb36",
+          "png_sha256": "2789992af11f005f849a4f2fd4a74b026122db513a6c0acfb275ede3f8a17146",
+          "paint_bbox_pixels": [
+            496,
+            1096,
+            656,
+            1176
+          ],
+          "target_and_highlight_retained": true,
+          "paint_within_clipped_rect": true
+        }
+      ],
+      "compose_and_stamp_pixels_identical": true
+    }
+  ],
+  "errors": [],
+  "harness_sha256": "572ff106e12a6b108f07fb305f54072a2056feac554a0c639b74d26046c3229a",
+  "readers": {
+    "pdfium": "146.0.7665.0",
+    "packages": {
+      "pypdf": "6.1.1",
+      "pypdfium2": "5.4.0",
+      "Pillow": "10.2.0"
+    }
+  },
+  "source_rect_pt": [
+    10,
+    20,
+    70,
+    60
+  ],
+  "crop_left_pt": 40,
+  "placement_pt": [
+    12,
+    18
+  ],
+  "expected_visible_rect_pt": [
+    52,
+    38,
+    82,
+    78
+  ],
+  "pixels_per_point": 8,
+  "sample_step_pt": 0.5,
+  "sample_margin_from_edges_pt": 0.25,
+  "limits": [
+    "Eight axis-aligned RGB 3pt specimens; not general imported-PDF parity.",
+    "Rounded borders receive sampled checks, not exact curve-raster proof.",
+    "Bevel/inset checks measure placement and opposed shading, not a prescribed color formula.",
+    "Stored highlight modes are checked; highlight interaction, keyboard navigation and assistive technology are unqualified."
+  ],
+  "input_manifest": {
+    "schema": "fullbleed.imported-border-inputs.v1",
+    "runtime": {
+      "version": "2.6.0a13",
+      "native_sha256": "b8c634e70819fb0459fb80c250baec79e314e0c6aa4b5ec81a3ddfaa44906ae9",
+      "pypdf": "6.19.0"
+    },
+    "generator_sha256": "71cb18e98f9cbbe1dbd557efccaee7436aa2ea083327660ac5ab00591671a412",
+    "cases": [
+      {
+        "name": "solid",
+        "files": {
+          "solid-source.pdf": "d2b9c3938c1162ccc29a338909763f1ee84831cb69032dfc874e0fc7249f3590",
+          "solid-compose.pdf": "fd5890829a4bda33deaa7f9e28e756663349689540ff27b80b47bc48867d312a",
+          "solid-stamp.pdf": "714704f22dc403806cd4d738b457f3ba6d1da9087ffeea9589f7d6a253227aa7"
+        }
+      },
+      {
+        "name": "dashed",
+        "files": {
+          "dashed-source.pdf": "ea9571dbd9a2e8e3f124353ef390d5f3571d3ea2844a385af809ff31c1621260",
+          "dashed-compose.pdf": "2d604145870affb3c50f1fcca040aece64488efcd904aa42d548225ebef29533",
+          "dashed-stamp.pdf": "0a0ce188c67770a9c510036651641e207c46677af4e80b68486d22c33f91a218"
+        }
+      },
+      {
+        "name": "rounded",
+        "files": {
+          "rounded-source.pdf": "ed90ee8c974ba67a867e6da651a3235542433739da49e8f08185500705eb8594",
+          "rounded-compose.pdf": "b8c73ac6962aec211cb4eef6d80e41ff192e04594c5e0aa5b44cc0834f847ffb",
+          "rounded-stamp.pdf": "5a15051a760915932b431c84cac5a680ff3aab28d90208cb148ca42202694439"
+        }
+      },
+      {
+        "name": "beveled",
+        "files": {
+          "beveled-source.pdf": "4563f388c807465403d8969c3e38741491b1e961326e161a40cb07075a081145",
+          "beveled-compose.pdf": "2361f3689630e96146e51371cba38b2cea2bbb13ecd2b50dc586e3f60004478f",
+          "beveled-stamp.pdf": "cd25b4758e0184833953c62d9939035d4ecd1c3cb1a39730409b2b683879cc81"
+        }
+      },
+      {
+        "name": "inset",
+        "files": {
+          "inset-source.pdf": "f631e6d75af492a2acb23d57ad7c205c0d9d2a356720667d9861540bef3c4c9e",
+          "inset-compose.pdf": "148b55a1ae5ad4faffdd5305b85376b775b4ced14810072e376181d17176f813",
+          "inset-stamp.pdf": "123fb9991efc862a8740d92890347c10986964e29467c92f152b9c013453ef2a"
+        }
+      },
+      {
+        "name": "underline",
+        "files": {
+          "underline-source.pdf": "0a896a976282538ce4180e4afcdecdaee8e56233bb708bafdf50fb6c08b3fd48",
+          "underline-compose.pdf": "6c3ae12242d2b95689b7044289aac62aff206610dcaf7e75ae078af3fdfa0d0a",
+          "underline-stamp.pdf": "3bd29a81b50c50a7bba7de768ebbdc6415a0ab228fdbd144d7f511c99bfe9905"
+        }
+      },
+      {
+        "name": "solid-outline",
+        "files": {
+          "solid-outline-source.pdf": "71716abb08e1ff2fd0d7b66fa518b8cf1a883b267ba0a45d0ed6e6b70995e578",
+          "solid-outline-compose.pdf": "ed4d9c42cd785f9f3bbbf6ac1b2d148c18be1a9d52e5c643e5dc82e7a4a3a4c5",
+          "solid-outline-stamp.pdf": "17f04be53cfcf2ff502d3759bdeee795b89a784c9d9a51bf0315308eea6e89d9"
+        }
+      },
+      {
+        "name": "appearance",
+        "files": {
+          "appearance-source.pdf": "99de2975e75b2b2b0539d34ad809120e85d97da1cf56b34c6cc0b3ba7e466e3d",
+          "appearance-compose.pdf": "743e7db430fef3b02fd9a30f016c622ee294aaae1b9e8b54a9c39d095ccfdd79",
+          "appearance-stamp.pdf": "05be0a082ca6dad2a643426467c5e7dcf7e7fff56d650543fcaf8841504beb36"
+        }
+      }
+    ]
+  },
+  "analytic_mask_samples": 63000,
+  "analytic_mask_mismatches": 0,
+  "completed_at": "2026-10-23T10:33:50.865138+00:00",
+  "source_head": "764a2cc30e1751b8faaa512c44b7ce6163137856",
+  "unpublished": true,
+  "wheel_sha256": "6f0372ad2cd81c2baca397baf7a2a922cfb57cd78443f2528375200fc5a975fe",
+  "negative_controls": [
+    {
+      "mutation": "width",
+      "expected_exit": 2,
+      "actual_exit": 2,
+      "status": "differences",
+      "errors": [
+        "solid-compose: 174 analytic mask differences"
+      ]
+    },
+    {
+      "mutation": "fallback",
+      "expected_exit": 2,
+      "actual_exit": 2,
+      "status": "differences",
+      "errors": [
+        "solid-compose: separate fallback border remains enabled"
+      ]
+    },
+    {
+      "mutation": "dash",
+      "expected_exit": 2,
+      "actual_exit": 2,
+      "status": "differences",
+      "errors": [
+        "dashed-compose: changed dash pattern"
+      ]
+    },
+    {
+      "mutation": "hash",
+      "expected_exit": 1,
+      "actual_exit": 1,
+      "status": "incomplete",
+      "errors": [
+        "ValueError: Input hash mismatch: solid-compose.pdf"
+      ]
+    }
+  ],
+  "prior_reader_outputs": {
+    "composition_outputs_identical": 16,
+    "independent_sources_identical": 8,
+    "prior_observation": "imported-border-cut.json",
+    "prior_observation_sha256": "85d01fd4b11e80bb1499fcf031f6c187ad83f5e78ebb451532e458ef25b05886"
+  }
+}
