@@ -16,6 +16,7 @@ import math
 import os
 from pathlib import Path
 import secrets
+import signal
 import subprocess
 import sys
 import tempfile
@@ -157,7 +158,21 @@ class Preview:
                             break
                 finally:
                     if process.poll() is None:
-                        process.kill()
+                        # A venv launcher or authored component can spawn a
+                        # descendant that inherits worker.log. Stop the whole
+                        # worker tree before removing its temporary directory.
+                        if os.name == "nt":
+                            stopped = subprocess.run(
+                                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                capture_output=True,
+                            )
+                            if stopped.returncode and process.poll() is None:
+                                stopped.check_returncode()
+                        else:
+                            try:
+                                os.killpg(process.pid, signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass  # The worker exited after poll().
                     process.wait()
             if self.stop.is_set():
                 return None

@@ -1,0 +1,319 @@
+{
+  "at": "2026-10-23T10:30:44.040553+00:00",
+  "run": 39933879568,
+  "head": "764a2cc30e1751b8faaa512c44b7ce6163137856",
+  "tree": "3d19cc65a4a6f907813159db3c6a0ddca98d03da",
+  "checkout": "8e60a49ccab883a4899ab7b03a8f101ab39c1a7f",
+  "artifact_sha256": "619b579d95d695e169fcd07527154f547b96b716d9c76e4977df31e867a4255f",
+  "verified_manifest_files": 7467,
+  "comparator_unchanged": true,
+  "baseline_run": 39697016396,
+  "source": {
+    "package_source": "source",
+    "checkout_commit": "8e60a49ccab883a4899ab7b03a8f101ab39c1a7f",
+    "wheel": "fullbleed-2.6.0a13-cp310-abi3-linux_x86_64.whl",
+    "wheel_sha256": "14ca527af56915dc41245c58d0b281b35c2d8666f341e319b1cc8025bfa02c4e"
+  },
+  "counts_before": {
+    "PASS": 1623,
+    "REFERENCE-DISPUTED": 18,
+    "FAIL": 21
+  },
+  "counts_after": {
+    "PASS": 1625,
+    "REFERENCE-DISPUTED": 18,
+    "FAIL": 19
+  },
+  "regressions": [],
+  "improvements": [
+    {
+      "key": [
+        "generated-content",
+        "generated-content-no-open-quote-depth"
+      ],
+      "before": "FAIL",
+      "after": "PASS"
+    },
+    {
+      "key": [
+        "paged-media",
+        "paged-footnote-counter-reset"
+      ],
+      "before": "FAIL",
+      "after": "PASS"
+    }
+  ],
+  "prior_regression_statuses": [
+    {
+      "key": [
+        "block-box-model",
+        "block-margin-collapse-adjacent"
+      ],
+      "status": "PASS"
+    },
+    {
+      "key": [
+        "block-box-model",
+        "block-margin-collapse-all-negative"
+      ],
+      "status": "PASS"
+    },
+    {
+      "key": [
+        "block-box-model",
+        "block-margin-collapse-parent-last-child"
+      ],
+      "status": "PASS"
+    },
+    {
+      "key": [
+        "flexbox",
+        "flexbox-display-contents-items"
+      ],
+      "status": "PASS"
+    },
+    {
+      "key": [
+        "interactions",
+        "interactions-positioning-float-x-margin-collapse"
+      ],
+      "status": "PASS"
+    },
+    {
+      "key": [
+        "interactions",
+        "interactions-float-x-margin-collapse"
+      ],
+      "status": "PASS"
+    },
+    {
+      "key": [
+        "multicol",
+        "multicol-column-count-text"
+      ],
+      "status": "PASS"
+    },
+    {
+      "key": [
+        "paged-media",
+        "multicol-span-all-page-break"
+      ],
+      "status": "PASS"
+    },
+    {
+      "key": [
+        "paged-media",
+        "paged-background-named-compound-list"
+      ],
+      "status": "PASS"
+    },
+    {
+      "key": [
+        "tables",
+        "tables-cell-tall-img-sibling-content"
+      ],
+      "status": "PASS"
+    }
+  ],
+  "gate_passed": false,
+  "scope": "Exact committed head only; subsequent working-tree changes are not included.",
+  "remaining_failure_review": {
+    "remaining_failures": [
+      {
+        "key": [
+          "backgrounds-borders",
+          "border-image-fill-axis-repeat"
+        ],
+        "before_diff_pct": 3.6544761904761907,
+        "after_diff_pct": 3.6544761904761907,
+        "compared_pngs": 1,
+        "byte_identical_pngs": 1
+      },
+      {
+        "key": [
+          "backgrounds-borders",
+          "border-image-round-horizontal"
+        ],
+        "before_diff_pct": 0.5973333333333334,
+        "after_diff_pct": 0.5973333333333334,
+        "compared_pngs": 1,
+        "byte_identical_pngs": 1
+      },
+      {
+        "key": [
+          "effects",
+          "r2-box-shadow-inset-blur-radius"
+        ],
+        "before_diff_pct": 33.632063492063494,
+        "after_diff_pct": 33.632063492063494,
+        "compared_pngs": 1,
+        "byte_identical_pngs": 1
+      },
+      {
+        "key": [
+          "effects",
+          "r2-text-shadow-blur-rgba"
+        ],
+        "before_diff_pct": 11.885714285714286,
+        "after_diff_pct": 11.885714285714286,
+        "compared_pngs": 1,
+        "byte_identical_pngs": 1
+      },
+      {
+        "key": [
+          "fonts-advanced",
+          "fonts-advanced-font-synthesis-none"
+        ],
+        "before_diff_pct": 0.6323809523809524,
+        "after_diff_pct": 0.6323809523809524,
+        "compared_pngs": 1,
+        "byte_identical_pngs": 1
+      },
+      {
+        "key": [
+          "generated-content",
+          "generated-content-counters-nested"
+        ],
+        "before_diff_pct": 0.8238461538461539,
+        "after_diff_pct": 0.8238461538461539,
+        "compared_pngs": 1,
+        "byte_identical_pngs": 1
+      },
+      {
+        "key": [
+          "grid",
+          "grid-display-contents-fragmentation-text-survival"
+        ],
+        "before_diff_pct": 1.6885242165242165,
+        "after_diff_pct": 1.6885242165242165,
+        "compared_pngs": 3,
+        "byte_identical_pngs": 3
+      },
+      {
+        "key": [
+          "interactions",
+          "interactions-grid-fragmentation-svg-background-single-owner"
+        ],
+        "before_diff_pct": 0.39535042735042736,
+        "after_diff_pct": 0.39535042735042736,
+        "compared_pngs": 3,
+        "byte_identical_pngs": 3
+      },
+      {
+        "key": [
+          "interactions",
+          "interactions-cartesian-block-box-model-x-clip-mask"
+        ],
+        "before_diff_pct": 0.26259692307692306,
+        "after_diff_pct": 0.26259692307692306,
+        "compared_pngs": 1,
+        "byte_identical_pngs": 1
+      },
+      {
+        "key": [
+          "interactions",
+          "interactions-cartesian-clip-mask-x-clip-mask"
+        ],
+        "before_diff_pct": 0.2475323076923077,
+        "after_diff_pct": 0.2475323076923077,
+        "compared_pngs": 1,
+        "byte_identical_pngs": 1
+      },
+      {
+        "key": [
+          "interactions",
+          "interactions-cartesian-clip-mask-x-effects"
+        ],
+        "before_diff_pct": 0.33693538461538464,
+        "after_diff_pct": 0.33693538461538464,
+        "compared_pngs": 1,
+        "byte_identical_pngs": 1
+      },
+      {
+        "key": [
+          "interactions",
+          "interactions-cartesian-clip-mask-x-tables"
+        ],
+        "before_diff_pct": 0.30779076923076926,
+        "after_diff_pct": 0.30779076923076926,
+        "compared_pngs": 1,
+        "byte_identical_pngs": 1
+      },
+      {
+        "key": [
+          "interactions",
+          "interactions-cartesian-effects-x-page-margins"
+        ],
+        "before_diff_pct": 1.6133333333333333,
+        "after_diff_pct": 1.6133333333333333,
+        "compared_pngs": 3,
+        "byte_identical_pngs": 3
+      },
+      {
+        "key": [
+          "interactions",
+          "interactions-cartesian-filters-x-paged-media"
+        ],
+        "before_diff_pct": 1.7501333333333333,
+        "after_diff_pct": 1.7501333333333333,
+        "compared_pngs": 4,
+        "byte_identical_pngs": 4
+      },
+      {
+        "key": [
+          "interactions",
+          "interactions-transforms-x-font-synthesis-matrix"
+        ],
+        "before_diff_pct": 1.6387878787878787,
+        "after_diff_pct": 1.6387878787878787,
+        "compared_pngs": 1,
+        "byte_identical_pngs": 1
+      },
+      {
+        "key": [
+          "paged-media",
+          "paged-gcpm-string-element-last"
+        ],
+        "before_diff_pct": 1.126140724946695,
+        "after_diff_pct": 1.126140724946695,
+        "compared_pngs": 1,
+        "byte_identical_pngs": 1
+      },
+      {
+        "key": [
+          "paged-media",
+          "paged-string-set-attr-start"
+        ],
+        "before_diff_pct": 1.107843137254902,
+        "after_diff_pct": 1.107843137254902,
+        "compared_pngs": 2,
+        "byte_identical_pngs": 2
+      },
+      {
+        "key": [
+          "tables",
+          "tables-cell-generated-before-child"
+        ],
+        "before_diff_pct": 0.6225,
+        "after_diff_pct": 0.6225,
+        "compared_pngs": 1,
+        "byte_identical_pngs": 1
+      },
+      {
+        "key": [
+          "typography",
+          "typography-font-weight-bold"
+        ],
+        "before_diff_pct": 1.0072727272727273,
+        "after_diff_pct": 1.0072727272727273,
+        "compared_pngs": 1,
+        "byte_identical_pngs": 1
+      }
+    ],
+    "all_remaining_failure_images_unchanged": true,
+    "source_head": "764a2cc30e1751b8faaa512c44b7ce6163137856"
+  },
+  "run_url": "https://github.com/fullbleed-engine/fullbleed-official/actions/runs/39933879568",
+  "baseline_run_url": "https://github.com/fullbleed-engine/fullbleed-official/actions/runs/39697016396",
+  "interpretation": "No newly failing fixtures against the published alpha-13 baseline. All 29 output PNGs for the 19 retained failures are byte-identical. The upstream all-pass gate remains failing; references, comparator and thresholds are unchanged."
+}

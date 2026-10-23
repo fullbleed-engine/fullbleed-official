@@ -85,7 +85,19 @@ jobs:
         run: python tools/generate_base14_metrics.py --check
 
       - name: Run rust test suite
+        env:
+          FULLBLEED_LINK_TEST_OUTPUT: ${{ runner.temp }}/native-renderer-regressions/fixtures
+          FULLBLEED_COMPOSE_TEST_OUTPUT: ${{ runner.temp }}/native-renderer-regressions/composition
         run: cargo test --locked -- --nocapture
+
+      - name: Retain native link, form, and inline-effect specimens
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-renderer-regressions-${{ matrix.os }}
+          path: ${{ runner.temp }}/native-renderer-regressions
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Render on the native main-thread stack
         run: python tools/smoke_rust_stack.py --out "${{ runner.temp }}/fullbleed-stack-${{ github.run_id }}-${{ github.run_attempt }}"
@@ -836,6 +848,13 @@ jobs:
       - name: Run repository Python tests with the installed native extension
         env:
           FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+          FULLBLEED_FORM_TEST_OUTPUT: target/python315/tagged-forms
+          FULLBLEED_INLINE_OPACITY_TEST_OUTPUT: target/python315/inline-opacity
+          FULLBLEED_TABLE_LINK_TEST_OUTPUT: target/python315/table-links
+          FULLBLEED_DESTINATION_VISIBILITY_TEST_OUTPUT: target/python315/destination-visibility
+          FULLBLEED_GENERAL_DESTINATION_TEST_OUTPUT: target/python315/general-destinations
+          FULLBLEED_LINK_SPACE_TEST_OUTPUT: target/python315/link-spaces
+          FULLBLEED_STANDARD_FONT_TEST_OUTPUT: target/python315/standard-fonts
         run: python -m pytest tests -q -ra --junitxml target/python315/python-tests.xml
       - name: Generate and check PDFs and previews
         shell: bash
@@ -1025,6 +1044,17 @@ jobs:
         env:
           FULLBLEED_TEST_INSTALLED_NATIVE: "1"
         run: python goldens/run_golden_suite.py --python python verify
+
+      - name: Retain rendered golden evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: golden-output-Windows
+          path: |
+            examples/acme_invoice/output/
+            examples/bank_statement/output/
+            examples/coastal_menu/output/
+          if-no-files-found: warn
 
       - name: Verify minimal per-page template flagging smoke
         run: python examples/template-flagging-smoke/run_smoke.py

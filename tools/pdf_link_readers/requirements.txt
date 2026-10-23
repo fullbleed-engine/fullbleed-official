@@ -1,0 +1,5 @@
+# Optional verification environment; never part of Fullbleed's runtime install.
+pypdf==6.1.1
+pypdfium2==5.4.0
+Pillow==10.2.0
+playwright==1.63.0

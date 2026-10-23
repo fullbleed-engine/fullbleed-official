@@ -637,6 +637,12 @@ pub struct Canvas {
     // keeping the layer inside the container's clip/opacity/transform state.
     compositor_scopes: Vec<CompositorScope>,
     fragmentainer_stack: Vec<Rect>,
+    inline_text_paint_origin: Option<Pt>,
+    navigation_active: bool,
+    destination_active: bool,
+    navigation_suppressed: bool,
+    destination_names: Vec<String>,
+    navigation_scopes: Vec<(bool, bool, bool, usize)>,
     perspective_context_stack: Vec<PerspectiveContext>,
     // Descendants of an inline-axis overflow clip do not contribute to the
     // document scrollable width used by the final HTML page-fit pass. Keep
@@ -671,6 +677,12 @@ impl Canvas {
             abs_containing_block_stack: Vec::new(),
             compositor_scopes: Vec::new(),
             fragmentainer_stack: Vec::new(),
+            inline_text_paint_origin: None,
+            navigation_active: false,
+            destination_active: false,
+            navigation_suppressed: false,
+            destination_names: Vec::new(),
+            navigation_scopes: Vec::new(),
             perspective_context_stack: Vec::new(),
             html_scrollable_right_clip_depth: 0,
             html_scrollable_bottom_clip_depth: 0,
@@ -747,6 +759,14 @@ impl Canvas {
         self.fragmentainer_stack.last().copied()
     }
 
+    pub(crate) fn inline_text_paint_origin(&self) -> Option<Pt> {
+        self.inline_text_paint_origin
+    }
+
+    pub(crate) fn replace_inline_text_paint_origin(&mut self, origin: Option<Pt>) -> Option<Pt> {
+        std::mem::replace(&mut self.inline_text_paint_origin, origin)
+    }
+
     pub(crate) fn push_perspective_context(&mut self, context: PerspectiveContext) {
         self.perspective_context_stack.push(context);
     }
@@ -816,6 +836,27 @@ impl Canvas {
             }
         }
         if !layer.is_empty() {
+            if self.destination_active && !self.navigation_suppressed {
+                // A deferred effect is replayed after its source scope has
+                // closed. Retain target identities with the moved placement;
+                // the form still supplies its resolved, transformed position.
+                let mut retained =
+                    Vec::with_capacity(layer.len() + self.destination_names.len() + 2);
+                retained.push(Command::Meta {
+                    key: META_DIAGNOSTIC_SCOPE_BEGIN_KEY.into(),
+                    value: "deferred-destination".into(),
+                });
+                retained.extend(self.destination_names.iter().map(|name| Command::Meta {
+                    key: crate::link_semantics::META_DESTINATION.into(),
+                    value: name.clone(),
+                }));
+                retained.append(&mut layer);
+                retained.push(Command::Meta {
+                    key: META_DIAGNOSTIC_SCOPE_END_KEY.into(),
+                    value: "deferred-destination".into(),
+                });
+                layer = retained;
+            }
             scope.layers.push((z_index, layer));
         }
     }
@@ -1068,10 +1109,121 @@ impl Canvas {
     }
 
     pub fn meta(&mut self, key: impl Into<String>, value: impl Into<String>) {
-        self.current.commands.push(Command::Meta {
-            key: key.into(),
-            value: value.into(),
+        let key = key.into();
+        let value = value.into();
+        match key.as_str() {
+            META_DIAGNOSTIC_SCOPE_BEGIN_KEY => self.navigation_scopes.push((
+                self.navigation_active,
+                self.destination_active,
+                self.navigation_suppressed,
+                self.destination_names.len(),
+            )),
+            META_DIAGNOSTIC_SCOPE_END_KEY => {
+                let (active, destinations, suppressed, count) = self
+                    .navigation_scopes
+                    .pop()
+                    .unwrap_or((false, false, false, 0));
+                self.navigation_active = active;
+                self.destination_active = destinations;
+                self.navigation_suppressed = suppressed;
+                self.destination_names.truncate(count);
+            }
+            crate::link_semantics::META_LINK_ID => {
+                self.navigation_active = true;
+            }
+            crate::link_semantics::META_DESTINATION => {
+                self.navigation_active = true;
+                self.destination_active = true;
+                self.destination_names.push(value.clone());
+            }
+            crate::link_semantics::META_NAVIGATION_SUPPRESSED => {
+                self.navigation_suppressed = value == "true"
+            }
+            _ => {}
+        }
+        self.current.commands.push(Command::Meta { key, value });
+    }
+
+    /// Effect forms retain their enclosing source scope when replayed. Carry
+    /// the need for geometry and deferred target identities into the temporary
+    /// canvas. These identities do not open another source scope on their own.
+    pub(crate) fn inherit_navigation_context(&mut self, parent: &Canvas) {
+        self.navigation_active = parent.navigation_active;
+        self.destination_active = parent.destination_active;
+        self.navigation_suppressed = parent.navigation_suppressed;
+        self.destination_names.clone_from(&parent.destination_names);
+    }
+
+    /// Decorative copies of authored content (for example CSS text shadows)
+    /// paint normally but cannot supply link labels, targets, or click regions.
+    pub(crate) fn with_navigation_suppressed(&mut self, paint: impl FnOnce(&mut Self)) {
+        let scoped = self.navigation_active;
+        if scoped {
+            self.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "navigation-decoration");
+            self.meta(crate::link_semantics::META_NAVIGATION_SUPPRESSED, "true");
+        }
+        paint(self);
+        if scoped {
+            self.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "navigation-decoration");
+        }
+    }
+
+    /// A destination is a position, not a painted rectangle. Keep the source
+    /// scope open until its semantic owner has been emitted.
+    pub(crate) fn begin_destination_scope(&mut self, names: &[String], x: Pt, y: Pt) -> bool {
+        if names.is_empty() {
+            return false;
+        }
+        self.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "destination");
+        for name in names {
+            self.meta(crate::link_semantics::META_DESTINATION, name.clone());
+        }
+        self.record_destination_point(x, y);
+        true
+    }
+
+    /// Record a resolved layout position before visibility, clipping or paint
+    /// opacity can remove its content. The first position in each source scope
+    /// owns the destination; later descendant positions cannot move it.
+    pub(crate) fn record_destination_point(&mut self, x: Pt, y: Pt) {
+        if !self.destination_active || self.navigation_suppressed {
+            return;
+        }
+        let (x, y) = self
+            .current_state
+            .projective_transform
+            .map(|transform| transform.map_point(x, y))
+            .unwrap_or((x, y));
+        self.meta(
+            crate::pdf_links::META_DESTINATION_POINT,
+            format!("{},{}", x.to_milli_i64(), y.to_milli_i64()),
+        );
+    }
+
+    pub(crate) fn record_link_box(&mut self, x: Pt, y: Pt, width: Pt, height: Pt) {
+        if !self.navigation_active || width <= Pt::ZERO || height <= Pt::ZERO {
+            return;
+        }
+        let points = [
+            (x, y + height),
+            (x + width, y + height),
+            (x + width, y),
+            (x, y),
+        ];
+        let points = points.map(|(x, y)| {
+            self.current_state
+                .projective_transform
+                .map(|transform| transform.map_point(x, y))
+                .unwrap_or((x, y))
         });
+        self.meta(
+            crate::pdf_links::META_LINK_QUAD,
+            points
+                .iter()
+                .flat_map(|(x, y)| [x.to_milli_i64().to_string(), y.to_milli_i64().to_string()])
+                .collect::<Vec<_>>()
+                .join(","),
+        );
     }
 
     pub fn set_fill_color(&mut self, color: Color) {
@@ -1558,11 +1710,38 @@ impl Canvas {
         });
     }
 
+    pub(crate) fn begin_inline_opacity(&mut self, effect: crate::inline_opacity::InlineOpacity) {
+        self.meta(
+            crate::inline_opacity::BEGIN,
+            format!("{}:{}", effect.id, effect.alpha),
+        );
+        // A form renderer has its own text state. Preserve the inherited font
+        // even when the fragment only changes its size or paints an image.
+        self.current.commands.extend([
+            Command::SetFillColor(self.current_state.fill_color),
+            Command::SetStrokeColor(self.current_state.stroke_color),
+            Command::SetLineWidth(self.current_state.line_width),
+            Command::SetLineCap(self.current_state.line_cap),
+            Command::SetLineJoin(self.current_state.line_join),
+            Command::SetBlendMode {
+                mode: self.current_state.blend_mode,
+            },
+            Command::SetFontName(self.current_state.font_name.clone()),
+            Command::SetFontSize(self.current_state.font_size),
+            Command::SetTextRenderingMode(self.current_state.text_rendering_mode),
+        ]);
+    }
+
+    pub(crate) fn end_inline_opacity(&mut self, effect: crate::inline_opacity::InlineOpacity) {
+        self.meta(crate::inline_opacity::END, effect.id.to_string());
+    }
+
     pub fn show_page(&mut self) {
         while !self.compositor_scopes.is_empty() {
             self.end_compositor_scope();
         }
-        let current = std::mem::replace(&mut self.current, Page::new());
+        let mut current = std::mem::replace(&mut self.current, Page::new());
+        current.commands = crate::inline_opacity::resolve(current.commands, self.page_size);
         self.pages.push(current);
         self.state_stack.clear();
         self.current_state = GraphicsState {

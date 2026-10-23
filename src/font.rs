@@ -15,6 +15,7 @@ struct TextWidthKey {
     font_index: usize,
     size_milli: i64,
     text: String,
+    shaped: bool,
 }
 
 #[derive(Debug)]
@@ -856,17 +857,51 @@ impl FontRegistry {
         self.measure_text_width_encoded(name, font_size, &encoded)
     }
 
+    /// Inline fragments must advance by their painted glyphs, including GPOS
+    /// kerning and ligatures. The legacy Basic Latin estimate is insufficient
+    /// when a following fragment starts at this measured end position.
+    pub(crate) fn measure_shaped_text_width(
+        &self,
+        name: &str,
+        font_size: Pt,
+        text: &str,
+        options: text_shape::ShapeOptions,
+    ) -> Pt {
+        let Some(index) = self.lookup.get(&normalize_name(name)).copied() else {
+            return self.measure_text_width_with_shape_options(name, font_size, text, options);
+        };
+        let encoded = text_shape::encode_shape_options(text, options);
+        let key = TextWidthKey {
+            font_index: index,
+            size_milli: font_size.to_milli_i64(),
+            text: encoded.clone(),
+            shaped: true,
+        };
+        if let Ok(mut cache) = self.text_width_cache.lock() {
+            if let Some(value) = cache.get(&key) {
+                return value;
+            }
+        }
+        let font = &self.fonts[index];
+        let value = measure_text_width_full(font, font_size, &encoded)
+            .unwrap_or_else(|| font.metrics.measure_text_width(font_size, text));
+        if let Ok(mut cache) = self.text_width_cache.lock() {
+            cache.insert(key, value);
+        }
+        value
+    }
+
     fn measure_text_width_encoded(&self, name: &str, font_size: Pt, text: &str) -> Pt {
         let (shape_options, clean_text) = text_shape::decode_shape_options(text);
         let key = normalize_name(name);
         let Some(index) = self.lookup.get(&key).copied() else {
-            let char_width = (font_size * 0.6).max(Pt::from_f32(1.0));
-            return char_width * (clean_text.chars().count() as i32);
+            return measure_unregistered_text_width(name, font_size, clean_text);
         };
         let cache_key = TextWidthKey {
             font_index: index,
             size_milli: font_size.to_milli_i64(),
             text: text.to_string(),
+            shaped: false,
         };
         if let Ok(mut cache) = self.text_width_cache.lock() {
             if let Some(value) = cache.get(&cache_key) {
@@ -874,8 +909,7 @@ impl FontRegistry {
             }
         }
         let Some(font) = self.fonts.get(index) else {
-            let char_width = (font_size * 0.6).max(Pt::from_f32(1.0));
-            return char_width * (clean_text.chars().count() as i32);
+            return measure_unregistered_text_width(name, font_size, clean_text);
         };
         if !self.use_full_unicode_metrics && shape_options == text_shape::ShapeOptions::default() {
             let value = font.metrics.measure_text_width(font_size, clean_text);
@@ -2263,6 +2297,54 @@ mod tests {
     }
 
     #[test]
+    fn standard_font_measurement_uses_painted_advances_and_substitutions() {
+        let registry = FontRegistry::new();
+        let size = crate::types::Pt::from_f32(12.0);
+        for (font, widths) in [
+            ("Helvetica", [944, 222, 278, 556]),
+            ("Times-Roman", [944, 278, 250, 500]),
+            ("Courier", [600, 600, 600, 600]),
+        ] {
+            let expected = widths
+                .into_iter()
+                .fold(crate::types::Pt::ZERO, |sum, width| {
+                    sum + size.mul_ratio(width, 1000)
+                });
+            assert_eq!(
+                registry.measure_text_width(font, size, "Wi 1"),
+                expected,
+                "{font}"
+            );
+            assert_eq!(
+                registry.measure_text_width(&font.to_lowercase(), size, "Wi 1"),
+                expected
+            );
+            assert_eq!(
+                registry.measure_shaped_text_width(font, size, "Wi 1", Default::default()),
+                expected,
+                "{font}"
+            );
+            assert_eq!(
+                registry.measure_text_width(font, size, "\u{2265} \u{2264} \u{6f22}"),
+                registry.measure_text_width(font, size, ">= <= ?")
+            );
+        }
+        // A registered alias takes precedence over the built-in metrics.
+        let mut aliased = FontRegistry::new();
+        let name = aliased
+            .register_bytes(NOTO.to_vec(), Some("Helvetica.ttf"))
+            .unwrap();
+        assert_eq!(
+            aliased.measure_text_width("Helvetica", size, "Wi 1"),
+            aliased.measure_text_width(&name, size, "Wi 1")
+        );
+        assert_ne!(
+            aliased.measure_text_width("Helvetica", size, "Wi 1"),
+            registry.measure_text_width("Helvetica", size, "Wi 1")
+        );
+    }
+
+    #[test]
     fn basic_latin_measurement_preserves_native_font_units() {
         let mut registry = FontRegistry::new();
         let registered = registry
@@ -2374,6 +2456,13 @@ mod tests {
             assert!(face.glyph_hor_advance(GlyphId(new_gid)).is_some());
         }
     }
+}
+
+pub(crate) fn measure_unregistered_text_width(name: &str, font_size: Pt, text: &str) -> Pt {
+    crate::base14_metrics::measure_text_width(name, font_size, text).unwrap_or_else(|| {
+        let char_width = (font_size * 0.6).max(Pt::from_f32(1.0));
+        char_width * (text.chars().count() as i32)
+    })
 }
 
 fn normalize_name(name: &str) -> String {

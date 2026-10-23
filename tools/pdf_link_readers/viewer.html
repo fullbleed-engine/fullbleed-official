@@ -1,0 +1,45 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="pdfjs/web/pdf_viewer.css">
+<style>
+html,body{margin:0;background:white;color:black}
+#sheet{position:relative;overflow:hidden;--scale-factor:2;--total-scale-factor:2;--user-unit:1;--scale-round-x:1px;--scale-round-y:1px}
+canvas{display:block}.annotationLayer{position:absolute;inset:0}
+</style></head><body><div id="sheet"></div>
+<script type="module">
+import * as pdfjs from './pdfjs/build/pdf.mjs';
+globalThis.pdfjsLib = pdfjs;
+const {PDFLinkService,EventBus} = await import('./pdfjs/web/pdf_viewer.mjs');
+pdfjs.GlobalWorkerOptions.workerSrc = './pdfjs/build/pdf.worker.mjs';
+let current = null, loadingTask = null, viewport = null;
+window.clicks = [];
+document.addEventListener('click', event => {
+  const link=event.target.closest?.('a');
+  if(link){ event.preventDefault();event.stopImmediatePropagation();window.clicks.push(link.href); }
+},true);
+window.draw = async (url, showAnnotations=true) => {
+  if(loadingTask) await loadingTask.destroy();
+  const sheet=document.getElementById('sheet'); sheet.replaceChildren();
+  loadingTask=pdfjs.getDocument({url,standardFontDataUrl:'./pdfjs/standard_fonts/',wasmUrl:'./pdfjs/wasm/',enableXfa:false,isEvalSupported:false});
+  current=await loadingTask.promise;
+  const page=await current.getPage(1);
+  viewport=page.getViewport({scale:2});
+  sheet.style.width=viewport.width+'px';sheet.style.height=viewport.height+'px';
+  const canvas=document.createElement('canvas');canvas.width=viewport.width;canvas.height=viewport.height;sheet.append(canvas);
+  await page.render({canvas,canvasContext:canvas.getContext('2d'),viewport,annotationMode:showAnnotations?pdfjs.AnnotationMode.ENABLE:pdfjs.AnnotationMode.DISABLE}).promise;
+  const annotations=await page.getAnnotations({intent:'display'});
+  if(showAnnotations){
+    const div=document.createElement('div');div.className='annotationLayer';sheet.append(div);
+    const linkService=new PDFLinkService({eventBus:new EventBus()});linkService.setDocument(current);
+    const layer=new pdfjs.AnnotationLayer({div,page,linkService,viewport:viewport.clone({dontFlip:true}),annotationCanvasMap:new Map(),accessibilityManager:null,annotationEditorUIManager:null});
+    await layer.render({annotations,linkService,renderForms:false,downloadManager:null,imageResourcesPath:'./pdfjs/images/'});
+  }
+  await new Promise(requestAnimationFrame);
+  return {version:pdfjs.version,pageCount:current.numPages,view:page.view,viewport:{width:viewport.width,height:viewport.height},annotations:annotations.map(a=>({id:a.id,subtype:a.subtype,rect:a.rect,quadPoints:Array.from(a.quadPoints||[]),borderStyle:a.borderStyle,hasAppearance:a.hasAppearance,url:a.url})),links:Array.from(sheet.querySelectorAll('a')).map(a=>({href:a.href,rect:a.getBoundingClientRect().toJSON()}))};
+};
+window.point = (x,y) => {
+  const p=viewport.convertToViewportPoint(x,y),r=document.getElementById('sheet').getBoundingClientRect();
+  const xx=p[0]+r.left,yy=p[1]+r.top;
+  return {x:xx,y:yy,href:document.elementFromPoint(xx,yy)?.closest('a')?.href||null};
+};
+window.ready=true;
+</script></body></html>

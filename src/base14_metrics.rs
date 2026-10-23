@@ -1,7 +1,9 @@
-//! Standard 14 font metrics for PDF text positions and inline word advances.
+//! Standard 14 font metrics for PDF text positions and document layout.
 //!
 //! This module supplies advances and character mappings, not font programs.
-//! Inline word fragments also use these advances to match whole-string painting.
+//! Paragraphs and inline fragments share advances with the PDF writer.
+
+use crate::types::Pt;
 
 #[path = "base14_metrics_data.rs"]
 mod data;
@@ -49,5 +51,53 @@ impl Base14Font {
 }
 
 pub(crate) fn font(name: &str) -> Option<Base14Font> {
-    data::font(name)
+    data::font(name).or_else(|| data::font(canonical_name(name)?))
+}
+
+pub(crate) fn canonical_name(name: &str) -> Option<&'static str> {
+    let name = name.trim().trim_matches('"').trim_matches('\'');
+    [
+        "Courier",
+        "Courier-Bold",
+        "Courier-Oblique",
+        "Courier-BoldOblique",
+        "Helvetica",
+        "Helvetica-Bold",
+        "Helvetica-Oblique",
+        "Helvetica-BoldOblique",
+        "Times-Roman",
+        "Times-Bold",
+        "Times-Italic",
+        "Times-BoldItalic",
+        "Symbol",
+        "ZapfDingbats",
+    ]
+    .into_iter()
+    .find(|candidate| candidate.eq_ignore_ascii_case(name))
+}
+
+pub(crate) fn measure_text_width(name: &str, size: Pt, text: &str) -> Option<Pt> {
+    let name = canonical_name(name)?;
+    let font = font(name)?;
+    let symbolic = matches!(name, "Symbol" | "ZapfDingbats");
+    let mut width = Pt::ZERO;
+    for ch in text.chars() {
+        let encoded = crate::pdf_encodings::encode_win_ansi_char(ch);
+        for &byte in encoded.bytes() {
+            // Symbol and ZapfDingbats retain their built-in code-to-glyph
+            // mapping. The other Standard 14 fonts use WinAnsi glyph names.
+            let glyph = if symbolic {
+                font.builtin_glyph(byte)
+            } else {
+                crate::pdf_encodings::win_ansi_encoding_byte(byte)
+                    .and_then(|ch| font.glyph_by_unicode(ch))
+            };
+            if let Some(glyph) = glyph {
+                // Match the engine's per-glyph fixed-point precision. Summing
+                // first and rounding later changes inline fragment positions.
+                width += size.mul_ratio(i32::from(glyph.width), 1000);
+            }
+        }
+    }
+    Some(width)
 }

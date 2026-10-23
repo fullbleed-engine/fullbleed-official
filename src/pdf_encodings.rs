@@ -99,6 +99,63 @@ pub(crate) fn win_ansi_encoding_byte(byte: u8) -> Option<char> {
     decode(&WIN_ANSI, byte)
 }
 
+/// The writer's single-byte mapping, shared with text measurement. Keep the
+/// distinction between deliberate ASCII substitutions and missing characters
+/// so existing lossy-output diagnostics remain meaningful.
+pub(crate) enum WinAnsiChar {
+    Byte(u8),
+    AsciiFallback(&'static [u8]),
+    Replacement,
+}
+
+impl WinAnsiChar {
+    pub(crate) fn bytes(&self) -> &[u8] {
+        match self {
+            Self::Byte(byte) => std::slice::from_ref(byte),
+            Self::AsciiFallback(bytes) => bytes,
+            Self::Replacement => b"?",
+        }
+    }
+}
+
+pub(crate) fn encode_win_ansi_char(ch: char) -> WinAnsiChar {
+    use WinAnsiChar::*;
+    let byte = match ch {
+        '\u{2265}' => return AsciiFallback(b">="),
+        '\u{2264}' => return AsciiFallback(b"<="),
+        '\u{0000}'..='\u{007f}' | '\u{00a0}'..='\u{00ff}' => ch as u8,
+        '\u{20ac}' => 0x80,
+        '\u{201a}' => 0x82,
+        '\u{0192}' => 0x83,
+        '\u{201e}' => 0x84,
+        '\u{2026}' => 0x85,
+        '\u{2020}' => 0x86,
+        '\u{2021}' => 0x87,
+        '\u{02c6}' => 0x88,
+        '\u{2030}' => 0x89,
+        '\u{0160}' => 0x8a,
+        '\u{2039}' => 0x8b,
+        '\u{0152}' => 0x8c,
+        '\u{017d}' => 0x8e,
+        '\u{2018}' => 0x91,
+        '\u{2019}' => 0x92,
+        '\u{201c}' => 0x93,
+        '\u{201d}' => 0x94,
+        '\u{2022}' => 0x95,
+        '\u{2013}' => 0x96,
+        '\u{2014}' => 0x97,
+        '\u{02dc}' => 0x98,
+        '\u{2122}' => 0x99,
+        '\u{0161}' => 0x9a,
+        '\u{203a}' => 0x9b,
+        '\u{0153}' => 0x9c,
+        '\u{017e}' => 0x9e,
+        '\u{0178}' => 0x9f,
+        _ => return Replacement,
+    };
+    Byte(byte)
+}
+
 #[rustfmt::skip]
 const PDF_DOC: [u16; 256] = [
     0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,

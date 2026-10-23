@@ -48,8 +48,14 @@ class Server:
     def close(self):
         if self.process.poll() is None:
             if os.name == "nt":
-                subprocess.run(["taskkill", "/PID", str(self.process.pid), "/T", "/F"],
-                               capture_output=True, check=True)
+                result = subprocess.run(
+                    ["taskkill", "/PID", str(self.process.pid), "/T", "/F"],
+                    capture_output=True,
+                )
+                # The child can exit after poll() and before taskkill opens it.
+                # Still fail if termination was rejected while it remains alive.
+                if result.returncode and self.process.poll() is None:
+                    result.check_returncode()
             else:
                 self.process.send_signal(signal.SIGINT)
             self.process.wait(timeout=15)
@@ -238,15 +244,26 @@ def check_timeout(project, out):
         initial = server.wait()
         component = project / "invoice_components.py"
         before = component.read_text(encoding="utf-8")
-        component.write_text(before + "\nimport time\ntime.sleep(30)\n", encoding="utf-8")
+        # A descendant holds the inherited worker log and would write a marker
+        # after the parent times out if cleanup only killed the immediate PID.
+        child = ("from pathlib import Path; import time; "
+                 "Path('output').mkdir(exist_ok=True); "
+                 "Path('output/timeout-child-started').touch(); time.sleep(8); "
+                 "Path('output/timeout-child-survived').touch()")
+        component.write_text(before + "\nimport subprocess, sys, time\n"
+                             + f"subprocess.Popen([sys.executable, '-c', {child!r}])\n"
+                             + "time.sleep(30)\n", encoding="utf-8")
         failed = server.wait("error", after=initial["attempt"])
         server.artifacts("timeout", failed)
         assert "exceeded 5 seconds" in failed["error"], failed
         assert failed["revision"] == initial["revision"]
+        assert (project / "output/timeout-child-started").exists(), "The descendant must have started"
+        time.sleep(9)
+        assert not (project / "output/timeout-child-survived").exists(), "The timed-out descendant survived"
         component.write_text(before, encoding="utf-8")
         recovered = server.wait(after=failed["attempt"])
         assert recovered["result"]["pdf_sha256"] == initial["result"]["pdf_sha256"]
-        return ["hung render is terminated, last good preview retained, next save recovers"]
+        return ["hung render and its descendant are terminated, last good preview retained, next save recovers"]
     finally:
         server.close()
 

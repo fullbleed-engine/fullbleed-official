@@ -20,6 +20,7 @@ These docs target the current repository source layout. For the published releas
   benchmark results and validation
 - `docs/python-api.md`: Python bindings, classes, methods, and usage patterns
 - `docs/embedded-stylesheets.md`: complete HTML documents, stylesheet order, print media, and compiled styling boundaries
+- `docs/pdf-links.md`: authored navigation, component exports, and measured PDF-reader limits in the unreleased candidate
 - `docs/component-authoring.md`: React-inspired Python functions, named elements, reusable styles, and document rendering
 - `docs/component-authoring-design.md`: implementation review and experimental component API direction
 - `docs/component-authoring-next-iteration.md`: component ergonomics decision brief, observed gaps, and implementation priorities

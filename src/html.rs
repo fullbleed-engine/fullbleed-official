@@ -13,8 +13,8 @@ use crate::flowable::{
     FloatClear, FloatFlowable, FloatSide, FootnoteCallFlowable, GridTrackBreadth, GridTrackSize,
     ImageFlowable, InlineBackgroundFlowable, InlineBlockLayoutFlowable, JustifyContent,
     LeaderFlowable, LengthSpec, ListBulletFlowable, ListBulletKind, ListItemFlowable, MaskMode,
-    MetaFlowable, MultiColumnFlowable, OutlineLineStyle, OverlayFlowable, PageFootnoteAreaStyle,
-    PageFootnoteEntry, PaintFilterOperation, PaintFilterSpec, Paragraph,
+    MetaFlowable, MultiColumnFlowable, NavigationPointFlowable, OutlineLineStyle, OverlayFlowable,
+    PageFootnoteAreaStyle, PageFootnoteEntry, PaintFilterOperation, PaintFilterSpec, Paragraph,
     RelativePositionedFlowable, RunningElementFlowable, ScreenReaderTextFlowable, Spacer,
     SvgComponentTransferFunction, SvgFilterInput, SvgFilterNode, SvgFilterPrimitive,
     SvgFilterProgram, SvgFilterRegion, SvgFlowable, SvgMorphologyOperator, TableCell,
@@ -114,6 +114,13 @@ struct CounterState {
     target_texts: Arc<HashMap<String, String>>,
     target_pages: Arc<HashMap<String, usize>>,
     table_semantics: Arc<crate::table_semantics::HtmlTableIndex>,
+    link_semantics: Arc<crate::link_semantics::HtmlLinkIndex>,
+    inline_source_ids: Arc<HashMap<usize, usize>>,
+    inline_opacity: HashMap<usize, crate::inline_opacity::InlineOpacity>,
+    inline_text_run: Option<(TextStyle, Arc<()>)>,
+    // True only while lowering content whose emitted semantic owner accepts
+    // inline text directly, such as a paragraph, heading, label or link.
+    inline_text_owner: bool,
     running_layouts: Option<crate::running_layout::RunningLayouts>,
     // A scoped lowering instruction, never a mutation of the authored DOM.
     // Inline descendants keep their own computed styles while the selected
@@ -137,6 +144,13 @@ struct CounterValue {
 }
 
 impl CounterState {
+    fn with_inline_text_owner<T>(&mut self, owner: bool, lower: impl FnOnce(&mut Self) -> T) -> T {
+        let previous = std::mem::replace(&mut self.inline_text_owner, owner);
+        let result = lower(self);
+        self.inline_text_owner = previous;
+        result
+    }
+
     fn with_target_context(
         document: &NodeRef,
         target_texts: HashMap<String, String>,
@@ -155,6 +169,14 @@ impl CounterState {
             target_texts: Arc::new(target_texts),
             target_pages,
             table_semantics: Arc::new(crate::table_semantics::HtmlTableIndex::build(document)),
+            link_semantics: Arc::new(crate::link_semantics::HtmlLinkIndex::build(document)),
+            inline_source_ids: Arc::new(
+                document
+                    .descendants()
+                    .enumerate()
+                    .map(|(index, node)| (node.identity_key(), index + 1))
+                    .collect(),
+            ),
             ..Self::default()
         }
     }
@@ -1543,6 +1565,7 @@ fn anonymous_table_cell_run_flowables(
                 true,
                 true,
                 None,
+                None,
             ));
             items.extend(after_items);
             let items = coerce_items_to_inline_run(
@@ -1552,7 +1575,7 @@ fn anonymous_table_cell_run_flowables(
                 font_registry.clone(),
                 false,
             );
-            let mut flowables = layout_children_to_flowables(items, None);
+            let mut flowables = layout_cell_children_to_flowables(items, &cell_style);
             if flowables.is_empty() {
                 None
             } else if flowables.len() == 1 {
@@ -1630,6 +1653,7 @@ fn anonymous_table_cell_run_flowables(
         )
         .with_row_min_height(min_height)
         .with_hide_empty_cells(cell_style.empty_cells_hide)
+        .with_pagination(cell_style.pagination)
         .with_self_visible(cell_style.visibility.paints())
         .with_overflow_hidden(matches!(
             cell_style.overflow,
@@ -1738,16 +1762,19 @@ fn collect_children(
         NodeData::Text(text) => text.borrow().chars().any(char::is_whitespace),
         _ => false,
     });
+    // Direct text still belongs to an anonymous inline run when a block child
+    // interrupts it. Keep the surrounding fragments inline here; the mixed
+    // child stream below separates the runs around the actual block boundary.
     let inline_context = (matches!(parent_style.display, DisplayMode::Inline)
-        || has_boundary_space_candidate)
+        || has_boundary_space_candidate
+        || children.iter().any(|child| child.as_element().is_some()))
         && !matches!(
             parent_style.display,
             DisplayMode::Flex
                 | DisplayMode::InlineFlex
                 | DisplayMode::Grid
                 | DisplayMode::InlineGrid
-        )
-        && inline_or_replaced_children_only(node, resolver, parent_style, ancestors);
+        );
     // A text-only block already has a paragraph that owns its line breaking.
     // In a mixed inline run, expose word boundaries to the shared line builder
     // so text after a styled sibling can use the remainder of the same line.
@@ -1755,6 +1782,26 @@ fn collect_children(
         || children
             .iter()
             .any(|child| matches!(child.data(), NodeData::Element(_)));
+    let previous_text_run = counters.inline_text_run.clone();
+    let mut run_style = text_style_for_flow_text(parent_style);
+    run_style.unicode_bidi = crate::style::UnicodeBidiMode::Normal;
+    let continues_run = matches!(
+        parent_style.display,
+        DisplayMode::Inline | DisplayMode::Contents
+    ) && parent_style.margin == EdgeSizes::zero()
+        && parent_style.padding == EdgeSizes::zero()
+        && parent_style.border_width == EdgeSizes::zero()
+        && matches!(parent_style.vertical_align, VerticalAlignMode::Baseline)
+        && matches!(
+            parent_style.unicode_bidi,
+            crate::style::UnicodeBidiMode::Normal
+        )
+        && previous_text_run
+            .as_ref()
+            .is_some_and(|(style, _)| style == &run_style);
+    if !continues_run {
+        counters.inline_text_run = Some((run_style, Arc::new(())));
+    }
     let inline_content: Vec<bool> = if inline_context {
         children
             .iter()
@@ -1784,11 +1831,15 @@ fn collect_children(
                         .as_ref()
                         .filter(|initial| initial.node == *child)
                         .map(|initial| &initial.style),
+                    counters
+                        .inline_text_run
+                        .as_ref()
+                        .map(|(_, run)| run.clone()),
                 ));
                 continue;
             }
         }
-        out.extend(node_to_flowables(
+        let children = node_to_flowables(
             child,
             resolver,
             parent_style,
@@ -1801,7 +1852,34 @@ fn collect_children(
             svg_raster_fallback,
             perf,
             doc_id,
-        ));
+        );
+        if let Some((_, run)) = &mut counters.inline_text_run {
+            let identity = Arc::as_ptr(run) as usize;
+            // Only the tail decides whether the following sibling continues
+            // this run. Earlier block/style boundaries already started their
+            // own runs while lowering the child.
+            let separates_text = children
+                .iter()
+                .rev()
+                .find_map(|item| {
+                    let flowable = match item {
+                        LayoutItem::Inline { flowable, .. }
+                        | LayoutItem::Block { flowable, .. } => flowable,
+                    };
+                    (!flowable.is_navigation_marker()).then_some(flowable)
+                })
+                .is_some_and(|flowable| flowable.inline_text_run_id() != Some(identity));
+            if separates_text {
+                *run = Arc::new(());
+            }
+        }
+        out.extend(children);
+    }
+    // A transparent, equally styled inline may contain a block boundary. Its
+    // final text run continues into the parent's next sibling; restoring the
+    // entry run here would introduce an artificial shaping/paint boundary.
+    if !continues_run {
+        counters.inline_text_run = previous_text_run;
     }
     out
 }
@@ -1847,6 +1925,7 @@ fn text_node_to_flowables(
     inline_context: bool,
     fragment_inline_words: bool,
     first_letter_style: Option<&ComputedStyle>,
+    shared_text_run: Option<Arc<()>>,
 ) -> Vec<LayoutItem> {
     if let Some(perf_logger) = perf {
         perf_logger.log_counts("story.text_nodes", doc_id, &[("count", 1)]);
@@ -1921,13 +2000,42 @@ fn text_node_to_flowables(
             }
         }
     };
+    let word_fragments = inline_context
+        && fragment_inline_words
+        && split_boundary_spaces
+        && !no_wrap(parent_style)
+        && !cleaned.contains('\n')
+        && matches!(parent_style.writing_mode, WritingModeMode::HorizontalTb)
+        // The shared inline layout resolves bidi across words and styles.
+        // Authored explicit controls must still remain together so breaking
+        // the source into words cannot unbalance an embedding or isolate.
+        && !cleaned.chars().any(|ch| {
+            matches!(
+                unicode_bidi::bidi_class(ch),
+                unicode_bidi::BidiClass::LRE
+                    | unicode_bidi::BidiClass::RLE
+                    | unicode_bidi::BidiClass::LRO
+                    | unicode_bidi::BidiClass::RLO
+                    | unicode_bidi::BidiClass::PDF
+                    | unicode_bidi::BidiClass::LRI
+                    | unicode_bidi::BidiClass::RLI
+                    | unicode_bidi::BidiClass::FSI
+                    | unicode_bidi::BidiClass::PDI
+            )
+        });
+    let inline_text_run = word_fragments.then(|| shared_text_run.unwrap_or_else(|| Arc::new(())));
     let mut items = Vec::new();
     let has_text = initial.is_some() || !cleaned.is_empty();
     if leading_space || (!has_text && trailing_space) {
-        items.push(inline_item(Box::new(CollapsibleSpaceFlowable::new(
-            text_style.clone(),
-            font_registry.clone(),
-        ))));
+        items.push(inline_item(Box::new(
+            CollapsibleSpaceFlowable::with_shaping_context(
+                text_style.clone(),
+                font_registry.clone(),
+                "",
+                cleaned.split(' ').next().unwrap_or(""),
+            )
+            .with_inline_text_run(inline_text_run.clone()),
+        )));
     }
     if let Some((text, style)) = initial {
         let first_style = text_style_for_flow_text(style);
@@ -2000,46 +2108,41 @@ fn text_node_to_flowables(
             order: 0,
         });
     }
-    let word_fragments = inline_context
-        && fragment_inline_words
-        && split_boundary_spaces
-        && !no_wrap(parent_style)
-        && !cleaned.contains('\n')
-        && matches!(parent_style.writing_mode, WritingModeMode::HorizontalTb)
-        // The shared inline layout resolves bidi across words and styles.
-        // Authored explicit controls must still remain together so breaking
-        // the source into words cannot unbalance an embedding or isolate.
-        && !cleaned.chars().any(|ch| {
-            matches!(
-                unicode_bidi::bidi_class(ch),
-                unicode_bidi::BidiClass::LRE
-                    | unicode_bidi::BidiClass::RLE
-                    | unicode_bidi::BidiClass::LRO
-                    | unicode_bidi::BidiClass::RLO
-                    | unicode_bidi::BidiClass::PDF
-                    | unicode_bidi::BidiClass::LRI
-                    | unicode_bidi::BidiClass::RLI
-                    | unicode_bidi::BidiClass::FSI
-                    | unicode_bidi::BidiClass::PDI
-            )
-        });
-    let fragments: Vec<&str> = if word_fragments {
+    let line_fragments = inline_context
+        && cleaned.contains('\n')
+        && matches!(parent_style.writing_mode, WritingModeMode::HorizontalTb);
+    let fragments: Vec<&str> = if line_fragments {
+        cleaned.split('\n').collect()
+    } else if word_fragments {
         cleaned.split(' ').collect()
     } else {
         vec![cleaned.as_str()]
     };
-    for (index, fragment) in fragments.into_iter().enumerate() {
-        if index > 0 {
-            items.push(inline_item(Box::new(CollapsibleSpaceFlowable::new(
-                text_style.clone(),
-                font_registry.clone(),
+    for (index, &fragment) in fragments.iter().enumerate() {
+        if index > 0 && line_fragments {
+            // Preserved source line feeds participate in the shared inline
+            // context like <br>, so they can be paginated and retain their
+            // owning link/reading scope instead of becoming one tall atom.
+            items.push(inline_item(Box::new(ForcedLineBreakFlowable::new(
+                text_style.line_height,
             ))));
+        } else if index > 0 {
+            items.push(inline_item(Box::new(
+                CollapsibleSpaceFlowable::with_shaping_context(
+                    text_style.clone(),
+                    font_registry.clone(),
+                    fragments[index - 1],
+                    fragment,
+                )
+                .with_inline_text_run(inline_text_run.clone()),
+            )));
         }
         if fragment.is_empty() {
             continue;
         }
         let paragraph = Paragraph::new(fragment)
             .with_inline_word_measurement(word_fragments)
+            .with_inline_text_run(inline_text_run.clone())
             .with_style(text_style.clone())
             .with_align(text_align_from_style(parent_style))
             .with_last_align(text_align_last_from_style(parent_style))
@@ -2057,10 +2160,15 @@ fn text_node_to_flowables(
         items.push(inline_item(Box::new(paragraph)));
     }
     if trailing_space && has_text {
-        items.push(inline_item(Box::new(CollapsibleSpaceFlowable::new(
-            text_style,
-            font_registry,
-        ))));
+        items.push(inline_item(Box::new(
+            CollapsibleSpaceFlowable::with_shaping_context(
+                text_style,
+                font_registry,
+                cleaned.rsplit(' ').next().unwrap_or(""),
+                "",
+            )
+            .with_inline_text_run(inline_text_run),
+        )));
     }
     annotate_reading_layout(items)
 }
@@ -2428,24 +2536,114 @@ fn node_to_flowables(
     if node.as_element().is_some() {
         counters.select_node(node, false);
     }
-    let items = node_to_flowables_in_scope(
-        node,
-        resolver,
-        parent_style,
-        ancestors,
-        counters,
-        font_registry,
-        asset_bundle,
-        report,
-        svg_form,
-        svg_raster_fallback,
-        perf,
-        doc_id,
-    );
+    let inline_text_owner = counters.inline_text_owner
+        || counters
+            .link_semantics
+            .metadata(node)
+            .iter()
+            .any(|(key, _)| key == crate::link_semantics::META_LINK_TARGET);
+    let items = counters.with_inline_text_owner(inline_text_owner, |counters| {
+        node_to_flowables_in_scope(
+            node,
+            resolver,
+            parent_style,
+            ancestors,
+            counters,
+            font_registry,
+            asset_bundle,
+            report,
+            svg_form,
+            svg_raster_fallback,
+            perf,
+            doc_id,
+        )
+    });
     // Restoring the caller's context does not end a child's sibling scope.
     // The next element (or ::after) selects the counters that it inherits.
     (counters.context, counters.pseudo_context) = previous;
+    let items = wrap_source_link_metadata(items, counters.link_semantics.metadata(node));
+    let Some(effect) = counters.inline_opacity.remove(&node.identity_key()) else {
+        return items;
+    };
     items
+        .into_iter()
+        .map(|item| match item {
+            LayoutItem::Inline {
+                flowable,
+                valign,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            } => LayoutItem::Inline {
+                flowable: Box::new(
+                    MetaFlowable::new(flowable, Vec::new()).with_inline_opacity(effect),
+                ),
+                valign,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            },
+            LayoutItem::Block {
+                flowable,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            } => LayoutItem::Block {
+                flowable: Box::new(
+                    MetaFlowable::new(flowable, Vec::new()).with_inline_opacity(effect),
+                ),
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            },
+        })
+        .collect()
+}
+
+fn wrap_source_link_metadata(
+    items: Vec<LayoutItem>,
+    metadata: &[(String, String)],
+) -> Vec<LayoutItem> {
+    if metadata.is_empty() {
+        return items;
+    }
+    items
+        .into_iter()
+        .map(|item| match item {
+            LayoutItem::Block {
+                flowable,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            } => LayoutItem::Block {
+                flowable: Box::new(MetaFlowable::new(flowable, metadata.to_vec())),
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            },
+            LayoutItem::Inline {
+                flowable,
+                valign,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            } => LayoutItem::Inline {
+                flowable: Box::new(MetaFlowable::new(flowable, metadata.to_vec())),
+                valign,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            },
+        })
+        .collect()
 }
 
 fn node_to_flowables_in_scope(
@@ -2480,6 +2678,7 @@ fn node_to_flowables_in_scope(
                 .as_ref()
                 .filter(|initial| initial.node == *node)
                 .map(|initial| &initial.style),
+            None,
         ),
         NodeData::Element(element) => {
             if let Some(perf_logger) = perf {
@@ -2745,6 +2944,28 @@ fn node_to_flowables_in_scope(
                     && style.running_name.is_none()
                     && style.string_set.is_empty();
             if transparent_inline {
+                if style.opacity < 1.0 - 1.0e-6 {
+                    let id = counters
+                        .inline_source_ids
+                        .get(&node.identity_key())
+                        .copied()
+                        .unwrap_or_else(|| {
+                            node.ancestors()
+                                .last()
+                                .unwrap_or_else(|| node.clone())
+                                .descendants()
+                                .position(|candidate| candidate == *node)
+                                .unwrap_or(0)
+                                + 1
+                        });
+                    counters.inline_opacity.insert(
+                        node.identity_key(),
+                        crate::inline_opacity::InlineOpacity {
+                            id,
+                            alpha: style.opacity.clamp(0.0, 1.0),
+                        },
+                    );
+                }
                 let out = if pseudo_quote_depth_changes {
                     // Quote nesting is a document-order state machine. Resolve
                     // an opening pseudo against the live state before walking
@@ -2828,6 +3049,24 @@ fn node_to_flowables_in_scope(
                         font_registry.clone(),
                     )
                 };
+                let mut out = out;
+                let only_collapsible_space = out.iter().all(|item| match item {
+                    LayoutItem::Inline { flowable, .. } => flowable.is_collapsible_inline_space(),
+                    LayoutItem::Block { .. } => false,
+                });
+                if only_collapsible_space && counters.link_semantics.destinations(node).is_some() {
+                    out.insert(
+                        0,
+                        LayoutItem::Inline {
+                            flowable: Box::new(NavigationPointFlowable),
+                            valign: VerticalAlign::Top,
+                            flex_grow: 0.0,
+                            flex_shrink: 0.0,
+                            width_spec: None,
+                            order: style.order,
+                        },
+                    );
+                }
                 let out = wrap_inline_bidi_scope(out, &style);
                 let out = if matches!(
                     style.vertical_align,
@@ -2919,6 +3158,8 @@ fn node_to_flowables_in_scope(
                         })
                         .fold(Pt::ZERO, |sum, width| sum + width);
                     let mut inline_box_style = style.clone();
+                    // The source inline group owns opacity, including its decorations.
+                    inline_box_style.opacity = 1.0;
                     if intrinsic_width > Pt::ZERO
                         && matches!(
                             inline_box_style.width,
@@ -2949,6 +3190,14 @@ fn node_to_flowables_in_scope(
                 return out;
             }
 
+            // Only emitted owners establish this scope. Transparent inline
+            // and display:contents elements returned above; their tag names
+            // must not suppress a descendant's anonymous paragraph.
+            counters.inline_text_owner = match info.tag.as_str() {
+                "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => true,
+                tag => block_container_role(tag)
+                    .map_or(counters.inline_text_owner, |role| role == "Lbl"),
+            };
             let mut flowables = if let Some(text) = screen_reader_text.as_ref() {
                 vec![LayoutItem::Block {
                     flowable: Box::new(
@@ -3019,8 +3268,13 @@ fn node_to_flowables_in_scope(
                             );
                         }
 
-                        if inline_children_only(node, resolver, &style, ancestors)
-                            && !has_structured_pseudo
+                        if inline_children_only_with_links(
+                            node,
+                            resolver,
+                            &style,
+                            ancestors,
+                            Some(&counters.link_semantics),
+                        ) && !has_structured_pseudo
                         {
                             // Resolve the large computed pseudo style only once
                             // the single-paragraph compiler path is selected.
@@ -4062,11 +4316,15 @@ fn node_to_flowables_in_scope(
                             }]
                         }
                     })(),
-                    "body" | "div" | "span" | "i" | "section" | "article" | "header" | "footer"
-                    | "aside" | "nav" | "main" | "blockquote" | "figure" | "figcaption" | "dl"
-                    | "dt" | "dd" => (|| {
+                    "body" | "div" | "span" | "i" | "a" | "section" | "article" | "header"
+                    | "footer" | "aside" | "nav" | "main" | "blockquote" | "figure"
+                    | "figcaption" | "dl" | "dt" | "dd" => (|| {
                         let container_role = block_container_role(info.tag.as_str());
-                        let direct_text_role = direct_text_structure_role(info.tag.as_str());
+                        let direct_text_role = direct_text_structure_role(
+                            info.tag.as_str(),
+                            &style,
+                            counters.inline_text_owner,
+                        );
                         if is_table_container_display(style.display) {
                             table_container_flowables(
                                 node,
@@ -4110,8 +4368,13 @@ fn node_to_flowables_in_scope(
                         } else if matches!(
                             style.display,
                             DisplayMode::Block | DisplayMode::FlowRoot | DisplayMode::InlineBlock
-                        ) && inline_children_only(node, resolver, &style, ancestors)
-                            && !has_structured_pseudo
+                        ) && inline_children_only_with_links(
+                            node,
+                            resolver,
+                            &style,
+                            ancestors,
+                            Some(&counters.link_semantics),
+                        ) && !has_structured_pseudo
                         {
                             let ancestors_no_self = &ancestors[..ancestors.len().saturating_sub(1)];
                             let mut text = extract_rendered_text(
@@ -4152,7 +4415,10 @@ fn node_to_flowables_in_scope(
                                 ..ContainerCompilationOptions::default()
                             };
                             if text.is_empty() {
-                                if matches!(info.tag.as_str(), "dl" | "figure" | "figcaption") {
+                                if matches!(
+                                    info.tag.as_str(),
+                                    "dl" | "figure" | "figcaption" | "blockquote"
+                                ) {
                                     container_flowables_with_role_options(
                                         Vec::new(),
                                         &style,
@@ -4209,7 +4475,10 @@ fn node_to_flowables_in_scope(
                                     width_spec: None,
                                     order: 0,
                                 }];
-                                if matches!(info.tag.as_str(), "dl" | "figure" | "figcaption") {
+                                if matches!(
+                                    info.tag.as_str(),
+                                    "dl" | "figure" | "figcaption" | "blockquote"
+                                ) {
                                     container_flowables_with_role_options(
                                         items,
                                         &style,
@@ -4280,6 +4549,10 @@ fn node_to_flowables_in_scope(
                                     &style,
                                     container_role,
                                     ContainerCompilationOptions {
+                                        inline_group_role: block_text_group_role(
+                                            &style,
+                                            direct_text_role,
+                                        ),
                                         suppress_single_used_column_rule:
                                             suppress_unused_multicol_rule,
                                         flow_gap: (info
@@ -4296,6 +4569,10 @@ fn node_to_flowables_in_scope(
                                     children,
                                     &style,
                                     ContainerCompilationOptions {
+                                        inline_group_role: block_text_group_role(
+                                            &style,
+                                            direct_text_role,
+                                        ),
                                         suppress_single_used_column_rule:
                                             suppress_unused_multicol_rule,
                                         flow_gap: (info
@@ -4388,6 +4665,21 @@ fn node_to_flowables_in_scope(
             // in flow and therefore keeps exactly the same Q32.32 layout geometry.
             let defer_visible_replaced_overflow = !parent_is_flex
                 && static_block_with_visible_replaced_overflow(node, resolver, &style, ancestors);
+
+            if flowables.is_empty() && counters.link_semantics.destinations(node).is_some() {
+                // Keep the normal computed box/position wrappers, but give the
+                // empty element no painted content or artificial flow height.
+                flowables = container_flowables(
+                    vec![LayoutItem::Block {
+                        flowable: Box::new(NavigationPointFlowable),
+                        flex_grow: 0.0,
+                        flex_shrink: 0.0,
+                        width_spec: None,
+                        order: 0,
+                    }],
+                    &style,
+                );
+            }
 
             // Preserve metadata-only nodes (for example <div data-fb="..."></div>) so
             // feature flags can be emitted even when the element has no visual content.
@@ -6621,12 +6913,24 @@ fn rich_first_letter_for(
     })
 }
 
+#[cfg(test)]
 fn inline_children_only(
     node: &NodeRef,
     resolver: &StyleResolver,
     parent_style: &ComputedStyle,
     ancestors: &[ElementInfo],
 ) -> bool {
+    inline_children_only_with_links(node, resolver, parent_style, ancestors, None)
+}
+
+fn inline_children_only_with_links(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    parent_style: &ComputedStyle,
+    ancestors: &[ElementInfo],
+    links: Option<&crate::link_semantics::HtmlLinkIndex>,
+) -> bool {
+    let links = links.filter(|index| index.has_descendant_boundary(node));
     for child in node.children() {
         let Some(element) = child.as_element() else {
             continue;
@@ -6653,6 +6957,11 @@ fn inline_children_only(
         // invalidate an otherwise flattenable inline formatting context.
         if matches!(child_style.display, DisplayMode::None) {
             continue;
+        }
+        // Link identity and referenced inline destinations are semantic
+        // boundaries even when their typography matches the surrounding text.
+        if links.is_some_and(|index| !index.metadata(&child).is_empty()) {
+            return false;
         }
         // This flattening fast-path is text-centric. Rendered replaced/media
         // elements must keep structural flowables or their content can vanish.
@@ -6701,7 +7010,8 @@ fn inline_children_only(
 
         let mut child_ancestors = ancestors.to_vec();
         child_ancestors.push(info);
-        if !inline_children_only(&child, resolver, &child_style, &child_ancestors) {
+        if !inline_children_only_with_links(&child, resolver, &child_style, &child_ancestors, links)
+        {
             return false;
         }
     }
@@ -6802,8 +7112,20 @@ fn inline_or_replaced_children_only(
                     return false;
                 }
                 match child_style.display {
-                    DisplayMode::Inline
-                    | DisplayMode::InlineBlock
+                    DisplayMode::Inline => {
+                        let mut child_ancestors = ancestors.to_vec();
+                        child_ancestors.push(info);
+                        if inline_has_in_flow_block_descendants(
+                            &child,
+                            resolver,
+                            &child_style,
+                            &child_ancestors,
+                        ) {
+                            return false;
+                        }
+                        saw_content = true;
+                    }
+                    DisplayMode::InlineBlock
                     | DisplayMode::InlineFlex
                     | DisplayMode::InlineGrid
                     | DisplayMode::InlineTable => {
@@ -6816,6 +7138,41 @@ fn inline_or_replaced_children_only(
         }
     }
     saw_content
+}
+
+fn inline_has_in_flow_block_descendants(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    parent_style: &ComputedStyle,
+    ancestors: &[ElementInfo],
+) -> bool {
+    for child in node.children().filter(|child| child.as_element().is_some()) {
+        let info = element_info(&child, resolver.has_sibling_selectors());
+        let inline_style = node_inline_style_attr(&child);
+        let style = resolver.compute_style(&info, parent_style, inline_style.as_deref(), ancestors);
+        if matches!(style.display, DisplayMode::None)
+            || matches!(style.position, PositionMode::Absolute | PositionMode::Fixed)
+            || !matches!(style.float_mode, FloatMode::None)
+        {
+            continue;
+        }
+        match style.display {
+            DisplayMode::Inline | DisplayMode::Contents => {
+                let mut child_ancestors = ancestors.to_vec();
+                child_ancestors.push(info);
+                if inline_has_in_flow_block_descendants(&child, resolver, &style, &child_ancestors)
+                {
+                    return true;
+                }
+            }
+            DisplayMode::InlineBlock
+            | DisplayMode::InlineFlex
+            | DisplayMode::InlineGrid
+            | DisplayMode::InlineTable => {}
+            _ => return true,
+        }
+    }
+    false
 }
 
 fn static_block_with_visible_replaced_overflow(
@@ -6874,6 +7231,13 @@ fn coerce_items_to_inline_run(
     font_registry: Option<Arc<FontRegistry>>,
     snap_baseline_phase: bool,
 ) -> Vec<LayoutItem> {
+    if items.iter().all(|item| match item {
+        LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => {
+            flowable.is_navigation_marker() || flowable.is_discardable_block_whitespace()
+        }
+    }) {
+        return items;
+    }
     let preserve_nested_floor = snap_baseline_phase
         && items.iter().any(|item| {
             matches!(
@@ -6891,7 +7255,10 @@ fn coerce_items_to_inline_run(
     // Rounding only their surrounding text can break baseline alignment.
     let ordinary_text_only = items.iter().all(|item| match item {
         LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => {
-            flowable.out_of_flow() || flowable.inline_x_height(Pt::ZERO).is_some()
+            flowable.out_of_flow()
+                || flowable.is_navigation_marker()
+                || flowable.forced_line_break_height().is_some()
+                || flowable.inline_x_height(Pt::ZERO).is_some()
         }
     });
     let round_integral_baseline = snap_baseline_phase
@@ -6948,10 +7315,11 @@ fn coerce_items_to_inline_run(
     let mut inline = Vec::with_capacity(item_count.saturating_mul(2) + 1);
     inline.push(make_strut());
     for (index, item) in items.into_iter().enumerate() {
-        let is_forced_break = match &item {
-            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => {
-                flowable.forced_line_break_height().is_some()
-            }
+        let (is_forced_break, is_navigation_marker) = match &item {
+            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => (
+                flowable.forced_line_break_height().is_some(),
+                flowable.is_navigation_marker(),
+            ),
         };
         let item = match item {
             LayoutItem::Inline { .. } => item,
@@ -6970,7 +7338,7 @@ fn coerce_items_to_inline_run(
                 order,
             },
         };
-        let item = if !snap_baseline_phase || is_forced_break {
+        let item = if !snap_baseline_phase || is_forced_break || is_navigation_marker {
             item
         } else {
             match item {
@@ -7053,8 +7421,13 @@ fn css_display_list_item_flowables(
     let mut consumed_inside_marker = false;
     let body: Box<dyn Flowable> = if marker_is_inside
         && (marker_prefix.is_some() || marker_bullet.is_some())
-        && inline_children_only(node, resolver, style, child_ancestors)
-    {
+        && inline_children_only_with_links(
+            node,
+            resolver,
+            style,
+            child_ancestors,
+            Some(&counters.link_semantics),
+        ) {
         let text = extract_rendered_text(node, resolver, style, child_ancestors, style.white_space);
         let text = if marker_bullet.is_some() {
             text
@@ -10360,8 +10733,13 @@ fn list_flowables(
             let li_body: Box<dyn Flowable> = if marker_is_inside
                 && marker_prefix.is_some()
                 && !has_structured_pseudo
-                && inline_children_only(&child, resolver, &style, &li_ancestors)
-            {
+                && inline_children_only_with_links(
+                    &child,
+                    resolver,
+                    &style,
+                    &li_ancestors,
+                    Some(&counters.link_semantics),
+                ) {
                 let text = extract_rendered_text(
                     &child,
                     resolver,
@@ -11976,6 +12354,7 @@ struct ContainerCompilationOptions {
     flow_gap: Option<LengthSpec>,
     table_semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
     emit_tag_group: bool,
+    inline_group_role: Option<&'static str>,
 }
 
 impl Default for ContainerCompilationOptions {
@@ -11986,6 +12365,7 @@ impl Default for ContainerCompilationOptions {
             flow_gap: None,
             table_semantics: None,
             emit_tag_group: true,
+            inline_group_role: None,
         }
     }
 }
@@ -12284,6 +12664,7 @@ fn container_flowable_with_role_options(
         style.direction,
         text_align_from_style(style),
         style.pagination,
+        options.inline_group_role,
     );
     let is_multicol_container = (style.column_count > 1
         || !matches!(style.column_width, LengthSpec::Auto))
@@ -12453,6 +12834,7 @@ fn block_container_role(tag: &str) -> Option<&'static str> {
         // transparent when PDF 2.0 parent/child relationships are checked.
         "figure" => Some("Figure"),
         "figcaption" => Some("Caption"),
+        "blockquote" => Some("BlockQuote"),
         "dl" => Some("L"),
         "dt" => Some("Lbl"),
         "dd" => Some("LBody"),
@@ -12460,15 +12842,43 @@ fn block_container_role(tag: &str) -> Option<&'static str> {
     }
 }
 
-fn direct_text_structure_role(tag: &str) -> &'static str {
+fn direct_text_structure_role(
+    tag: &str,
+    style: &ComputedStyle,
+    inline_text_owner: bool,
+) -> &'static str {
+    if inline_text_owner && block_container_role(tag).is_none() {
+        return "Span";
+    }
     match tag {
         "dl" | "dd" => "LBody",
         "dt" => "Lbl",
-        "blockquote" => "BlockQuote",
+        "blockquote" => "P",
         "figcaption" => "P",
-        "span" | "i" => "Span",
+        // A standalone block-styled inline element owns an anonymous
+        // paragraph. Within an emitted paragraph, heading or Link, the
+        // scoped owner above keeps its content inline. display:contents
+        // bypasses those owner scopes because it emits no container.
+        "span" | "i" | "a"
+            if matches!(style.display, DisplayMode::Block | DisplayMode::FlowRoot) =>
+        {
+            "P"
+        }
+        "span" | "i" | "a" => "Span",
         _ => "P",
     }
+}
+
+fn block_text_group_role(
+    style: &ComputedStyle,
+    direct_text_role: &'static str,
+) -> Option<&'static str> {
+    // The flattened text path already owns its paragraph. When inline
+    // styling requires a real line builder, retain that same logical owner
+    // around the complete anonymous run instead of emitting root-level Spans.
+    // Authored paragraphs/headings and atomic inline links have separate owners.
+    (matches!(style.display, DisplayMode::Block | DisplayMode::FlowRoot) && direct_text_role == "P")
+        .then_some(direct_text_role)
 }
 
 fn wrap_definition_list_item(children: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<LayoutItem> {
@@ -12570,7 +12980,41 @@ fn layout_children_to_flowables(
         DirectionMode::Ltr,
         TextAlign::Left,
         crate::flowable::Pagination::default(),
+        None,
     )
+}
+
+fn layout_cell_children_to_flowables(
+    items: Vec<LayoutItem>,
+    style: &ComputedStyle,
+) -> Vec<Box<dyn Flowable>> {
+    layout_children_to_flowables_with_options(
+        items,
+        None,
+        no_wrap(style),
+        true,
+        false,
+        style.direction,
+        text_align_from_style(style),
+        style.pagination,
+        None,
+    )
+}
+
+fn emit_inline_markers_without_line(
+    group: &mut Vec<(Box<dyn Flowable>, VerticalAlign)>,
+    out: &mut Vec<Box<dyn Flowable>>,
+) {
+    if group
+        .iter()
+        .all(|(child, _)| child.is_discardable_block_whitespace() || child.is_navigation_marker())
+    {
+        out.extend(
+            group
+                .drain(..)
+                .filter_map(|(child, _)| child.is_navigation_marker().then_some(child)),
+        );
+    }
 }
 
 fn layout_children_to_flowables_with_options(
@@ -12582,6 +13026,7 @@ fn layout_children_to_flowables_with_options(
     direction: DirectionMode,
     align: TextAlign,
     pagination: crate::flowable::Pagination,
+    text_group_role: Option<&'static str>,
 ) -> Vec<Box<dyn Flowable>> {
     let mut out: Vec<Box<dyn Flowable>> = Vec::new();
     let mut inline_group: Vec<(Box<dyn Flowable>, VerticalAlign)> = Vec::new();
@@ -12592,6 +13037,10 @@ fn layout_children_to_flowables_with_options(
                 flowable, valign, ..
             } => inline_group.push((flowable, valign)),
             LayoutItem::Block { flowable, .. } => {
+                // Formatting whitespace between blocks does not generate an
+                // anonymous box or interrupt sibling margin collapsing.
+                // Metadata/decorated wrappers remain non-discardable.
+                emit_inline_markers_without_line(&mut inline_group, &mut out);
                 if !inline_group.is_empty() {
                     out.push(Box::new(
                         InlineBlockLayoutFlowable::new_pt(
@@ -12601,6 +13050,7 @@ fn layout_children_to_flowables_with_options(
                         )
                         .with_css_pixel_line_snap(snap_line_height_to_css_pixel)
                         .with_anonymous_block_context(anonymous_block_context)
+                        .with_text_group_role(text_group_role)
                         .with_inline_bidi(direction, align)
                         .with_line_pagination(pagination)
                         .with_no_wrap(prevent_soft_wrap),
@@ -12612,11 +13062,16 @@ fn layout_children_to_flowables_with_options(
         }
     }
 
-    if !inline_group.is_empty() {
+    emit_inline_markers_without_line(&mut inline_group, &mut out);
+    if inline_group
+        .iter()
+        .any(|(child, _)| !child.is_discardable_block_whitespace())
+    {
         out.push(Box::new(
             InlineBlockLayoutFlowable::new_pt(inline_group, Pt::ZERO, forced_line_height)
                 .with_css_pixel_line_snap(snap_line_height_to_css_pixel)
                 .with_anonymous_block_context(anonymous_block_context)
+                .with_text_group_role(text_group_role)
                 .with_inline_bidi(direction, align)
                 .with_line_pagination(pagination)
                 .with_no_wrap(prevent_soft_wrap),
@@ -15000,7 +15455,7 @@ fn table_row_flowable_from_cells(
             perf,
             doc_id,
         );
-        let mut cell_flowables = layout_children_to_flowables(cell_items, None);
+        let mut cell_flowables = layout_cell_children_to_flowables(cell_items, &cell_style);
         let cell_flowable: Box<dyn Flowable> = if cell_flowables.is_empty() {
             Box::new(
                 ContainerFlowable::new_pt(
@@ -16313,6 +16768,15 @@ fn table_flowable(
                     .map(|s| parse_data_fb(s))
             })
             .unwrap_or_default();
+        let row_destinations = if anonymous_row {
+            None
+        } else {
+            counters.link_semantics.destinations(&row)
+        };
+        let group_destinations = row
+            .parent()
+            .filter(|parent| *parent != table_node)
+            .and_then(|parent| counters.link_semantics.destinations(&parent));
         let section_context = row.parent().and_then(|parent| {
             let parent_el = parent.as_element()?;
             if parent == table_node {
@@ -16541,6 +17005,11 @@ fn table_flowable(
                     spanning_cell
                         .as_rowspan_placeholder()
                         .with_table_semantics(counters.table_semantics.node(&row))
+                        .with_navigation_destinations(
+                            None,
+                            row_destinations.clone(),
+                            group_destinations.clone(),
+                        )
                         .with_row_collapsed(row_collapsed)
                         .with_row_border(
                             row_style.border_width,
@@ -16796,7 +17265,7 @@ fn table_flowable(
                     cell_items
                 };
 
-                let mut cell_flowables = layout_children_to_flowables(cell_items, None);
+                let mut cell_flowables = layout_cell_children_to_flowables(cell_items, &cell_style);
                 cell_content = if cell_flowables.is_empty() {
                     None
                 } else if cell_flowables.len() == 1 {
@@ -16983,6 +17452,11 @@ fn table_flowable(
             );
             let mut cell = cell
                 .with_table_semantics(counters.table_semantics.node(cell_child))
+                .with_navigation_destinations(
+                    counters.link_semantics.destinations(cell_child),
+                    row_destinations.clone(),
+                    group_destinations.clone(),
+                )
                 .with_border_styles(
                     border_styles.top,
                     border_styles.right,
@@ -17064,6 +17538,7 @@ fn table_flowable(
                         .map(Arc::<str>::from),
                 )
                 .with_hide_empty_cells(cell_style.empty_cells_hide)
+                .with_pagination(cell_style.pagination)
                 .with_establishes_abs_containing_block(establishes_abs_containing_block(cell_style))
                 .with_overflow_hidden(matches!(
                     cell_style.overflow,
@@ -17104,6 +17579,11 @@ fn table_flowable(
                     spanning_cell
                         .as_rowspan_placeholder()
                         .with_table_semantics(counters.table_semantics.node(&row))
+                        .with_navigation_destinations(
+                            None,
+                            row_destinations.clone(),
+                            group_destinations.clone(),
+                        )
                         .with_row_collapsed(row_collapsed)
                         .with_row_border(
                             row_style.border_width,

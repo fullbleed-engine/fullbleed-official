@@ -1,0 +1,917 @@
+{
+  "schema": "fullbleed.table-text-baselines.v1",
+  "at": "2026-10-23T06:52:16.694402+00:00",
+  "scope": "Neutral inline wrappers in the retained table controls. Glyph-origin and page/line comparisons, not universal pixel or browser parity.",
+  "parent_revision": "fd23a927c9abde68d9dc75d1c8f778c61233314c",
+  "candidate": {
+    "wheel_sha256": "ef8ff18284c10e039533d561a662f37f60f2ae4a87f36c0f7a696309911e7e62",
+    "native_sha256": "a64b7edacf5a4688f41e0035de6a4c9e14174c3f203d8c494fec107a529b3113",
+    "source_sha256": {
+      "src/html.rs": "4487e8d6480ce66a9f9b8111a319de1cbf52959cf53e168da83f9e1a040a1f15",
+      "src/flowable.rs": "466e458ae6dc33b7f2b21437e105d624cf71ebe8f97e896c1a0f5db49f270842",
+      "src/link_semantics.rs": "0f2e4552c7c659c3e4b7fab12c82c1e84ce688ad40b3e268df54f647bba33f56",
+      "src/lib.rs": "da1964363f26c336a5a3f241aae4a0136969bcedc40876d06ec84209f0db16f2",
+      "src/canvas.rs": "aed1b50ac04925689d6240a78bd2ff0822d7f7f1c6b89df68acb4fff6879ae1f",
+      "src/pdf.rs": "96c014659734bdc657cf2cadbcf55b5a20625b27bc25490085881c1b19aefd8c",
+      "src/pdf_table.rs": "a9fa967d1dbe7b918f62aad24e3d6dbe5ae8aa50ac599eaced99a14291a50c8e",
+      "src/pdf_links.rs": "176045fd9df1bc0bb033ceceaf5c053c8acd8f92cf9fe62734a030341231329e",
+      "src/pdf_link_geometry.rs": "159d0552fad65ed8f9cddce0565d718c42d2874fec086132ed7688ba5bd0cd85",
+      "src/finalize.rs": "06b0cb069a35905a926700a8266bc76578deea40e1c9f2b1531a149cb9727b71",
+      "src/finalize_links.rs": "d3cb169672157a47007d26ed3705c36f70ce4c31a5d5119372442b31f83aeeb9",
+      "src/finalize_clip.rs": "21059cde21072ccdd91a5d0462ea1ce26fb1073e1184678ec69b3faf973ec39d",
+      "src/finalize_versions.rs": "326e90f199c56fab554cae0d73686ddd0ef7930d541835e2418a4e7a32f06800",
+      "src/pdf_tagged_forms.rs": "059887083f970e64e4560b712b2a996c9fc04f6824256be7b0da637e2934ecb9",
+      "src/inline_opacity.rs": "37174fb9f5430af22dfb746e2a3f482ccbe889c2f5d4e94ce901d04b2469abd7",
+      "src/font.rs": "2bff42c9d00d988e26fed7f5380b59e3fee799955003ed0b3c99405d67377e55",
+      "src/authoring.rs": "c61820e58cc13e55d6fee81393a6a7caf0665281b09260c033d82d375232c7e6",
+      "src/frame.rs": "8a9977aedec47e96d439a34fe933ab262fb93aaa736b96ef24366d0a08131133",
+      "src/base14_metrics.rs": "c5a5d54073d9a94687af899cb3fe7594ab767e45200d690de2b98aa792200a94",
+      "src/pdf_encodings.rs": "380593a53f63a1ee436890700dd5e1c0e432e031636ac6eaee07cca5e41ff83e"
+    },
+    "unpublished": true,
+    "version_scope": "Local QA wheel reuses 2.6.0a13. The published alpha predates this work."
+  },
+  "checks": {
+    "native_tests": 1568,
+    "focused_python": {
+      "tests": 435,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "full_python": {
+      "tests": 1365,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "previous_candidate_alignment": {
+      "tests": 72,
+      "failures": 42,
+      "errors": 0,
+      "skipped": 0
+    },
+    "regular_table_pairs": {
+      "comparisons": 72,
+      "matching_origins": 72,
+      "tolerance_pt": 0.001,
+      "reader": "146.0.7665.0",
+      "max_dx_pt": 4.57763671875e-05,
+      "max_dy_pt": 0.0
+    },
+    "alignment_and_line_feeds": {
+      "comparisons": 156,
+      "clickable_glyphs": 900,
+      "max_dx_pt": 0.0,
+      "max_dy_pt": 0.0,
+      "reader": "146.0.7665.0"
+    },
+    "retained_authored": {
+      "cases": 185,
+      "byte_identical": 161,
+      "changed": [
+        {
+          "path": "destination-visibility/clip-compact-none.pdf",
+          "before_sha256": "f1a2d13c3ac6094a9dadc949b53bd94ed2947d473b03a16ffb639ca0d6ab0307",
+          "after_sha256": "80ffc515251cefc362fe1d52464064c86b38b713484cb69dba09c05b84dafa12",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "after_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "pdfium_extraction_order_unchanged": true
+            },
+            {
+              "page": 2,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "e406e342bfbdc51c0d2bf56a7d0bff4091017bd8c69f4ba8529718a4eebc4b60",
+              "after_pixel_sha256": "e406e342bfbdc51c0d2bf56a7d0bff4091017bd8c69f4ba8529718a4eebc4b60",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/clip-compact-pdfua1.pdf",
+          "before_sha256": "06adea531e06fdebd163c505fd0ff50bdec3a9ba7af7fe1c1696f4754bc1babb",
+          "after_sha256": "e78a2f07ac28758a2e19cd1487311dee1cd40b71f3bada2063ffa92d2165cbeb",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "after_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "pdfium_extraction_order_unchanged": true
+            },
+            {
+              "page": 2,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "e406e342bfbdc51c0d2bf56a7d0bff4091017bd8c69f4ba8529718a4eebc4b60",
+              "after_pixel_sha256": "e406e342bfbdc51c0d2bf56a7d0bff4091017bd8c69f4ba8529718a4eebc4b60",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/clip-compact-pdfua2.pdf",
+          "before_sha256": "e6ee4091ac2193242fddf0cfa311bb83c8e8827ef369ea05099eb6e926cd4c19",
+          "after_sha256": "6925a506adae7ac8689d80bc6c3bb6493ca1b0125de95c2e5b6dd4aedebaa62c",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "after_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "pdfium_extraction_order_unchanged": true
+            },
+            {
+              "page": 2,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "e406e342bfbdc51c0d2bf56a7d0bff4091017bd8c69f4ba8529718a4eebc4b60",
+              "after_pixel_sha256": "e406e342bfbdc51c0d2bf56a7d0bff4091017bd8c69f4ba8529718a4eebc4b60",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/clip-direct-none.pdf",
+          "before_sha256": "f60c5fb0f1690582bda7268fb8874f834a3582ae62e33dfa02f5363d626583f1",
+          "after_sha256": "7103532219a0aaaf79bf069301c5054b223322885141094facaec8bdd15f9d1f",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "after_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/clip-direct-pdfua1.pdf",
+          "before_sha256": "e046783630cb04c2897c758070cc50706f9b813f75e4515e2ef65c7ba9c3e286",
+          "after_sha256": "5748edebe68871bafe8644620c6ba820322fb72fbb090dfff0d8d118e32fc058",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "after_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/clip-direct-pdfua2.pdf",
+          "before_sha256": "4930c17a38d3a364718a4bc38f0cf69983b19f6e7bf714e7ae02a5da6a621a08",
+          "after_sha256": "8ec281a2b01d0675685328354d158520f0c956acd29800477a8b6554c001a2ed",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "after_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/overflow-compact-none.pdf",
+          "before_sha256": "90cf88e85c839a7e1cae17f4384e685bb40832751857c3ddb610350bb6f4259b",
+          "after_sha256": "ba949b92c888428fdb6151d2424c4f16c8e86c47edbecd8786fc6288dad69792",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "1b5c5770a651eae6f1b34b5563604e4457cb9179ae563b6cdc593c47cc1a0f2d",
+              "after_pixel_sha256": "1b5c5770a651eae6f1b34b5563604e4457cb9179ae563b6cdc593c47cc1a0f2d",
+              "pdfium_extraction_order_unchanged": false,
+              "pdfium_text_before": "AdaRowCellAfterInside",
+              "pdfium_text_after": "AdaRowCellInsideAfter",
+              "unchanged_clip_aware_mupdf_text": true
+            },
+            {
+              "page": 2,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "abe053b67381594a947049cb4f83f617adbc8266d501a1fb49372f1f995cfcb2",
+              "after_pixel_sha256": "abe053b67381594a947049cb4f83f617adbc8266d501a1fb49372f1f995cfcb2",
+              "pdfium_extraction_order_unchanged": false,
+              "pdfium_text_before": "GraceRowCellAfterInside",
+              "pdfium_text_after": "GraceRowCellInsideAfter",
+              "unchanged_clip_aware_mupdf_text": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/overflow-compact-pdfua1.pdf",
+          "before_sha256": "732575660edfd861464211b5ce28bafdfe67511dd0db6ddc2f1fd236206fcfa8",
+          "after_sha256": "1c64208ccf26fd734b773d3a21cb5dc94b6324e3dcbcb2a38d368825f4169f5a",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "1b5c5770a651eae6f1b34b5563604e4457cb9179ae563b6cdc593c47cc1a0f2d",
+              "after_pixel_sha256": "1b5c5770a651eae6f1b34b5563604e4457cb9179ae563b6cdc593c47cc1a0f2d",
+              "pdfium_extraction_order_unchanged": false,
+              "pdfium_text_before": "AdaRowCellAfterInside",
+              "pdfium_text_after": "AdaRowCellInsideAfter",
+              "unchanged_clip_aware_mupdf_text": true
+            },
+            {
+              "page": 2,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "abe053b67381594a947049cb4f83f617adbc8266d501a1fb49372f1f995cfcb2",
+              "after_pixel_sha256": "abe053b67381594a947049cb4f83f617adbc8266d501a1fb49372f1f995cfcb2",
+              "pdfium_extraction_order_unchanged": false,
+              "pdfium_text_before": "GraceRowCellAfterInside",
+              "pdfium_text_after": "GraceRowCellInsideAfter",
+              "unchanged_clip_aware_mupdf_text": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/overflow-compact-pdfua2.pdf",
+          "before_sha256": "3a4180038b080401ce4bc3ee26148075e5f2996b9e2d653df8e92e70227e874f",
+          "after_sha256": "1bf2e11a0bcfd1e1cc687cb8423feb825188d8462b3c2b8f00640778d24faebf",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "1b5c5770a651eae6f1b34b5563604e4457cb9179ae563b6cdc593c47cc1a0f2d",
+              "after_pixel_sha256": "1b5c5770a651eae6f1b34b5563604e4457cb9179ae563b6cdc593c47cc1a0f2d",
+              "pdfium_extraction_order_unchanged": false,
+              "pdfium_text_before": "AdaRowCellAfterInside",
+              "pdfium_text_after": "AdaRowCellInsideAfter",
+              "unchanged_clip_aware_mupdf_text": true
+            },
+            {
+              "page": 2,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "abe053b67381594a947049cb4f83f617adbc8266d501a1fb49372f1f995cfcb2",
+              "after_pixel_sha256": "abe053b67381594a947049cb4f83f617adbc8266d501a1fb49372f1f995cfcb2",
+              "pdfium_extraction_order_unchanged": false,
+              "pdfium_text_before": "GraceRowCellAfterInside",
+              "pdfium_text_after": "GraceRowCellInsideAfter",
+              "unchanged_clip_aware_mupdf_text": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/overflow-direct-none.pdf",
+          "before_sha256": "9fd0e724a96a1c90dddd40a5730f33b31f2c036e21e9ac7136fb796dfe91520f",
+          "after_sha256": "57110ece0abbb6e642337970954fc09ed1b05a4207e40b4c6b61a13748fd3968",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "1b5c5770a651eae6f1b34b5563604e4457cb9179ae563b6cdc593c47cc1a0f2d",
+              "after_pixel_sha256": "1b5c5770a651eae6f1b34b5563604e4457cb9179ae563b6cdc593c47cc1a0f2d",
+              "pdfium_extraction_order_unchanged": false,
+              "pdfium_text_before": "AdaRowCellAfterInside",
+              "pdfium_text_after": "AdaRowCellInsideAfter",
+              "unchanged_clip_aware_mupdf_text": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/overflow-direct-pdfua1.pdf",
+          "before_sha256": "90be5088dd9c4e8fcb9cf4f0693e50f5038a16d38a17eb331c1fe0f6918064c7",
+          "after_sha256": "7966fee7ce032efc3b7d19289c4cdae175188ae3f2d9168cc74e9d2622ca97f0",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "1b5c5770a651eae6f1b34b5563604e4457cb9179ae563b6cdc593c47cc1a0f2d",
+              "after_pixel_sha256": "1b5c5770a651eae6f1b34b5563604e4457cb9179ae563b6cdc593c47cc1a0f2d",
+              "pdfium_extraction_order_unchanged": false,
+              "pdfium_text_before": "AdaRowCellAfterInside",
+              "pdfium_text_after": "AdaRowCellInsideAfter",
+              "unchanged_clip_aware_mupdf_text": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/overflow-direct-pdfua2.pdf",
+          "before_sha256": "fc43127fff7e779263b300c515778e725ab3dcb5f421ad4767658c0b026344d2",
+          "after_sha256": "57af14a153392cf2d4e715be54ad9dcb17cb66fc35a72798d73446d48a741f85",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "1b5c5770a651eae6f1b34b5563604e4457cb9179ae563b6cdc593c47cc1a0f2d",
+              "after_pixel_sha256": "1b5c5770a651eae6f1b34b5563604e4457cb9179ae563b6cdc593c47cc1a0f2d",
+              "pdfium_extraction_order_unchanged": false,
+              "pdfium_text_before": "AdaRowCellAfterInside",
+              "pdfium_text_after": "AdaRowCellInsideAfter",
+              "unchanged_clip_aware_mupdf_text": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/transparent-compact-none.pdf",
+          "before_sha256": "1f1328f489bc4ed2211bfcf519cdc345c8dfc7894377b785331dc6c3717ee2b8",
+          "after_sha256": "51cdd8f1d8e75fc4197098566536977d8120894bc27cbd388f92b7033f64c4a8",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "after_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "pdfium_extraction_order_unchanged": true
+            },
+            {
+              "page": 2,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "e406e342bfbdc51c0d2bf56a7d0bff4091017bd8c69f4ba8529718a4eebc4b60",
+              "after_pixel_sha256": "e406e342bfbdc51c0d2bf56a7d0bff4091017bd8c69f4ba8529718a4eebc4b60",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/transparent-compact-pdfua1.pdf",
+          "before_sha256": "7368e21b2c03e97eba631aa8cad54f2185662bdc6e8a7e3f88d6f9a70b6349a0",
+          "after_sha256": "e22b53a595adde0a6bb8333445b5a7bbc2bbc005250dcd99255b107065045f26",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "after_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "pdfium_extraction_order_unchanged": true
+            },
+            {
+              "page": 2,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "e406e342bfbdc51c0d2bf56a7d0bff4091017bd8c69f4ba8529718a4eebc4b60",
+              "after_pixel_sha256": "e406e342bfbdc51c0d2bf56a7d0bff4091017bd8c69f4ba8529718a4eebc4b60",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/transparent-compact-pdfua2.pdf",
+          "before_sha256": "5d463120c9cc14ac7b55ceb116d4fd7736e30fd5d5664fbc08718539bfe95527",
+          "after_sha256": "71b14a0ecfdcd65da3146d973231959b6cea330d10f0a8a6ed8062af40ec606c",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "after_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "pdfium_extraction_order_unchanged": true
+            },
+            {
+              "page": 2,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "e406e342bfbdc51c0d2bf56a7d0bff4091017bd8c69f4ba8529718a4eebc4b60",
+              "after_pixel_sha256": "e406e342bfbdc51c0d2bf56a7d0bff4091017bd8c69f4ba8529718a4eebc4b60",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/transparent-direct-none.pdf",
+          "before_sha256": "1821b0d9cf06a671d30aecccc72fb6c63e66874571204198acf0f75fa784cfdf",
+          "after_sha256": "29bde7849444ebd50555d294479947e3bb5178baee7c31d100e3daf4e0dd9e46",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "after_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/transparent-direct-pdfua1.pdf",
+          "before_sha256": "1b4a343b0f85669a6dcf379554dab202ad8a8e1ff05941b0c769cfb166810026",
+          "after_sha256": "3a6624bac317493b9075f4f8163728e7be0bfa1bc03242043d3b2489aa167551",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "after_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/transparent-direct-pdfua2.pdf",
+          "before_sha256": "8dc9b7f2e72d27a4afe80c26350773cdddd6034206531a7bae26d5de4187b74b",
+          "after_sha256": "4cc688eb6e1ce21c83d6bd547894d03f419ba90d3c65d7e87e2e265d02dc83fa",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": true,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "after_pixel_sha256": "16429ba673abac7d955211743fa60d914dce044ad8235cf22954879931205507",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/visible-compact-none.pdf",
+          "before_sha256": "1b69b9a48e7e9878678993e70fa585b469a6d6bf515eb0da1115f88ec5f3832e",
+          "after_sha256": "9eee6f4c8e0e3784e847e48ffc770a8a8f07ea782c34eafff3ce5bd1a377a390",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": false,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "41ecd330e4da1d266185c7c0d4947cf819d345268c5badfe9b4944c786ad9c52",
+              "after_pixel_sha256": "fb6a4280d96cb25353d45dd418a70c8708b0c32277f348ea88dee7766ce70e49",
+              "pdfium_extraction_order_unchanged": true
+            },
+            {
+              "page": 2,
+              "exact_pixels": false,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "bf49284f9c1330327cb39898b1c63dbec426e66ecf95476a520f0b083cdb2fac",
+              "after_pixel_sha256": "ee3b829d209b06eb857a8385cd9913f866d2c5c29fac1d59d8b520bd07eedd7f",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/visible-compact-pdfua1.pdf",
+          "before_sha256": "165a6717ba44dd587749ca1d4054a2daadb32fafb02eccd3e9fa8aaf841d1f99",
+          "after_sha256": "4720e8c5a781195460020e01ae91b9e910503e4463506c79b5f99d2c3e0192f7",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": false,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "41ecd330e4da1d266185c7c0d4947cf819d345268c5badfe9b4944c786ad9c52",
+              "after_pixel_sha256": "fb6a4280d96cb25353d45dd418a70c8708b0c32277f348ea88dee7766ce70e49",
+              "pdfium_extraction_order_unchanged": true
+            },
+            {
+              "page": 2,
+              "exact_pixels": false,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "bf49284f9c1330327cb39898b1c63dbec426e66ecf95476a520f0b083cdb2fac",
+              "after_pixel_sha256": "ee3b829d209b06eb857a8385cd9913f866d2c5c29fac1d59d8b520bd07eedd7f",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/visible-compact-pdfua2.pdf",
+          "before_sha256": "768f4ceea4a46bf1dbdbaa5a24651e16815b354d94b60bfabb01b7afd18b54c9",
+          "after_sha256": "34e844bb1660cb02200970186cf0ed0f5fce78660cb9f6a220e90e22c809491c",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": false,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "41ecd330e4da1d266185c7c0d4947cf819d345268c5badfe9b4944c786ad9c52",
+              "after_pixel_sha256": "fb6a4280d96cb25353d45dd418a70c8708b0c32277f348ea88dee7766ce70e49",
+              "pdfium_extraction_order_unchanged": true
+            },
+            {
+              "page": 2,
+              "exact_pixels": false,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "bf49284f9c1330327cb39898b1c63dbec426e66ecf95476a520f0b083cdb2fac",
+              "after_pixel_sha256": "ee3b829d209b06eb857a8385cd9913f866d2c5c29fac1d59d8b520bd07eedd7f",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/visible-direct-none.pdf",
+          "before_sha256": "7f53867aaa1b60521b06dfa4f28b99d5a372268fc8a66d47f4102f84207e139a",
+          "after_sha256": "3120a84c1876c870e6fa94f3d5b07019f6ef158362c02f31f29f2a5039aa4368",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": false,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "41ecd330e4da1d266185c7c0d4947cf819d345268c5badfe9b4944c786ad9c52",
+              "after_pixel_sha256": "fb6a4280d96cb25353d45dd418a70c8708b0c32277f348ea88dee7766ce70e49",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/visible-direct-pdfua1.pdf",
+          "before_sha256": "50e38ab5e82edd985c317631569942eba4f40fb2859a89094d0da89e39860099",
+          "after_sha256": "fb54f3ac6f9df95cb13859d3604f4d5ee8e70a30ca48d5a7ccf2a7e04d114bd1",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": false,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "41ecd330e4da1d266185c7c0d4947cf819d345268c5badfe9b4944c786ad9c52",
+              "after_pixel_sha256": "fb6a4280d96cb25353d45dd418a70c8708b0c32277f348ea88dee7766ce70e49",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        },
+        {
+          "path": "destination-visibility/visible-direct-pdfua2.pdf",
+          "before_sha256": "5de1367e9c8a51a6a25f45d8f428330bb594163486febe80aa9c647740eea69e",
+          "after_sha256": "6ebf8f68c6e8daa87173cb699955a2c29cd1d948ec78935dde290b7e3e72607c",
+          "bytes_identical": false,
+          "pages": [
+            {
+              "page": 1,
+              "exact_pixels": false,
+              "max_dx_pt": 0.0,
+              "max_dy_pt": 0.5,
+              "before_pixel_sha256": "41ecd330e4da1d266185c7c0d4947cf819d345268c5badfe9b4944c786ad9c52",
+              "after_pixel_sha256": "fb6a4280d96cb25353d45dd418a70c8708b0c32277f348ea88dee7766ce70e49",
+              "pdfium_extraction_order_unchanged": true
+            }
+          ],
+          "actions_unchanged": true
+        }
+      ],
+      "review": {
+        "at": "2026-10-23T06:51:35.207154+00:00",
+        "changed_pdfs": 24,
+        "visible_corrections": 6,
+        "nonpainting_changes": 18,
+        "plain_controls": [
+          {
+            "file": "visible-direct-none.pdf",
+            "pages": 1,
+            "plain_sha256": "0e0758c0364098b0d03f25c9b220f463089e5c8620fc0ec7042cdf875283ad60",
+            "linked_sha256": "3120a84c1876c870e6fa94f3d5b07019f6ef158362c02f31f29f2a5039aa4368",
+            "identical_pixels": true
+          },
+          {
+            "file": "visible-compact-none.pdf",
+            "pages": 2,
+            "plain_sha256": "37196d98100b03d85eb4575bc3df19f2fc9f0042b004fca77d601ed39c30c004",
+            "linked_sha256": "9eee6f4c8e0e3784e847e48ffc770a8a8f07ea782c34eafff3ce5bd1a377a390",
+            "identical_pixels": true
+          },
+          {
+            "file": "visible-direct-pdfua1.pdf",
+            "pages": 1,
+            "plain_sha256": "fe62f7d916204902a01c848e168281b84adf1d7272d55ce5265fc348382c3d8c",
+            "linked_sha256": "fb54f3ac6f9df95cb13859d3604f4d5ee8e70a30ca48d5a7ccf2a7e04d114bd1",
+            "identical_pixels": true
+          },
+          {
+            "file": "visible-compact-pdfua1.pdf",
+            "pages": 2,
+            "plain_sha256": "9d6c54b99da29c63e127a9ba4dfa7c9870054e478c174c84b2b47f568387e137",
+            "linked_sha256": "4720e8c5a781195460020e01ae91b9e910503e4463506c79b5f99d2c3e0192f7",
+            "identical_pixels": true
+          },
+          {
+            "file": "visible-direct-pdfua2.pdf",
+            "pages": 1,
+            "plain_sha256": "4ca0409f4b4150933553a982ed9ee1005b0d4d339ea64dc08d00e35e5938387c",
+            "linked_sha256": "6ebf8f68c6e8daa87173cb699955a2c29cd1d948ec78935dde290b7e3e72607c",
+            "identical_pixels": true
+          },
+          {
+            "file": "visible-compact-pdfua2.pdf",
+            "pages": 2,
+            "plain_sha256": "629c5b3940e1de3b5a24f0dc3fe133075023ec4f5085549eace21bdd247992f1",
+            "linked_sha256": "34e844bb1660cb02200970186cf0ed0f5fce78660cb9f6a220e90e22c809491c",
+            "identical_pixels": true
+          }
+        ],
+        "visible_before_after_pngs_reviewed": [
+          "destination-visibility/visible-direct-none/before-1.png",
+          "destination-visibility/visible-direct-none/after-1.png"
+        ],
+        "observations": [
+          "All 24 changed PDFs are the existing destination-visibility fixtures. Actions and semantic target paths are unchanged; only the Inside text baseline moves by 0.5pt.",
+          "Six visible cases match newly rendered plain-text controls in every pixel. Eighteen clipped/transparent cases retain identical pixels.",
+          "PDFium extraction reorders fully clipped Inside text in overflow controls; clip-aware MuPDF text and visible pixels are unchanged. The reading-order observation remains recorded."
+        ]
+      }
+    },
+    "composition": {
+      "cases": 127,
+      "identical": 127,
+      "changed": [],
+      "baseline": "writer72all",
+      "candidate": "writer74all"
+    },
+    "ua2": [
+      {
+        "name": "space-regions-pdfua2-compact.pdf",
+        "pdf_sha256": "c8dbccc57ef8af37fe0c59d0a6e371ea3c9f3821309388127d305d0ce665a5d8",
+        "exit_code": 0,
+        "compliant": true,
+        "failed_rules": 0
+      },
+      {
+        "name": "space-regions-pdfua2-compiled.pdf",
+        "pdf_sha256": "eaa6e37f55052f039b33da9d25ad793d6df24a85a22e3f7434ce8d2575c769a3",
+        "exit_code": 0,
+        "compliant": true,
+        "failed_rules": 0
+      },
+      {
+        "name": "space-regions-pdfua2-direct.pdf",
+        "pdf_sha256": "eaa6e37f55052f039b33da9d25ad793d6df24a85a22e3f7434ce8d2575c769a3",
+        "exit_code": 0,
+        "compliant": true,
+        "failed_rules": 0
+      }
+    ],
+    "first_page_pixels": {
+      "at": "2026-10-23T06:29:56.093290+00:00",
+      "reader": "146.0.7665.0",
+      "cases": [
+        {
+          "font": "Helvetica",
+          "page": 1,
+          "dpi": 288,
+          "pdf_sha256": [
+            "7635ce454e3c40b99528410682d720352e4b624e24ca6c15f1a239be8ceb8936",
+            "5b44e8fdadb48f4ef3a8d89e8f475f3d9a8b3339b46684d2c4d3a919d15c2329"
+          ],
+          "changed_pixels": 649,
+          "plain_pixel_sha256": "64884aa05fe7905b925bee19ca60e57b824c23ec05ef36b81f3ecb922e3012a9",
+          "linked_pixel_sha256": "ca226f8b9fb63150423ab37cfd8c0696bd065b8391eb546b2aadb34fba5a7318"
+        },
+        {
+          "font": "Courier",
+          "page": 1,
+          "dpi": 288,
+          "pdf_sha256": [
+            "ba3106ccd3059d95c464fe92ae9a0457e59436a0a9e074deff4d0b8d48a3c3e3",
+            "847b8be98232b3f050b810d26f31372b231668d93a5ba152ebd33ff7247adb3c"
+          ],
+          "changed_pixels": 43,
+          "plain_pixel_sha256": "680c89002a28171a54fb7ba4130a20333f23e6a8f6ef8fb4851fc925a4974841",
+          "linked_pixel_sha256": "d5ae2cff5d212737735eb4a17098001a887bd7f0eaf963572e5ca1a85016b2f5"
+        },
+        {
+          "font": "Noto-Sans",
+          "page": 1,
+          "dpi": 288,
+          "pdf_sha256": [
+            "4dcc8e945f425c9331e308ffbd3ea7fc05dd5685c538398e55638d497061d54c",
+            "51ff81b5f5d8d95eddb16333b39988ce9e77f967b42a4db990569de9494354d6"
+          ],
+          "changed_pixels": 0,
+          "plain_pixel_sha256": "2afca04da614fa3970675bc56750dee5954db0505cbe9669b7a5083ce4baf5ed",
+          "linked_pixel_sha256": "2afca04da614fa3970675bc56750dee5954db0505cbe9669b7a5083ce4baf5ed"
+        }
+      ]
+    },
+    "fractional_base14_horizontal": [
+      {
+        "font": "Helvetica",
+        "mode": "direct",
+        "within_candidate": {
+          "linkwriter23": {
+            "max_dx_pt": 0.00262451171875,
+            "max_dy_pt": 0.5
+          },
+          "linkwriter25": {
+            "max_dx_pt": 0.00262451171875,
+            "max_dy_pt": 0.0
+          }
+        },
+        "candidate_change_dx_pt": 0.0
+      },
+      {
+        "font": "Helvetica",
+        "mode": "compiled",
+        "within_candidate": {
+          "linkwriter23": {
+            "max_dx_pt": 0.00262451171875,
+            "max_dy_pt": 0.5
+          },
+          "linkwriter25": {
+            "max_dx_pt": 0.00262451171875,
+            "max_dy_pt": 0.0
+          }
+        },
+        "candidate_change_dx_pt": 0.0
+      },
+      {
+        "font": "Helvetica",
+        "mode": "compact",
+        "within_candidate": {
+          "linkwriter23": {
+            "max_dx_pt": 0.00262451171875,
+            "max_dy_pt": 0.5
+          },
+          "linkwriter25": {
+            "max_dx_pt": 0.00262451171875,
+            "max_dy_pt": 0.0
+          }
+        },
+        "candidate_change_dx_pt": 0.0
+      },
+      {
+        "font": "Times-Roman",
+        "mode": "direct",
+        "within_candidate": {
+          "linkwriter23": {
+            "max_dx_pt": 0.00494384765625,
+            "max_dy_pt": 0.5
+          },
+          "linkwriter25": {
+            "max_dx_pt": 0.00494384765625,
+            "max_dy_pt": 0.0
+          }
+        },
+        "candidate_change_dx_pt": 0.0
+      },
+      {
+        "font": "Times-Roman",
+        "mode": "compiled",
+        "within_candidate": {
+          "linkwriter23": {
+            "max_dx_pt": 0.00494384765625,
+            "max_dy_pt": 0.5
+          },
+          "linkwriter25": {
+            "max_dx_pt": 0.00494384765625,
+            "max_dy_pt": 0.0
+          }
+        },
+        "candidate_change_dx_pt": 0.0
+      },
+      {
+        "font": "Times-Roman",
+        "mode": "compact",
+        "within_candidate": {
+          "linkwriter23": {
+            "max_dx_pt": 0.00494384765625,
+            "max_dy_pt": 0.5
+          },
+          "linkwriter25": {
+            "max_dx_pt": 0.00494384765625,
+            "max_dy_pt": 0.0
+          }
+        },
+        "candidate_change_dx_pt": 0.0
+      },
+      {
+        "font": "Courier",
+        "mode": "direct",
+        "within_candidate": {
+          "linkwriter23": {
+            "max_dx_pt": 0.0036163330078125,
+            "max_dy_pt": 0.5
+          },
+          "linkwriter25": {
+            "max_dx_pt": 0.0036163330078125,
+            "max_dy_pt": 0.0
+          }
+        },
+        "candidate_change_dx_pt": 0.0
+      },
+      {
+        "font": "Courier",
+        "mode": "compiled",
+        "within_candidate": {
+          "linkwriter23": {
+            "max_dx_pt": 0.0036163330078125,
+            "max_dy_pt": 0.5
+          },
+          "linkwriter25": {
+            "max_dx_pt": 0.0036163330078125,
+            "max_dy_pt": 0.0
+          }
+        },
+        "candidate_change_dx_pt": 0.0
+      },
+      {
+        "font": "Courier",
+        "mode": "compact",
+        "within_candidate": {
+          "linkwriter23": {
+            "max_dx_pt": 0.0036163330078125,
+            "max_dy_pt": 0.5
+          },
+          "linkwriter25": {
+            "max_dx_pt": 0.0036163330078125,
+            "max_dy_pt": 0.0
+          }
+        },
+        "candidate_change_dx_pt": 0.0
+      }
+    ]
+  },
+  "limits": [
+    "Tests use neutral anchor styles. Default link color/decoration can deliberately change paint.",
+    "Three sampled fonts are not a universal typography guarantee; Base-14 raster differences remain in the retained PDFium controls.",
+    "Fractional-size Base-14 horizontal differences remain below 0.005pt in the nine reviewed cases and are unchanged from the preceding wheel. The wrapping regression asserts vertical baselines; the tall-cell regression also asserts horizontal origins.",
+    "The separate full CSS corpus still requires current-commit review. Comparator and reference classifications are unchanged."
+  ]
+}

@@ -9,6 +9,11 @@ use crate::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+#[path = "finalize_links.rs"]
+mod links;
+#[path = "finalize_versions.rs"]
+mod versions;
+
 pub const META_PAGE_TEMPLATE_KEY: &str = "fb.page_template";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,17 +134,17 @@ fn preflight_finalize_pdf(
 }
 
 fn page_box(doc: &LoDocument, page_id: LoObjectId) -> Vec<LoObject> {
-    if let Ok(arr) = doc
-        .get_page_attribute(page_id, b"CropBox")
-        .and_then(LoObject::as_array)
-    {
-        return arr.clone();
-    }
-    if let Ok(arr) = doc
-        .get_page_attribute(page_id, b"MediaBox")
-        .and_then(LoObject::as_array)
-    {
-        return arr.clone();
+    for key in [b"CropBox".as_slice(), b"MediaBox".as_slice()] {
+        let Ok(value) = doc.get_page_attribute(page_id, key) else {
+            continue;
+        };
+        let Ok(value) = resolve_finalize_object(doc, value) else {
+            continue;
+        };
+        let Ok(array) = value.as_array() else {
+            continue;
+        };
+        return array.clone();
     }
     vec![0.into(), 0.into(), 612.into(), 792.into()]
 }
@@ -188,9 +193,15 @@ fn resolve_finalize_object<'a>(
     doc: &'a LoDocument,
     mut obj: &'a LoObject,
 ) -> Result<&'a LoObject, FullBleedError> {
+    let mut seen = BTreeSet::new();
     loop {
         match obj {
             LoObject::Reference(id) => {
+                if !seen.insert(*id) {
+                    return Err(FullBleedError::InvalidConfiguration(
+                        "pdf compose error: cyclic object reference".to_string(),
+                    ));
+                }
                 obj = doc.get_object(*id).map_err(pdf_err)?;
             }
             _ => return Ok(obj),
@@ -226,63 +237,22 @@ fn annotation_allowed_for_mode(
     }
 }
 
-fn clone_template_annotations_for_output_page(
-    doc: &mut LoDocument,
-    template_page: &LoDictionary,
-    output_page_id: LoObjectId,
-    mode: ComposeAnnotationMode,
-) -> Result<Option<LoObject>, FullBleedError> {
-    if mode == ComposeAnnotationMode::None {
-        return Ok(None);
-    }
-
-    let annots_obj = match template_page.get(b"Annots") {
-        Ok(obj) => obj,
-        Err(_) => return Ok(None),
-    };
-
-    let annots_arr = match resolve_finalize_object(doc, annots_obj)? {
-        LoObject::Array(arr) => arr.clone(),
-        _ => return Ok(None),
-    };
-
-    let mut out_annots: Vec<LoObject> = Vec::new();
-    for annot in annots_arr {
-        let annot_dict = match resolve_finalize_object(doc, &annot)? {
-            LoObject::Dictionary(d) => d.clone(),
-            LoObject::Stream(s) => s.dict.clone(),
-            _ => continue,
-        };
-
-        if !annotation_allowed_for_mode(mode, doc, &annot_dict) {
-            continue;
-        }
-
-        let mut cloned = annot_dict;
-        cloned.set("P", LoObject::Reference(output_page_id));
-        let new_annot_id = doc.add_object(LoObject::Dictionary(cloned));
-        out_annots.push(LoObject::Reference(new_annot_id));
-    }
-
-    if out_annots.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(LoObject::Array(out_annots)))
-    }
-}
-
 fn import_document_objects(
     dst: &mut LoDocument,
     mut src: LoDocument,
-) -> Result<Vec<LoObjectId>, FullBleedError> {
+) -> Result<links::ImportedDocument, FullBleedError> {
     let start_id = dst.max_id + 1;
     src.renumber_objects_with(start_id);
     let page_ids: Vec<LoObjectId> = src.get_pages().values().copied().collect();
+    let destinations = links::NamedDestinations::read(&src)?;
     if src.max_id > dst.max_id {
         dst.max_id = src.max_id;
     }
     dst.objects.extend(src.objects);
-    Ok(page_ids)
+    Ok(links::ImportedDocument {
+        pages: page_ids,
+        destinations,
+    })
 }
 
 pub fn stamp_overlay_on_template_pdf(
@@ -293,11 +263,17 @@ pub fn stamp_overlay_on_template_pdf(
     dx: f32,
     dy: f32,
 ) -> Result<FinalizeStampSummary, FullBleedError> {
+    if !dx.is_finite() || !dy.is_finite() {
+        return Err(FullBleedError::InvalidConfiguration(
+            "stamp has a non-finite placement offset".to_string(),
+        ));
+    }
     let template_meta = preflight_finalize_pdf(template_pdf, "template")?;
     let overlay_meta = preflight_finalize_pdf(overlay_pdf, "overlay")?;
 
     let mut template = LoDocument::load(template_pdf).map_err(pdf_err)?;
-    let mut overlay = LoDocument::load(overlay_pdf).map_err(pdf_err)?;
+    let overlay = LoDocument::load(overlay_pdf).map_err(pdf_err)?;
+    let mut requirements = versions::Requirements::read(&template)?;
 
     let template_pages = template.get_pages();
     let template_count = template_meta.page_count;
@@ -307,17 +283,27 @@ pub fn stamp_overlay_on_template_pdf(
         None => default_page_map(template_count, overlay_count)?,
     };
     validate_page_map(&mapping, template_count, overlay_count)?;
-
-    let start_id = template.max_id + 1;
-    overlay.renumber_objects_with(start_id);
-    let overlay_pages = overlay.get_pages();
-    if overlay.max_id > template.max_id {
-        template.max_id = overlay.max_id;
+    if !mapping.is_empty() {
+        requirements.include(&overlay)?;
     }
-    template.objects.extend(overlay.objects);
+    links::normalize_template_navigation(&mut template)?;
 
+    let overlay = import_document_objects(&mut template, overlay)?;
     let template_ids: Vec<LoObjectId> = template_pages.values().copied().collect();
-    let overlay_ids: Vec<LoObjectId> = overlay_pages.values().copied().collect();
+    let overlay_ids = &overlay.pages;
+    let mut placements = links::PagePlacements::new();
+    let output_placements: Vec<_> = mapping
+        .iter()
+        .map(|(tpl_i, ovl_i)| {
+            links::register_placement(
+                &mut placements,
+                overlay_ids[*ovl_i],
+                template_ids[*tpl_i],
+                dx,
+                dy,
+            )
+        })
+        .collect();
 
     for (out_idx, (tpl_i, ovl_i)) in mapping.iter().enumerate() {
         let template_page_id = template_ids[*tpl_i];
@@ -359,8 +345,38 @@ pub fn stamp_overlay_on_template_pdf(
         template
             .add_page_contents(template_page_id, do_content)
             .map_err(pdf_err)?;
+        let output_box = page_box(&template, template_page_id);
+        let added = links::clone_annotations(
+            &mut template,
+            overlay_page_id,
+            output_placements[out_idx],
+            ComposeAnnotationMode::LinkOnly,
+            &placements,
+            &overlay.destinations,
+            &output_box,
+        )?;
+        if !added.is_empty() {
+            let page = template
+                .get_object(template_page_id)
+                .and_then(LoObject::as_dict)
+                .map_err(pdf_err)?;
+            let mut annotations = match page.get(b"Annots") {
+                Ok(value) => resolve_finalize_object(&template, value)?
+                    .as_array()
+                    .map_err(pdf_err)?
+                    .clone(),
+                Err(_) => Vec::new(),
+            };
+            annotations.extend(added);
+            template
+                .get_object_mut(template_page_id)
+                .and_then(LoObject::as_dict_mut)
+                .map_err(pdf_err)?
+                .set("Annots", LoObject::Array(annotations));
+        }
     }
 
+    requirements.apply(&mut template)?;
     template.prune_objects();
     template.renumber_objects();
     template.compress();
@@ -405,7 +421,10 @@ pub fn compose_overlay_with_template_catalog_with_annotation_mode(
     }
 
     let mut composed = LoDocument::with_version("1.7");
-    let mut template_pages_by_id: BTreeMap<String, Vec<LoObjectId>> = BTreeMap::new();
+    let mut requirements = versions::Requirements::new("1.7")?;
+    let mut templates: BTreeMap<String, links::ImportedDocument> = BTreeMap::new();
+    let required_templates: BTreeSet<&str> =
+        plan.iter().map(|item| item.template_id.as_str()).collect();
 
     for (template_id, asset) in &catalog.by_id {
         let report = preflight_finalize_pdf(&asset.pdf_path, "template")?;
@@ -419,61 +438,81 @@ pub fn compose_overlay_with_template_catalog_with_annotation_mode(
         }
 
         let src = LoDocument::load(&asset.pdf_path).map_err(pdf_err)?;
-        let page_ids = import_document_objects(&mut composed, src)?;
+        if required_templates.contains(template_id.as_str()) {
+            requirements.include(&src)?;
+        }
+        let imported = import_document_objects(&mut composed, src)?;
         if let Some(expected) = asset.page_count {
-            if expected != page_ids.len() {
+            if expected != imported.pages.len() {
                 return Err(FullBleedError::InvalidConfiguration(format!(
                     "template page count mismatch for template_id={}: expected {} found {}",
                     template_id,
                     expected,
-                    page_ids.len()
+                    imported.pages.len()
                 )));
             }
         }
-        template_pages_by_id.insert(template_id.clone(), page_ids);
+        templates.insert(template_id.clone(), imported);
     }
 
     preflight_finalize_pdf(overlay_pdf, "overlay")?;
     let overlay_src = LoDocument::load(overlay_pdf).map_err(pdf_err)?;
-    let overlay_pages = import_document_objects(&mut composed, overlay_src)?;
+    requirements.include(&overlay_src)?;
+    let overlay = import_document_objects(&mut composed, overlay_src)?;
 
     for (idx, item) in plan.iter().enumerate() {
-        let Some(template_pages) = template_pages_by_id.get(&item.template_id) else {
+        let Some(template) = templates.get(&item.template_id) else {
             return Err(FullBleedError::InvalidConfiguration(format!(
                 "plan item {} references unknown template_id: {}",
                 idx, item.template_id
             )));
         };
-        if item.template_page_index >= template_pages.len() {
+        if item.template_page_index >= template.pages.len() {
             return Err(FullBleedError::InvalidConfiguration(format!(
                 "plan item {} template_page out of range: {} (allowed 0..{})",
                 idx,
                 item.template_page_index,
-                template_pages.len().saturating_sub(1)
+                template.pages.len().saturating_sub(1)
             )));
         }
-        if item.overlay_page_index >= overlay_pages.len() {
+        if item.overlay_page_index >= overlay.pages.len() {
             return Err(FullBleedError::InvalidConfiguration(format!(
                 "plan item {} overlay_page out of range: {} (allowed 0..{})",
                 idx,
                 item.overlay_page_index,
-                overlay_pages.len().saturating_sub(1)
+                overlay.pages.len().saturating_sub(1)
+            )));
+        }
+        if !item.dx.is_finite() || !item.dy.is_finite() {
+            return Err(FullBleedError::InvalidConfiguration(format!(
+                "plan item {idx} has a non-finite placement offset"
             )));
         }
     }
 
     let pages_id = composed.new_object_id();
     let mut kids: Vec<LoObject> = Vec::with_capacity(plan.len());
+    let output_pages: Vec<_> = plan.iter().map(|_| composed.new_object_id()).collect();
+    let mut placements = links::PagePlacements::new();
+    let mut output_placements = Vec::with_capacity(plan.len());
+    for (item, &output_page) in plan.iter().zip(&output_pages) {
+        let template_page = templates[&item.template_id].pages[item.template_page_index];
+        let template_placement =
+            links::register_placement(&mut placements, template_page, output_page, 0.0, 0.0);
+        let overlay_placement = links::register_placement(
+            &mut placements,
+            overlay.pages[item.overlay_page_index],
+            output_page,
+            item.dx,
+            item.dy,
+        );
+        output_placements.push((template_placement, overlay_placement));
+    }
 
     for (idx, item) in plan.iter().enumerate() {
-        let template_page_id = template_pages_by_id[&item.template_id][item.template_page_index];
-        let overlay_page_id = overlay_pages[item.overlay_page_index];
-
-        let template_page = composed
-            .get_object(template_page_id)
-            .and_then(LoObject::as_dict)
-            .map_err(pdf_err)?
-            .clone();
+        let template = &templates[&item.template_id];
+        let template_page_id = template.pages[item.template_page_index];
+        let overlay_page_id = overlay.pages[item.overlay_page_index];
         let template_content = composed
             .get_page_content(template_page_id)
             .map_err(pdf_err)?;
@@ -516,7 +555,7 @@ pub fn compose_overlay_with_template_catalog_with_annotation_mode(
         .into_bytes();
         let page_content_id = composed.add_object(LoStream::new(dictionary! {}, page_content));
 
-        let page_id = composed.new_object_id();
+        let page_id = output_pages[idx];
         let mut out_page = dictionary! {
             "Type" => "Page",
             "Parent" => pages_id,
@@ -527,15 +566,30 @@ pub fn compose_overlay_with_template_catalog_with_annotation_mode(
                     format!("FB_OVL_{}", idx + 1) => overlay_form_id,
                 },
             },
-            "MediaBox" => LoObject::Array(template_bbox),
+            "MediaBox" => LoObject::Array(template_bbox.clone()),
         };
-        if let Some(annots) = clone_template_annotations_for_output_page(
+        let mut annots = links::clone_annotations(
             &mut composed,
-            &template_page,
-            page_id,
+            template_page_id,
+            output_placements[idx].0,
             annotation_mode,
-        )? {
-            out_page.set("Annots", annots);
+            &placements,
+            &template.destinations,
+            &template_bbox,
+        )?;
+        // The public mode controls template carryover. Authored overlay links
+        // remain part of the output even when template annotations are disabled.
+        annots.extend(links::clone_annotations(
+            &mut composed,
+            overlay_page_id,
+            output_placements[idx].1,
+            ComposeAnnotationMode::LinkOnly,
+            &placements,
+            &overlay.destinations,
+            &template_bbox,
+        )?);
+        if !annots.is_empty() {
+            out_page.set("Annots", LoObject::Array(annots));
         }
         composed
             .objects
@@ -557,6 +611,7 @@ pub fn compose_overlay_with_template_catalog_with_annotation_mode(
         "Pages" => pages_id,
     });
     composed.trailer.set("Root", catalog_id);
+    requirements.apply(&mut composed)?;
     composed.prune_objects();
     composed.renumber_objects();
     composed.compress();
