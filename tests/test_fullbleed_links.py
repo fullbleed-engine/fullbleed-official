@@ -469,6 +469,69 @@ def test_wrapped_link_has_one_logical_owner_across_pages():
     assert len(references) == total
 
 
+@pytest.mark.parametrize("profile", ["none", "pdfua2"])
+@pytest.mark.parametrize("mode", ["direct", "compiled", "compact"])
+def test_wrapped_spaces_form_one_continuous_link_region_per_line(profile, mode):
+    import ctypes
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as raw
+
+    url = "https://example.invalid/space-metrics"
+    text = "Read the full report. " * 36
+    html = '<p><a href="' + url + '">{{words}}</a></p>'
+    css = """@page{size:200pt 200pt;margin:16pt}
+    body{font-family:'Noto Sans';font-size:12.337pt;line-height:18pt}p{margin:0}"""
+    engine = fullbleed.PdfEngine(
+        pdf_profile=profile, document_lang="en-US", document_title="Wrapped link regions",
+        font_files=[font()],
+    )
+    if mode == "direct":
+        data = engine.render_pdf(html.replace("{{words}}", text), css)
+    elif mode == "compiled":
+        data = engine.compile_pdf(html.replace("{{words}}", text), css).render_pdf()
+    else:
+        data = engine.compile_pdf(html, css).render_pdf_reflow_bindings(
+            {"words": [text, text]}, compression="compact",
+        )
+    if output := os.environ.get("FULLBLEED_LINK_SPACE_TEST_OUTPUT"):
+        directory = Path(output)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / f"space-regions-{profile}-{mode}.pdf").write_bytes(bytes(data))
+    document = reader(data)
+    if profile == "pdfua2":
+        tags = structures(document.trailer["/Root"]["/StructTreeRoot"])
+        assert sum(tag["/S"] == "/Link" for tag in tags.values()) == (2 if mode == "compact" else 1)
+    viewed = pdfium.PdfDocument(bytes(data))
+    try:
+        for index, source_page in enumerate(document.pages):
+            annotations = [ref.get_object() for ref in source_page.get("/Annots", [])]
+            assert annotations and all(a["/A"]["/URI"] == url for a in annotations)
+            page = viewed[index]
+            extracted = page.get_textpage()
+            try:
+                baselines = set()
+                for char_index in range(extracted.count_chars()):
+                    if extracted.get_text_range(char_index, 1).isspace():
+                        continue
+                    x, y = ctypes.c_double(), ctypes.c_double()
+                    assert raw.FPDFText_GetCharOrigin(extracted, char_index, ctypes.byref(x), ctypes.byref(y))
+                    baselines.add(round(y.value, 3))
+                    left, bottom, right, top = extracted.get_charbox(char_index)
+                    assert raw.FPDFLink_GetLinkAtPoint(page, (left + right) / 2, (bottom + top) / 2)
+                assert len(annotations) == len(baselines), "Uniform linked text needs one region per visible line"
+                boxes = sorted((list(map(float, a["/Rect"])) for a in annotations), key=lambda b: b[1])
+                assert all(top - bottom > 10 for _, bottom, _, top in boxes), "No thin space-only bands"
+                assert not raw.FPDFLink_GetLinkAtPoint(page, 8, 100), "The page margin is not part of the link"
+                for lower, upper in zip(boxes, boxes[1:]):
+                    if upper[1] - lower[3] > 0.1:
+                        assert not raw.FPDFLink_GetLinkAtPoint(page, 20, (lower[3] + upper[1]) / 2)
+            finally:
+                extracted.close()
+                page.close()
+    finally:
+        viewed.close()
+
+
 @pytest.mark.parametrize("component", [Link, Button])
 def test_component_links_preserve_pdf_actions_and_both_html_exports(component):
     url = "https://example.invalid/documents?format=pdf&source=author"

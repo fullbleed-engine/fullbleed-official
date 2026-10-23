@@ -413,22 +413,24 @@ impl Collector<'_> {
         let (_, clean) = crate::text_shape::decode_shape_options(text);
         let width = crate::base14_metrics::font(&state.font)
             .map(|font| {
-                clean
+                let width = clean
                     .chars()
-                    .map(|ch| {
+                    .filter_map(|ch| {
                         font.glyph_by_unicode(ch)
                             .or_else(|| font.glyph_by_unicode('?'))
                     })
-                    .flatten()
-                    .map(|glyph| f64::from(glyph.width))
-                    .sum::<f64>()
-                    * pt(state.size)
-                    / 1000.0
+                    .fold(Pt::ZERO, |sum, glyph| {
+                        sum + state.size.mul_ratio(i32::from(glyph.width), 1000)
+                    });
+                // Match the used per-glyph advances of built-in-font inline
+                // words. A separate floating-point sum leaves sub-millipoint
+                // gaps between their activation and the following space box.
+                pt(width)
             })
             .unwrap_or(0.0);
         // CSS's standard-font line box metrics; embedded fonts use their own
         // hhea metrics above. These bounds describe the text box, not glyph ink.
-        (width, pt(state.size) * 0.8, pt(state.size) * 0.2)
+        (width, pt(state.size * 0.8), pt(state.size * 0.2))
     }
 
     fn glyph_width(&self, state: &State, glyph: u16) -> f64 {
@@ -1448,6 +1450,62 @@ mod tests {
                     String::from_utf8_lossy(&bytes).contains("/Subtype /Link "),
                     name != "display-none",
                     "{name}-{suffix}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pdf_links_spaces_share_their_text_runs_vertical_activation_bounds() {
+        let engine = crate::FullBleed::builder()
+            .register_font_file("python/fullbleed_assets/fonts/NotoSans-Regular.ttf")
+            .build()
+            .unwrap();
+        for (name, family, size) in [
+            ("embedded", "'Noto Sans'", "12pt"),
+            ("embedded-fractional", "'Noto Sans'", "12.337pt"),
+            ("standard", "Helvetica", "12pt"),
+            ("standard-fractional", "Helvetica", "12.337pt"),
+        ] {
+            let html = format!(
+                r#"<p><a href="https://example.invalid/space-metrics">{}</a></p>"#,
+                "Read the full report. ".repeat(36)
+            );
+            let css = format!(
+                "@page{{size:200pt 200pt;margin:16pt}}body{{font-family:{family};font-size:{size};line-height:18pt}}p{{margin:0}}"
+            );
+            let compiled = engine.compile_document(&html, &css).unwrap();
+            retain_pdf(
+                &format!("space-link-metrics-{name}"),
+                &compiled.render_to_buffer().unwrap(),
+            );
+            let navigation = DocumentLinks::collect(
+                &compiled.document,
+                compiled.document.page_size,
+                Some(engine.font_registry.as_ref()),
+                &[],
+            )
+            .unwrap();
+            for (index, page) in compiled.document.pages.iter().enumerate() {
+                let text_commands = |commands: &[Command]| {
+                    commands
+                        .iter()
+                        .filter_map(|command| match command {
+                            Command::DrawString { x, y, text } => Some((*x, *y, text.clone())),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let painted = text_commands(&page.commands);
+                let lines: std::collections::BTreeSet<_> =
+                    painted.iter().map(|(_, y, _)| y.to_milli_i64()).collect();
+                assert!(!lines.is_empty(), "{name}, page {index}");
+                let links = &navigation.pages[index].links;
+                assert_eq!(links.len(), 1, "{name}, page {index}");
+                assert_eq!(
+                    links[0].region.annotation_regions().len(),
+                    lines.len(),
+                    "one continuous activation box per uniform text line: {name}, page {index}"
                 );
             }
         }

@@ -3651,13 +3651,17 @@ pub(crate) fn css_direct_text_prefers_nearest_baseline_snap(
             && css_print_line_prefers_nearest_baseline_snap(style, font_registry))
 }
 
-fn text_font_extents(style: &TextStyle, font_registry: Option<&FontRegistry>) -> (Pt, Pt) {
-    let (mut ascent, mut descent) = font_registry
+fn text_raw_font_extents(style: &TextStyle, font_registry: Option<&FontRegistry>) -> (Pt, Pt) {
+    font_registry
         .and_then(|registry| {
             let (primary, _) = resolve_font_stack(Some(registry), style);
             registry.vertical_metrics(&primary, style.font_size)
         })
-        .unwrap_or_else(|| (style.font_size * 0.8, style.font_size * 0.2));
+        .unwrap_or_else(|| (style.font_size * 0.8, style.font_size * 0.2))
+}
+
+fn text_font_extents(style: &TextStyle, font_registry: Option<&FontRegistry>) -> (Pt, Pt) {
+    let (mut ascent, mut descent) = text_raw_font_extents(style, font_registry);
     if style.css_pixel_snap_metrics {
         ascent = round_to_css_pixel(ascent);
         descent = ceil_to_css_pixel(descent);
@@ -11462,6 +11466,7 @@ pub(crate) struct CollapsibleSpaceFlowable {
     inline_ascent: Pt,
     x_height: Pt,
     font_extents: (Pt, Pt),
+    navigation_font_extents: (Pt, Pt),
     decoration_renderer: Option<Box<Paragraph>>,
 }
 
@@ -11498,6 +11503,11 @@ impl CollapsibleSpaceFlowable {
         let font_extents = probe
             .inline_font_extents(width)
             .unwrap_or((baseline, (height - baseline).max(Pt::ZERO)));
+        // Layout can snap font extents to CSS pixels. Link activation instead
+        // shares the raw font box used for the neighboring painted text runs.
+        // Mixing these boxes splits a uniform line into thin annotation bands.
+        let navigation_font_extents =
+            text_raw_font_extents(&probe.style, probe.font_registry.as_deref());
         // A collapsed interior space still belongs to its decorating inline.
         // Keep the font/style only when paint needs it; ordinary spaces remain
         // geometry and reading-order metadata. The line builder removes spaces
@@ -11512,6 +11522,7 @@ impl CollapsibleSpaceFlowable {
             inline_ascent,
             x_height,
             font_extents,
+            navigation_font_extents,
             decoration_renderer,
         }
     }
@@ -11585,9 +11596,9 @@ impl Flowable for CollapsibleSpaceFlowable {
         canvas.meta(META_READING_TEXT_KEY, " ");
         canvas.record_link_box(
             x,
-            y + self.baseline - self.font_extents.0,
+            y + self.baseline - self.navigation_font_extents.0,
             avail_width,
-            self.font_extents.0 + self.font_extents.1,
+            self.navigation_font_extents.0 + self.navigation_font_extents.1,
         );
         if let Some(renderer) = self.decoration_renderer.as_ref() {
             let draw_y = y + self.baseline - renderer.style.font_size;
