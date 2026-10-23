@@ -1,0 +1,130 @@
+{
+  "observed_at": "2026-10-23T07:18:41.454549+00:00",
+  "status": "observed-reader-difference",
+  "scope": "Independent PDF in the unmodified official PDF.js viewer. Fullbleed is not used to generate the source PDF. This does not establish imported-border preservation.",
+  "source_pdf": {
+    "path": "../fixtures/border-zoom.pdf",
+    "sha256": "1bab5a8883313d0064db14a43589c1759b66530652d5a84be0da697f0b1aece5",
+    "bytes": 903,
+    "page_points": [
+      200,
+      200
+    ],
+    "border_width_points": 3,
+    "link_rect": [
+      110,
+      110,
+      170,
+      150
+    ],
+    "annotation_flags": 4,
+    "no_zoom_flag": false,
+    "appearance_stream": false
+  },
+  "generator": "../make_border_zoom.py",
+  "official_release": {
+    "version": "6.4.299",
+    "url": "https://github.com/mozilla/pdf.js/releases/tag/v6.4.299",
+    "archive_sha256": "f2245eb7ef3f674c872fe568a177bfec15874f5c034613e55d8e307f93ebd86d",
+    "viewer_modified": false,
+    "device_pixel_ratio": 1,
+    "cases": [
+      {
+        "zoom_percent": 75,
+        "viewport_scale": 1.0,
+        "borderWidth": "3px",
+        "inlineBorder": "3px",
+        "width": 60,
+        "height": 40,
+        "page_stroke_dark_pixels": 3,
+        "link_border_dark_pixels": 3,
+        "png_sha256": "53476b3124ca6979d520267c65b4a2f0d8fe0ee734a53064296bb004b6ef845f"
+      },
+      {
+        "zoom_percent": 150,
+        "viewport_scale": 2.0,
+        "borderWidth": "3px",
+        "inlineBorder": "3px",
+        "width": 120,
+        "height": 80,
+        "page_stroke_dark_pixels": 6,
+        "link_border_dark_pixels": 3,
+        "png_sha256": "e4b36867befd1fb43f16659ce25416ff8704050a9f2fb46770c479ab54f4171d"
+      },
+      {
+        "zoom_percent": 225,
+        "viewport_scale": 3.0,
+        "borderWidth": "3px",
+        "inlineBorder": "3px",
+        "width": 180,
+        "height": 120,
+        "page_stroke_dark_pixels": 9,
+        "link_border_dark_pixels": 3,
+        "png_sha256": "a811f78ffbeea692566a67c5869ae499c8edd23499f9d8e3319703ca0f512738"
+      }
+    ]
+  },
+  "online_demo": {
+    "url": "https://mozilla.github.io/pdf.js/web/viewer.html",
+    "version": "6.5.316",
+    "local_file_picker": true,
+    "cases": [
+      {
+        "zoom_percent": 75,
+        "borderWidth": "3px",
+        "inlineBorder": "3px",
+        "width": 60,
+        "height": 40,
+        "version": "6.5.316",
+        "scale": 0.75,
+        "devicePixelRatio": 1,
+        "png_sha256": "53476b3124ca6979d520267c65b4a2f0d8fe0ee734a53064296bb004b6ef845f"
+      },
+      {
+        "zoom_percent": 150,
+        "borderWidth": "3px",
+        "inlineBorder": "3px",
+        "width": 120,
+        "height": 80,
+        "version": "6.5.316",
+        "scale": 1.5,
+        "devicePixelRatio": 1,
+        "png_sha256": "e4b36867befd1fb43f16659ce25416ff8704050a9f2fb46770c479ab54f4171d"
+      },
+      {
+        "zoom_percent": 300,
+        "borderWidth": "3px",
+        "inlineBorder": "3px",
+        "width": 240,
+        "height": 160,
+        "version": "6.5.316",
+        "scale": 3,
+        "devicePixelRatio": 1,
+        "png_sha256": "ea171ed37de9e4624d97f263f5456b19f1a001c863b33f4f89b7cae589957c7e"
+      }
+    ]
+  },
+  "browser": {
+    "name": "Chromium",
+    "version": "153.0.8010.12",
+    "os": "Windows-10-10.0.26200-SP0",
+    "fresh_headless_context": true,
+    "authenticated_session_used": false
+  },
+  "screenshot": {
+    "path": "pdfjs-border-zoom-225.png",
+    "sha256": "a811f78ffbeea692566a67c5869ae499c8edd23499f9d8e3319703ca0f512738",
+    "visually_reviewed": true
+  },
+  "spec_reference": "https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/pdfreference1.6.pdf#page=596",
+  "source_inspection": {
+    "commit": "32b6649db7915fa6a97e40e80fdd0dfe203ff695",
+    "url": "https://github.com/mozilla/pdf.js/blob/32b6649db7915fa6a97e40e80fdd0dfe203ff695/src/display/annotation_layer.js",
+    "observation": "AnnotationElement._createContainer assigns the unscaled numeric border width as CSS pixels; radius calculations use --total-scale-factor."
+  },
+  "limits": [
+    "Only this solid-border source specimen and measured zooms are covered.",
+    "No Fullbleed composition, keyboard navigation, assistive technology, or conformance claim.",
+    "The standalone harness first hit an automation CSP evaluation error, then passed after using DOM locators. The demo harness first matched multiple file pickers, then passed using its observed fileInput element."
+  ]
+}

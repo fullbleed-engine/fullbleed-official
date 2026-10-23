@@ -136,3 +136,33 @@ text retains small horizontal rounding differences recorded in the observation.
 These checks do not establish identical rasterization in every PDF reader.
 The observation retains the corresponding native checks and known pixel
 differences for the sampled fonts.
+
+## Inspect a source link border at different zoom levels
+
+The [independent source PDF](fixtures/border-zoom.pdf) contains two frames with
+3pt borders. The left frame is page artwork. The right is a Link annotation
+with `/BS << /W 3 /S /S >>`, no appearance stream, and no `NoZoom` flag.
+The standard-library generator reproduces the checked-in PDF exactly:
+
+```sh
+python tools/pdf_link_readers/make_border_zoom.py --out border-zoom.pdf
+```
+
+Open it with the file picker in the [official PDF.js demo](https://mozilla.github.io/pdf.js/web/viewer.html)
+and change the zoom from 75% to 150% and 300%. In the observed demo version
+6.5.316, the right border stays at 3 CSS pixels while its frame grows. The
+unmodified official 6.4.299 release also keeps the link border at 3 pixels at
+75%, 150%, and 225%; the page stroke grows to 3, 6, and 9 pixels respectively.
+
+![At 225% zoom in PDF.js 6.4.299, the 3pt page stroke is visibly thicker than the 3pt link border.](observations/pdfjs-border-zoom-225.png)
+
+The [recorded measurements](observations/pdfjs-border-zoom.json) include reader
+versions, the official release archive hash, source-PDF hash, computed CSS,
+and screenshot measurements. The PDF reference defines border width in points
+and describes the `NoZoom` exception in
+[sections 8.4.2 and 8.4.3](https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/pdfreference1.6.pdf#page=596).
+
+This isolates one source-reader difference without using Fullbleed. It does
+not establish preservation of every imported border style, or make the
+composition checks above pass. Keep source-reader observations separate from
+Fullbleed output comparisons.

@@ -128,6 +128,14 @@ Imported links without appearance streams still show visual differences
 for dashed, rounded, beveled, inset, and underline borders. MuPDF's omission of
 an ordinary Link appearance is not evidence that an appearance was preserved.
 
+One difference is independently reproducible before composition: the official
+PDF.js 6.4.299 viewer and its 6.5.316 online demo keep a source link's 3pt border
+at 3 CSS pixels as the page zoom changes. The
+[small source PDF and measurements](../tools/pdf_link_readers/README.md#inspect-a-source-link-border-at-different-zoom-levels)
+compare that annotation with a 3pt page stroke. Fullbleed does not generate
+this control, so this observation identifies a reader-side scaling difference;
+it does not settle the other imported-border differences.
+
 These imported-border differences remain open release work. Do not infer
 appearance parity from successful destination checks or from a reader that
 does not draw the source annotation. Retaining the stored highlight mode does
