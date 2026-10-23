@@ -509,6 +509,8 @@ def test_wrapped_spaces_form_one_continuous_link_region_per_line(profile, mode):
             page = viewed[index]
             extracted = page.get_textpage()
             try:
+                visible_label = " ".join(extracted.get_text_range().split())
+                assert all(a["/Contents"] == visible_label for a in annotations), "Wrapped words keep their separating whitespace"
                 baselines = set()
                 for char_index in range(extracted.count_chars()):
                     if extracted.get_text_range(char_index, 1).isspace():

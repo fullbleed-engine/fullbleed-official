@@ -1512,6 +1512,99 @@ mod tests {
     }
 
     #[test]
+    fn pdf_links_keep_authored_word_boundaries_when_lines_drop_spaces() {
+        let engine = crate::FullBleed::builder()
+            .register_font_file("python/fullbleed_assets/fonts/NotoSans-Regular.ttf")
+            .build()
+            .unwrap();
+        let sentence = "Read the full report. ";
+        let repeated = sentence.repeat(9);
+        let mixed = "Read <strong>the</strong> full <em>report.</em> ".repeat(9);
+        for (name, content, style, explicit, expected) in [
+            (
+                "wrapped",
+                repeated.clone(),
+                "",
+                "",
+                repeated.trim().to_owned(),
+            ),
+            ("mixed", mixed.clone(), "", "", repeated.trim().to_owned()),
+            (
+                "background",
+                mixed.clone(),
+                "background:#fde6ae;text-decoration:underline",
+                "",
+                repeated.trim().to_owned(),
+            ),
+            (
+                "opacity",
+                mixed,
+                "opacity:0.5",
+                "",
+                repeated.trim().to_owned(),
+            ),
+            (
+                "hard-breaks",
+                "Read<br>the <span>full</span><br>report.".into(),
+                "",
+                "",
+                sentence.trim().to_owned(),
+            ),
+            (
+                "split-word",
+                "un<span>break</span>able".into(),
+                "",
+                "",
+                "unbreakable".into(),
+            ),
+            (
+                "collapsed",
+                "  Read\n\t the <span> full </span> report.  ".into(),
+                "",
+                "",
+                sentence.trim().to_owned(),
+            ),
+            (
+                "explicit",
+                repeated,
+                "",
+                "aria-label='Open the document'",
+                "Open the document".into(),
+            ),
+        ] {
+            let html = format!(
+                "<p><a href='https://example.invalid/labels' style='{style}' {explicit}>{content}</a></p>"
+            );
+            let css = "@page{size:200pt 300pt;margin:16pt}body{font-family:'Noto Sans';font-size:12pt;line-height:18pt}p{margin:0}";
+            let compiled = engine.compile_document(&html, css).unwrap();
+            retain_pdf(
+                &format!("label-boundaries-{name}"),
+                &compiled.render_to_buffer().unwrap(),
+            );
+            if let Some(directory) = std::env::var_os("FULLBLEED_LINK_TEST_OUTPUT") {
+                let directory = std::path::Path::new(&directory);
+                std::fs::write(
+                    directory.join(format!("label-boundaries-{name}.html")),
+                    html,
+                )
+                .unwrap();
+                std::fs::write(directory.join(format!("label-boundaries-{name}.css")), css)
+                    .unwrap();
+            }
+            let navigation = DocumentLinks::collect(
+                &compiled.document,
+                compiled.document.page_size,
+                Some(engine.font_registry.as_ref()),
+                &[],
+            )
+            .unwrap();
+            assert_eq!(navigation.pages.len(), 1, "{name}");
+            assert_eq!(navigation.pages[0].links.len(), 1, "{name}");
+            assert_eq!(navigation.pages[0].links[0].label, expected, "{name}");
+        }
+    }
+
+    #[test]
     fn pdf_links_writer_emits_actions_and_tagged_annotation_ownership() {
         for (name, profile) in [
             ("plain", crate::PdfProfile::None),

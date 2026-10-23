@@ -2474,6 +2474,16 @@ pub trait Flowable: FlowableClone + Send + Sync {
         false
     }
 
+    /// Preserve source whitespace omitted from painted inline layout. This
+    /// carries reading semantics only: no advance, ink, or activation region.
+    fn draw_inline_reading_boundary(&self, canvas: &mut Canvas) {
+        if self.forced_line_break_height().is_some() {
+            canvas.meta(META_READING_TEXT_KEY, "\n");
+        } else if self.is_collapsible_inline_space() {
+            canvas.meta(META_READING_TEXT_KEY, " ");
+        }
+    }
+
     fn flex_min_content_width(&self, _avail_width: Pt) -> Option<Pt> {
         self.intrinsic_width()
     }
@@ -10414,6 +10424,10 @@ impl CssLineBoxFlowable {
 }
 
 impl Flowable for CssLineBoxFlowable {
+    fn draw_inline_reading_boundary(&self, canvas: &mut Canvas) {
+        self.child.draw_inline_reading_boundary(canvas);
+    }
+
     fn expands_inline_fill(&self) -> bool {
         self.child.expands_inline_fill()
     }
@@ -19446,6 +19460,7 @@ struct InlineLineLayout {
     parent_font_ascent: Pt,
     parent_font_descent: Pt,
     items: Vec<InlineItemLayout>,
+    reading_boundaries: Vec<usize>,
     reading_break_after: bool,
     source_end: usize,
 }
@@ -19525,6 +19540,10 @@ impl InlineBackgroundFlowable {
 }
 
 impl Flowable for InlineBackgroundFlowable {
+    fn draw_inline_reading_boundary(&self, canvas: &mut Canvas) {
+        self.child.draw_inline_reading_boundary(canvas);
+    }
+
     fn is_inline_first_letter(&self) -> bool {
         self.child.is_inline_first_letter()
     }
@@ -20251,6 +20270,7 @@ impl InlineBlockLayoutFlowable {
                 parent_font_descent,
                 source_end: items.last().map_or(0, |item| item.idx + 1),
                 items,
+                reading_boundaries: Vec::new(),
                 reading_break_after: false,
             });
         };
@@ -20289,6 +20309,7 @@ impl InlineBlockLayoutFlowable {
                         parent_font_ascent: Pt::ZERO,
                         parent_font_descent: Pt::ZERO,
                         items: Vec::new(),
+                        reading_boundaries: Vec::new(),
                         reading_break_after: false,
                         source_end: idx + 1,
                     });
@@ -20531,6 +20552,7 @@ impl InlineBlockLayoutFlowable {
                     parent_font_ascent: Pt::ZERO,
                     parent_font_descent: Pt::ZERO,
                     items: Vec::new(),
+                    reading_boundaries: Vec::new(),
                     reading_break_after: false,
                     source_end: idx + 1,
                 });
@@ -20552,6 +20574,29 @@ impl InlineBlockLayoutFlowable {
                 font_extents: None,
             });
             line.items.sort_by_key(|item| item.idx);
+        }
+
+        // Layout drops collapsible line-edge spaces and consumes hard breaks.
+        // Retain their source positions for reading metadata after all geometry
+        // is final. A boundary before a continuation belongs to that line, so
+        // splitting a paragraph keeps its leading source whitespace available.
+        let mut painted = vec![false; self.children.len()];
+        for item in lines.iter().flat_map(|line| &line.items) {
+            painted[item.idx] = true;
+        }
+        if !lines.is_empty() {
+            let mut line_index = 0;
+            for (idx, (child, _)) in self.children.iter().enumerate() {
+                while line_index + 1 < lines.len() && idx >= lines[line_index].source_end {
+                    line_index += 1;
+                }
+                if !painted[idx]
+                    && (child.is_collapsible_inline_space()
+                        || child.forced_line_break_height().is_some())
+                {
+                    lines[line_index].reading_boundaries.push(idx);
+                }
+            }
         }
 
         InlineLayoutCache {
@@ -20910,7 +20955,12 @@ impl Flowable for InlineBlockLayoutFlowable {
         let mut cursor_y = y;
         for line in &layout.lines {
             cursor_y += line.clearance_before;
-            let mut paint_items: Vec<&InlineItemLayout> = line.items.iter().collect();
+            let mut paint_items: Vec<_> = line
+                .items
+                .iter()
+                .map(|item| (item.idx, Some(item)))
+                .chain(line.reading_boundaries.iter().map(|idx| (*idx, None)))
+                .collect();
             let mut run_origins = HashMap::<usize, Pt>::new();
             for item in &line.items {
                 if let Some(run) = self.children[item.idx].0.inline_text_run_id() {
@@ -20921,15 +20971,19 @@ impl Flowable for InlineBlockLayoutFlowable {
                 }
             }
             paint_items.sort_by(|a, b| {
-                let a_child = &self.children[a.idx].0;
-                let b_child = &self.children[b.idx].0;
+                let a_child = &self.children[a.0].0;
+                let b_child = &self.children[b.0].0;
                 a_child
                     .z_index()
                     .cmp(&b_child.z_index())
                     .then_with(|| a_child.is_positioned().cmp(&b_child.is_positioned()))
-                    .then_with(|| a.idx.cmp(&b.idx))
+                    .then_with(|| a.0.cmp(&b.0))
             });
-            for item in paint_items {
+            for (idx, item) in paint_items {
+                let Some(item) = item else {
+                    self.children[idx].0.draw_inline_reading_boundary(canvas);
+                    continue;
+                };
                 let y_off = Self::item_y_offset(line, item);
                 let (child, _) = &self.children[item.idx];
                 let child = item.bidi_child.as_deref().unwrap_or(child.as_ref());
@@ -20979,9 +21033,6 @@ impl Flowable for InlineBlockLayoutFlowable {
                     child.draw(canvas, item_x, cursor_y + y_off, item_width, item_height);
                 }
                 canvas.replace_inline_text_paint_origin(previous_origin);
-            }
-            if line.reading_break_after {
-                canvas.meta(META_READING_TEXT_KEY, "\n");
             }
             cursor_y = cursor_y + line.line_height;
         }
@@ -41067,6 +41118,21 @@ impl MetaFlowable {
 }
 
 impl Flowable for MetaFlowable {
+    fn draw_inline_reading_boundary(&self, canvas: &mut Canvas) {
+        if let Some(effect) = self.inline_opacity {
+            canvas.begin_inline_opacity(effect);
+        }
+        canvas.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "flowable");
+        for (key, value) in self.metadata.iter() {
+            canvas.meta(key.clone(), value.clone());
+        }
+        self.child.draw_inline_reading_boundary(canvas);
+        canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
+        if let Some(effect) = self.inline_opacity {
+            canvas.end_inline_opacity(effect);
+        }
+    }
+
     fn is_discardable_block_whitespace(&self) -> bool {
         // The reading-layout marker observes layout; it must not make an
         // otherwise collapsed space create a line box between blocks.
