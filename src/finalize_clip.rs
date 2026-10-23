@@ -416,6 +416,10 @@ pub(super) fn annotation(
     }
     annotation.set("AP", appearances);
     annotation.set("Rect", array(&clipped));
+    // The appearance already preserves the original, clipped artwork. Leaving
+    // a fallback border makes some readers draw a second edge at the new Rect.
+    annotation.remove(b"BS");
+    annotation.set("Border", array(&[0.0, 0.0, 0.0]));
     if !active {
         // Keep the original annotation handler: converting Link to Stamp can
         // introduce a popup note or change which readers draw the appearance.

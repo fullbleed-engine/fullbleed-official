@@ -77,3 +77,41 @@ includes runtime and reader identity, the per-case mismatch counts and click
 observations, and hashes of the complete retained artifacts. A complete run can expose reader differences even when
 the encoded geometry and painted shape agree. Treat those as unresolved
 compatibility observations, not as a passed conformance or accessibility gate.
+
+## Check borders on cropped imported links
+
+An independent import fixture checks a different failure: a reader can draw an
+extra border along a newly clipped `Rect`, even when the appearance stream
+already contains the correctly clipped artwork. Generate these inputs with the
+candidate wheel, then use the same separate reader environment and PDF.js
+assets described above. The generation environment also needs `pypdf`; it is
+an optional fixture-authoring dependency, not a Fullbleed runtime dependency:
+
+```sh
+python -m pip install pypdf==6.1.1
+python tools/pdf_link_readers/imported_borders.py generate --out target/imported-border-inputs
+python tools/pdf_link_readers/imported_borders.py check --inputs target/imported-border-inputs --pdfjs target/pdf-link-reader-deps/node_modules/pdfjs-dist --out target/imported-border-results
+```
+
+The generator uses pypdf to author eight white-page source PDFs independently
+of Fullbleed: solid, dashed, rounded, beveled, inset, underline, outline
+highlighting, and an explicit appearance stream. Fullbleed composes and stamps
+each source with an offset. The resulting 24 PDFs are checked in PDFium and
+the actual PDF.js annotation layer.
+
+A narrow band at the cut edge must remain white. Output artwork must still be
+visible, interior clicks must retain their target, and the clipped-away area
+must be inactive. The explicit source appearance supplies a positive paint
+control; a reader that omits a border-only source is not evidence of its
+preservation. Screenshots, PDFs, hashes, reader versions, and the harness are
+retained. Exit **2** records an unwanted edge; exit **1** means an incomplete or
+invalid check; exit **0** means these bounded observations pass.
+
+This check does not establish full border-style parity. It verifies that the
+stored `H` value survives, but does not qualify mouse-highlight appearance,
+keyboard navigation, or accessibility.
+
+The [recorded observation](observations/imported-border-cut.json) includes the
+before/after counts, native-module identity, source hashes, and a separate
+Poppler reference check. The public alpha version number alone does not
+identify the candidate used for these observations.

@@ -110,6 +110,13 @@ requires adjusting its active area while preserving the placement of its
 artwork. An explicit PDF appearance stream and a viewer-generated border are
 different inputs to this process.
 
+For a partially clipped link, the candidate wraps its original appearance, or
+creates one from its border, at the original position. It then disables the
+separate border on the clipped annotation. This prevents readers from drawing
+an extra edge along the new click boundary. The
+[imported-border check](../tools/pdf_link_readers/README.md#check-borders-on-cropped-imported-links)
+reproduces this case with independent source PDFs, composition, and stamping.
+
 The reviewed PDF.js specimens preserve explicit appearance streams through
 composition and stamping, including artwork whose active region is fully
 clipped. When no active region remains, composition retains the original Link
@@ -123,5 +130,6 @@ an ordinary Link appearance is not evidence that an appearance was preserved.
 
 These imported-border differences remain open release work. Do not infer
 appearance parity from successful destination checks or from a reader that
-does not draw the source annotation. See [PDF templates](pdf-templates.md) for
-the composition API and scope.
+does not draw the source annotation. Retaining the stored highlight mode does
+not establish identical mouse-highlight behavior across readers. See
+[PDF templates](pdf-templates.md) for the composition API and scope.
