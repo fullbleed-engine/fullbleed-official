@@ -114,3 +114,30 @@ The installed-wheel examples were rendered into isolated output directories.
 Acme and coastal-menu PDFs and previews remain byte-identical to their
 baselines. This refresh records the reviewed table alignment change; it does
 not claim that the complete bank statement matches browser layout.
+
+The alpha 14 LTR alignment correction refreshes the first page of all three
+examples. The inline-row layout previously applied physical text alignment only
+while reordering bidirectional text. Applying it after that optional step also
+honors the authored alignment of ordinary LTR text and inline objects:
+
+- Acme's invoice number moves right by 60.998pt, affecting 2,415 pixels in
+  `(818, 153, 1155, 169)`. Its two outlined `#` paths move with the text.
+- The bank statement's phone number and website move right by 48.353pt and
+  15.515pt. Seven contact-icon paths move right by 0.72pt within their
+  right-aligned cells. The 3,322 changed pixels are confined to
+  `(904, 88, 1150, 191)`; page two remains byte-identical.
+- The coastal-menu title moves right by 36.734pt to center the inline table
+  within its parent, affecting 23,170 pixels in `(1709, 262, 2278, 429)`.
+  Other text and all vector paths remain unchanged.
+
+Text, fonts, styles, vertical positions, page counts and dimensions are
+unchanged. The before/after pages were visually inspected. A fresh Chromium
+153 print reference confirms the authored right/center alignment; the bank
+contact text's right edges are within 0.03pt of the browser cell edge, and both
+menu title lines' centers are within 0.03pt of the browser container center.
+Acme's residual text-bound right-edge difference is 0.456pt. This does not assert
+complete browser parity or resolve other font/spacing differences. All seven
+isolated local PDF/PNG outputs match the
+[original failed CI artifact](https://github.com/fullbleed-engine/fullbleed-official/actions/runs/39947906567/artifacts/12500480859)
+byte for byte, and all three existing validation contracts pass. The original
+failed comparison remains retained; no comparator or tolerance changed.
