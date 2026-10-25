@@ -1,3 +1,19 @@
+# Fullbleed Release Notes - 2.5.35
+
+Long tables and auto-height containers with clipping overflow now continue onto
+subsequent PDF pages. Previously, `overflow: hidden` could keep an unconstrained
+container on one page and hide later rows. The correction preserves clipping
+while allowing ordinary pagination, repeated table headers, descendant page
+breaks, and footnote placement.
+
+Explicit height, maximum height, line clamping, and aspect-ratio viewports retain
+their bounded behavior. This stable backport does not include the component
+alpha's percentage-column allocator changes or its authoring APIs.
+
+See the [2.5.35 runbook](docs/release/2.5.35-runbook.md) for release gates and
+verification scope. A passing fixture does not establish document-wide
+accessibility or general CSS parity.
+
 # Fullbleed Release Notes - 2.5.34
 
 Compiled reflow now refreshes running headers and footers when record values
