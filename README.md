@@ -136,7 +136,7 @@ functions, children and reusable styles instead of writing HTML strings:
 
 | Channel | Install | Component API |
 | --- | --- | --- |
-| Stable **2.5.36** | `python -m pip install fullbleed` | Existing HTML/CSS rendering and `fullbleed.ui` components |
+| [Stable release](https://pypi.org/project/fullbleed/) | `python -m pip install fullbleed` | Existing HTML/CSS rendering and `fullbleed.ui` components |
 | Opt-in alpha **2.6.0a14** | `python -m pip install --pre "fullbleed==2.6.0a14"` | `fullbleed.components`: owned styles, named parts, data tables, static Bootstrap helpers, page bands and styled/unstyled HTML export |
 
 The component API remains experimental:
@@ -150,7 +150,8 @@ The language packages have their own versions and API coverage.
 
 The alpha also adds [native PDF links](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a14/docs/pdf-links.md)
 for both HTML and component authors, including internal destinations and wrapped
-links. This navigation work is not included in stable 2.5.36 or alpha 13.
+links. This navigation work is separate from the stable 2.5 API and requires
+alpha 14 rather than an earlier alpha kit.
 
 The [complete-document migration guide](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a14/docs/component-namespace.md) maps
 styles, page geometry, metadata, fonts and renderer options from the existing
