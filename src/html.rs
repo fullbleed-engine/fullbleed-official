@@ -12993,7 +12993,9 @@ fn layout_cell_children_to_flowables(
         None,
         no_wrap(style),
         true,
-        false,
+        // Wrapped cell text participates by its first line. A last-line
+        // baseline would lift preceding lines above the row.
+        true,
         style.direction,
         text_align_from_style(style),
         style.pagination,
