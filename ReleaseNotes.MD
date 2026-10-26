@@ -1,3 +1,20 @@
+# Fullbleed Release Notes - 2.5.37
+
+Package descriptions now lead with the HTML/CSS workflow, keep component
+authoring available below the language quickstarts, and use release-scoped
+repository links that work from a package index. JavaScript and .NET packages
+release independently; their guides supply tested version pins without leaving
+obsolete install commands in the Python package description.
+
+Release automation renders the descriptions from the actual wheels and source
+distribution with PyPA's README renderer. It checks link/image destinations,
+local anchors, and agreement across the distribution set before publishing.
+The checker and its Markdown dependency are release tooling only.
+
+The rendering engine and Python API source are unchanged from 2.5.36. This
+release does not promote the component alpha or add a new conformance claim.
+See the [2.5.37 runbook](docs/release/2.5.37-runbook.md).
+
 # Fullbleed Release Notes - 2.5.36
 
 Auto-layout tables now account for permitted text breaks when choosing column
