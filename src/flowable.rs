@@ -2433,6 +2433,12 @@ pub trait Flowable: FlowableClone + Send + Sync {
         false
     }
 
+    /// Minimum outer width contributed to intrinsic parent sizing, including
+    /// authored child width constraints without making wrappable text atomic.
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.flex_min_content_width(avail_width)
+    }
+
     fn flex_min_content_width(&self, _avail_width: Pt) -> Option<Pt> {
         self.intrinsic_width()
     }
@@ -2897,6 +2903,10 @@ impl Flowable for FootnoteCallFlowable {
 
     fn intrinsic_width(&self) -> Option<Pt> {
         self.call.intrinsic_width()
+    }
+
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.call.min_content_contribution(avail_width)
     }
 
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
@@ -3885,6 +3895,24 @@ mod text_baseline_tests {
             .unwrap();
         assert!(anywhere_min < normal_min);
         assert_eq!(anywhere_min, anywhere.measure_text_width("W"));
+    }
+
+    #[test]
+    fn cjk_min_content_uses_normal_breaks_and_preserves_punctuation_groups() {
+        let paragraph = Paragraph::new("吾輩は猫である。名前はまだ無い。");
+        let minimum = paragraph
+            .flex_min_content_width(Pt::from_f32(500.0))
+            .unwrap();
+        assert_eq!(minimum, paragraph.measure_text_width("る。"));
+        assert!(minimum < paragraph.intrinsic_width().unwrap());
+
+        let mut style = TextStyle::default();
+        style.word_break = WordBreakMode::KeepAll;
+        let keep_all = Paragraph::new("吾輩は猫である。").with_style(style);
+        assert_eq!(
+            keep_all.flex_min_content_width(Pt::from_f32(500.0)),
+            keep_all.intrinsic_width()
+        );
     }
 
     #[test]
@@ -8707,28 +8735,51 @@ fn paragraph_may_split_word(paragraph: &Paragraph, word: &str, emergency: bool) 
 }
 
 fn paragraph_break_allowed_between(paragraph: &Paragraph, before: char, after: char) -> bool {
+    text_break_allowed_between(&paragraph.style, before, after)
+}
+
+fn text_break_allowed_between(style: &TextStyle, before: char, after: char) -> bool {
     if matches!(
-        paragraph.style.word_break,
+        style.word_break,
         crate::style::WordBreakMode::BreakAll | crate::style::WordBreakMode::Anywhere
-    ) || matches!(
-        paragraph.style.line_break,
-        crate::style::LineBreakMode::Anywhere
-    ) {
+    ) || matches!(style.line_break, crate::style::LineBreakMode::Anywhere)
+    {
         return true;
     }
-    if matches!(
-        paragraph.style.word_break,
-        crate::style::WordBreakMode::KeepAll
-    ) || (!is_east_asian_line_break_character(before)
-        && !is_east_asian_line_break_character(after))
+    if matches!(style.word_break, crate::style::WordBreakMode::KeepAll)
+        || (!is_east_asian_line_break_character(before)
+            && !is_east_asian_line_break_character(after))
     {
         return false;
     }
-    let strict = matches!(
-        paragraph.style.line_break,
-        crate::style::LineBreakMode::Strict
-    );
+    let strict = matches!(style.line_break, crate::style::LineBreakMode::Strict);
     !is_east_asian_opening_punctuation(before) && !is_east_asian_closing_punctuation(after, strict)
+}
+
+/// Measure the largest unbreakable part of a word using the same CJK rules
+/// as line layout. Emergency `break-word` wrapping must not lower this width.
+fn minimum_unbreakable_text_width(
+    text: &str,
+    style: &TextStyle,
+    measure: impl Fn(&str) -> Pt,
+) -> Pt {
+    let anywhere = matches!(
+        style.overflow_wrap,
+        crate::style::OverflowWrapMode::Anywhere
+    );
+    let mut maximum = Pt::ZERO;
+    let mut start = 0;
+    let mut previous = None;
+    for (index, current) in text.char_indices() {
+        if previous
+            .is_some_and(|before| anywhere || text_break_allowed_between(style, before, current))
+        {
+            maximum = maximum.max(measure(&text[start..index]));
+            start = index;
+        }
+        previous = Some(current);
+    }
+    maximum.max(measure(&text[start..]))
 }
 
 fn split_long_word_by_width(paragraph: &Paragraph, word: &str, max_width: Pt) -> Vec<String> {
@@ -9152,7 +9203,11 @@ impl Flowable for Paragraph {
         for line in self.text.split('\n') {
             for word in line.split_whitespace() {
                 for segment in word.split_inclusive('-') {
-                    max_w = max_w.max(self.measure_text_width(segment));
+                    max_w = max_w.max(minimum_unbreakable_text_width(
+                        segment,
+                        &self.style,
+                        |text| self.measure_text_width(text),
+                    ));
                 }
             }
         }
@@ -10428,6 +10483,10 @@ impl Flowable for CssLineBoxFlowable {
             .flex_outer_height_for_basis(basis, avail_width, avail_height)
     }
 
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.child.min_content_contribution(avail_width)
+    }
+
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child.flex_min_content_width(avail_width)
     }
@@ -10742,6 +10801,10 @@ impl Flowable for CssPixelHeightFlowable {
     fn flex_outer_height_for_basis(&self, basis: Pt, avail_width: Pt, avail_height: Pt) -> Pt {
         self.child
             .flex_outer_height_for_basis(basis, avail_width, avail_height)
+    }
+
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.child.min_content_contribution(avail_width)
     }
 
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
@@ -13538,9 +13601,12 @@ impl TableCell {
         max
     }
 
-    fn min_word_width(&self) -> Pt {
+    fn min_word_width(&self, avail_width: Pt) -> Pt {
         if let Some(content) = self.content.as_ref() {
-            return content.intrinsic_width().unwrap_or(Pt::ZERO);
+            return content
+                .min_content_contribution(avail_width)
+                .or_else(|| content.intrinsic_width())
+                .unwrap_or(Pt::ZERO);
         }
         if self.no_wrap {
             return self.max_line_width();
@@ -13556,8 +13622,9 @@ impl TableCell {
         }
 
         for word in self.text.split_whitespace() {
-            let w = self.measure_text_width(word);
-            max = max.max(w);
+            max = max.max(minimum_unbreakable_text_width(word, &self.style, |text| {
+                self.measure_text_width(text)
+            }));
         }
         if max == Pt::ZERO {
             max = self.measure_text_width(&self.text);
@@ -18275,14 +18342,15 @@ impl TableFlowableData {
                     border.left + border.right
                 };
                 let extra = padding.left + padding.right + horizontal_border;
-                let (min_text, max_text) = if let Some(content) = cell.content.as_ref() {
+                let min_text = cell.min_word_width(span_width);
+                let max_text = if let Some(content) = cell.content.as_ref() {
                     let intrinsic = content.intrinsic_width().unwrap_or(Pt::ZERO);
                     let wrapped = content
                         .wrap(span_width.max(Pt::from_f32(1.0)), huge_pt())
                         .width;
-                    (intrinsic, wrapped.max(intrinsic))
+                    wrapped.max(intrinsic).max(min_text)
                 } else {
-                    (cell.min_word_width(), cell.max_line_width())
+                    cell.max_line_width()
                 };
                 let min_w = (min_text + extra).to_milli_i64();
                 let max_w = (max_text + extra).to_milli_i64();
@@ -19026,6 +19094,10 @@ impl Flowable for InlineBackgroundFlowable {
         self.child.multicol_text_min_content_width(avail_width)
     }
 
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.child.min_content_contribution(avail_width)
+    }
+
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child.flex_min_content_width(avail_width)
     }
@@ -19154,6 +19226,15 @@ impl InlineBlockLayoutFlowable {
     }
 
     fn intrinsic_inline_width(&self, min_content: bool, avail_width: Pt) -> Option<Pt> {
+        self.intrinsic_inline_width_with_contributions(min_content, avail_width, false)
+    }
+
+    fn intrinsic_inline_width_with_contributions(
+        &self,
+        min_content: bool,
+        avail_width: Pt,
+        contributions: bool,
+    ) -> Option<Pt> {
         let min_content = min_content && !self.no_wrap;
         let mut line_width = Pt::ZERO;
         let mut content_width = Pt::ZERO;
@@ -19176,7 +19257,14 @@ impl InlineBlockLayoutFlowable {
             if space && last_positive_is_space.is_none_or(|was_space| was_space) {
                 continue;
             }
-            let mut width = if min_content {
+            let mut width = if contributions {
+                let minimum = child.min_content_contribution(avail_width)?;
+                if min_content {
+                    minimum
+                } else {
+                    child.intrinsic_width()?.max(minimum)
+                }
+            } else if min_content {
                 child.flex_min_content_width(avail_width)?
             } else {
                 child.intrinsic_width()?
@@ -19952,6 +20040,10 @@ impl Flowable for InlineBlockLayoutFlowable {
             seen = true;
         }
         seen.then_some(if self.no_wrap { combined } else { maximum })
+    }
+
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.intrinsic_inline_width_with_contributions(true, avail_width, true)
     }
 
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
@@ -34958,6 +35050,71 @@ impl Flowable for ContainerFlowable {
         Some((border_box_width + margin.left + margin.right).max(Pt::ZERO))
     }
 
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        let mut child_minimum = Pt::ZERO;
+        for child in &self.state.children {
+            if !child.out_of_flow() {
+                child_minimum = child_minimum.max(child.min_content_contribution(avail_width)?);
+            }
+        }
+        let minimum = (child_minimum + self.flex_outer_width_minimum(avail_width)).max(Pt::ZERO);
+        let resolve = |spec: LengthSpec| -> Option<Pt> {
+            match spec {
+                LengthSpec::Absolute(_)
+                | LengthSpec::Em(_)
+                | LengthSpec::Rem(_)
+                | LengthSpec::Calc(CalcLength { percent: 0.0, .. })
+                | LengthSpec::Clamped(ClampedLength {
+                    value: CalcLength { percent: 0.0, .. },
+                    ..
+                })
+                | LengthSpec::FontRelative(FontRelativeLength {
+                    base: CalcLength { percent: 0.0, .. },
+                    ..
+                }) => {
+                    let width = spec.resolve_width(
+                        avail_width,
+                        self.state.font_size,
+                        self.state.root_font_size,
+                    );
+                    Some(
+                        self.flex_outer_width_for_basis(width, avail_width)
+                            .max(Pt::ZERO),
+                    )
+                }
+                LengthSpec::MinContent => Some(minimum),
+                LengthSpec::MaxContent | LengthSpec::Content => self.intrinsic_width(),
+                LengthSpec::FitContent => {
+                    Some(self.intrinsic_width()?.min(avail_width.max(minimum)))
+                }
+                // A percentage depending on this column cannot establish its
+                // own minimum during the table's intrinsic sizing pass.
+                _ => None,
+            }
+        };
+        let transferred = self
+            .state
+            .aspect_ratio
+            .filter(|_| {
+                matches!(
+                    self.state.height,
+                    LengthSpec::Absolute(_)
+                        | LengthSpec::Em(_)
+                        | LengthSpec::Rem(_)
+                        | LengthSpec::Calc(CalcLength { percent: 0.0, .. })
+                )
+            })
+            .and_then(|_| self.intrinsic_width());
+        let mut width = resolve(self.state.width).or(transferred).unwrap_or(minimum);
+        if let Some(maximum) = resolve(self.state.max_width) {
+            width = width.min(maximum);
+        }
+        if let Some(minimum) = resolve(self.state.min_width) {
+            width = width.max(minimum);
+        }
+        Some(width.max(Pt::ZERO))
+    }
+
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         let mut max_child = Pt::ZERO;
         for child in &self.state.children {
@@ -38575,6 +38732,10 @@ impl Flowable for ClearFlowable {
             .flex_outer_height_for_basis(basis, avail_width, avail_height)
     }
 
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.child.min_content_contribution(avail_width)
+    }
+
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child.flex_min_content_width(avail_width)
     }
@@ -38917,6 +39078,12 @@ impl Flowable for ExpandedWidthFlowable {
             self.expanded_width(avail_width),
             avail_height,
         )
+    }
+
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.child
+            .min_content_contribution(self.expanded_width(avail_width))
+            .map(|width| self.collapse_width_contribution(width))
     }
 
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
@@ -39603,6 +39770,10 @@ impl Flowable for MetaFlowable {
     fn flex_outer_height_for_basis(&self, basis: Pt, avail_width: Pt, avail_height: Pt) -> Pt {
         self.child
             .flex_outer_height_for_basis(basis, avail_width, avail_height)
+    }
+
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.child.min_content_contribution(avail_width)
     }
 
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
@@ -40421,6 +40592,10 @@ impl Flowable for RelativePositionedFlowable {
     fn flex_outer_height_for_basis(&self, basis: Pt, avail_width: Pt, avail_height: Pt) -> Pt {
         self.child
             .flex_outer_height_for_basis(basis, avail_width, avail_height)
+    }
+
+    fn min_content_contribution(&self, avail_width: Pt) -> Option<Pt> {
+        self.child.min_content_contribution(avail_width)
     }
 
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {

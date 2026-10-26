@@ -1,3 +1,28 @@
+# Fullbleed Release Notes - 2.5.36
+
+Auto-layout tables now account for permitted text breaks when choosing column
+widths. Long Japanese text can wrap within a specified table width without
+manual `<br>` elements. Plain cells honor `word-break: break-all`,
+`line-break: anywhere`, and `overflow-wrap: anywhere` during minimum-width
+measurement. Cells containing inline or block elements use their wrappable
+minimum instead of requiring the entire unwrapped line to fit.
+
+Wrapped inline text inside cells also starts at the first line's baseline,
+preventing earlier lines from being positioned above the row in both auto and
+fixed table layouts.
+
+Authored child widths, minimum widths, and box sizing remain part of a cell's
+minimum contribution, including through nested elements. Percentage widths
+that depend on the column do not create a circular minimum-size requirement.
+
+Paragraph minimum-width measurement uses its existing CJK punctuation rules.
+Unbreakable Latin text, `word-break: keep-all`, and `white-space: nowrap` retain
+their minimum width; emergency `overflow-wrap: break-word` does not shrink it.
+No browser, system font, or new runtime dependency is added.
+
+See the [2.5.36 runbook](docs/release/2.5.36-runbook.md) for required evidence and
+scope. This correction does not establish general CSS or CJK typography parity.
+
 # Fullbleed Release Notes - 2.5.35
 
 Long tables and auto-height containers with clipping overflow now continue onto
