@@ -26,17 +26,17 @@ Actual Fullbleed output. Open either preview for its PDF, or [explore the design
 | Python | `python -m pip install fullbleed` | [Python quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) |
 | Rust | `cargo add fullbleed` | [Native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/) |
 | Node.js / TypeScript | `npm install fullbleed` | [Node quickstart](https://docs.fullbleed.dev/getting-started/node/) · [Next.js PDF download](https://docs.fullbleed.dev/guides/nextjs-pdf/) |
-| Browser JavaScript | `npm install --save-exact fullbleed@0.7.1` | [PDF components and JSX](https://docs.fullbleed.dev/guides/javascript-components/) · [React starter](https://docs.fullbleed.dev/guides/react-pdf/) · [HTML/CSS starter](https://docs.fullbleed.dev/guides/browser-pdf/) |
-| C# / .NET | `dotnet add package FullBleed.DotNet --version 0.2.0` | [C# components and styles](https://docs.fullbleed.dev/guides/csharp-components/) · [NuGet quickstart](https://docs.fullbleed.dev/getting-started/dotnet/) |
+| Browser JavaScript | `npm install --save-exact fullbleed@0.8.1` | [PDF components and JSX](https://docs.fullbleed.dev/guides/javascript-components/) · [React starter](https://docs.fullbleed.dev/guides/react-pdf/) · [HTML/CSS starter](https://docs.fullbleed.dev/guides/browser-pdf/) |
+| C# / .NET | `dotnet add package FullBleed.DotNet --version 0.2.1` | [C# components and styles](https://docs.fullbleed.dev/guides/csharp-components/) · [NuGet quickstart](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
 The JavaScript package and the downloadable Node.js, browser, React, Vue,
-Next.js and component starters use **0.7.1**, wrapping engine **2.5.29**, with
+Next.js and component starters use **0.8.1**, wrapping engine **2.5.35**, with
 [styled and unstyled component HTML export](https://docs.fullbleed.dev/guides/javascript-components/#export-html-with-or-without-styles).
 All generate ordinary PDFs and previews. Import
 `fullbleed` in Node or `fullbleed/browser` in a web app. Node applications can use
 a [bounded render queue](https://docs.fullbleed.dev/guides/node-render-queue/)
 and optional process isolation.
-FullBleed.DotNet 0.2.0 uses engine 2.5.22. Its managed library targets .NET 8 and works with .NET 8, 9, and 10 applications, with C# document components, native rendering, compiled bindings, and previews. Its separate CLI adapter requires the Python CLI.
+FullBleed.DotNet 0.2.1 uses engine 2.5.35. Its managed library targets .NET 8 and works with .NET 8, 9, and 10 applications, with C# document components, native rendering, compiled bindings, and previews. Its separate CLI adapter requires the Python CLI.
 The Python package provides the complete CLI, including compiled variable-data jobs and print profiles; the Rust guide covers the native API.
 
 ## Your first PDF
@@ -111,7 +111,7 @@ Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-start
 
 ### C# and .NET
 
-Install [`FullBleed.DotNet`](https://www.nuget.org/packages/FullBleed.DotNet/0.2.0) in a .NET 8, 9, or 10 project and follow the [C# quickstart](https://docs.fullbleed.dev/getting-started/dotnet/). Compose documents with ordinary methods, LINQ children and immutable style objects. The [component guide](https://docs.fullbleed.dev/guides/csharp-components/) explains `WithClass`, attached stylesheets and inline overrides and includes a complete invoice download with explicit fonts. Existing HTML/CSS templates remain supported. Native rendering runs inside the .NET process on Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS, without a Python or browser runtime.
+Install [`FullBleed.DotNet`](https://www.nuget.org/packages/FullBleed.DotNet/0.2.1) in a .NET 8, 9, or 10 project and follow the [C# quickstart](https://docs.fullbleed.dev/getting-started/dotnet/). Compose documents with ordinary methods, LINQ children and immutable style objects. The [component guide](https://docs.fullbleed.dev/guides/csharp-components/) explains `WithClass`, attached stylesheets and inline overrides and includes a complete invoice download with explicit fonts. Existing HTML/CSS templates remain supported. Native rendering runs inside the .NET process on Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS, without a Python or browser runtime.
 
 <a id="compose-documents-in-python"></a>
 
@@ -130,7 +130,7 @@ functions, children and reusable styles instead of writing HTML strings:
 
 | Channel | Install | Component API |
 | --- | --- | --- |
-| Stable **2.5.35** | `python -m pip install fullbleed` | Existing HTML/CSS rendering and `fullbleed.ui` components |
+| Stable **2.5.36** | `python -m pip install fullbleed` | Existing HTML/CSS rendering and `fullbleed.ui` components |
 | Opt-in alpha **2.6.0a14** | `python -m pip install --pre "fullbleed==2.6.0a14"` | `fullbleed.components`: owned styles, named parts, data tables, static Bootstrap helpers, page bands and styled/unstyled HTML export |
 
 The component API remains experimental:
@@ -144,7 +144,7 @@ The language packages have their own versions and API coverage.
 
 The alpha also adds [native PDF links](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a14/docs/pdf-links.md)
 for both HTML and component authors, including internal destinations and wrapped
-links. This navigation work is not included in stable 2.5.35 or alpha 13.
+links. This navigation work is not included in stable 2.5.36 or alpha 13.
 
 The [complete-document migration guide](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a14/docs/component-namespace.md) maps
 styles, page geometry, metadata, fonts and renderer options from the existing
