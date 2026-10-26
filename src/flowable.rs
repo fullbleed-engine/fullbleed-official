@@ -4017,6 +4017,24 @@ mod text_baseline_tests {
     }
 
     #[test]
+    fn cjk_min_content_uses_normal_breaks_and_preserves_punctuation_groups() {
+        let paragraph = Paragraph::new("吾輩は猫である。名前はまだ無い。");
+        let minimum = paragraph
+            .flex_min_content_width(Pt::from_f32(500.0))
+            .unwrap();
+        assert_eq!(minimum, paragraph.measure_text_width("る。"));
+        assert!(minimum < paragraph.intrinsic_width().unwrap());
+
+        let mut style = TextStyle::default();
+        style.word_break = WordBreakMode::KeepAll;
+        let keep_all = Paragraph::new("吾輩は猫である。").with_style(style);
+        assert_eq!(
+            keep_all.flex_min_content_width(Pt::from_f32(500.0)),
+            keep_all.intrinsic_width()
+        );
+    }
+
+    #[test]
     fn pre_wrap_hangs_the_overflowing_separator_after_the_fitting_word() {
         let paragraph = Paragraph::new("alpha    beta gamma").with_whitespace(true, false);
         let fit = paragraph.measure_text_width("alpha    beta");
@@ -8877,28 +8895,51 @@ fn paragraph_may_split_word(paragraph: &Paragraph, word: &str, emergency: bool) 
 }
 
 fn paragraph_break_allowed_between(paragraph: &Paragraph, before: char, after: char) -> bool {
+    text_break_allowed_between(&paragraph.style, before, after)
+}
+
+fn text_break_allowed_between(style: &TextStyle, before: char, after: char) -> bool {
     if matches!(
-        paragraph.style.word_break,
+        style.word_break,
         crate::style::WordBreakMode::BreakAll | crate::style::WordBreakMode::Anywhere
-    ) || matches!(
-        paragraph.style.line_break,
-        crate::style::LineBreakMode::Anywhere
-    ) {
+    ) || matches!(style.line_break, crate::style::LineBreakMode::Anywhere)
+    {
         return true;
     }
-    if matches!(
-        paragraph.style.word_break,
-        crate::style::WordBreakMode::KeepAll
-    ) || (!is_east_asian_line_break_character(before)
-        && !is_east_asian_line_break_character(after))
+    if matches!(style.word_break, crate::style::WordBreakMode::KeepAll)
+        || (!is_east_asian_line_break_character(before)
+            && !is_east_asian_line_break_character(after))
     {
         return false;
     }
-    let strict = matches!(
-        paragraph.style.line_break,
-        crate::style::LineBreakMode::Strict
-    );
+    let strict = matches!(style.line_break, crate::style::LineBreakMode::Strict);
     !is_east_asian_opening_punctuation(before) && !is_east_asian_closing_punctuation(after, strict)
+}
+
+/// Measure the largest unbreakable part of a word using the same CJK rules
+/// as line layout. Emergency `break-word` wrapping must not lower this width.
+fn minimum_unbreakable_text_width(
+    text: &str,
+    style: &TextStyle,
+    measure: impl Fn(&str) -> Pt,
+) -> Pt {
+    let anywhere = matches!(
+        style.overflow_wrap,
+        crate::style::OverflowWrapMode::Anywhere
+    );
+    let mut maximum = Pt::ZERO;
+    let mut start = 0;
+    let mut previous = None;
+    for (index, current) in text.char_indices() {
+        if previous
+            .is_some_and(|before| anywhere || text_break_allowed_between(style, before, current))
+        {
+            maximum = maximum.max(measure(&text[start..index]));
+            start = index;
+        }
+        previous = Some(current);
+    }
+    maximum.max(measure(&text[start..]))
 }
 
 fn split_long_word_by_width(paragraph: &Paragraph, word: &str, max_width: Pt) -> Vec<String> {
@@ -9332,7 +9373,11 @@ impl Flowable for Paragraph {
         for line in self.text.split('\n') {
             for word in line.split_whitespace() {
                 for segment in word.split_inclusive('-') {
-                    max_w = max_w.max(self.measure_text_width(segment));
+                    max_w = max_w.max(minimum_unbreakable_text_width(
+                        segment,
+                        &self.style,
+                        |text| self.measure_text_width(text),
+                    ));
                 }
             }
         }
@@ -14009,8 +14054,9 @@ impl TableCell {
         }
 
         for word in self.text.split_whitespace() {
-            let w = self.measure_text_width(word);
-            max = max.max(w);
+            max = max.max(minimum_unbreakable_text_width(word, &self.style, |text| {
+                self.measure_text_width(text)
+            }));
         }
         if max == Pt::ZERO {
             max = self.measure_text_width(&self.text);
