@@ -975,6 +975,12 @@ jobs:
       - test-linux-wheels
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout description verifier
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+          persist-credentials: false
+
       - name: Download all wheel artifacts
         uses: actions/download-artifact@v8
         with:
@@ -996,8 +1002,10 @@ jobs:
       - name: Validate package metadata and abi3 wheel tags
         shell: bash
         run: |
-          python -m pip install "twine==7.0.0"
+          python -m pip install "twine==7.0.0" "readme-renderer[md]==45.0" "comrak==0.0.12"
+          python -m unittest tools.package_description_tests -v
           python -m twine check dist/*
+          python tools/check_package_description.py dist --expected-version "${{ needs.validate.outputs.version }}" --out target/package-description
           python - <<'PY'
           from pathlib import Path
 
@@ -1036,6 +1044,14 @@ jobs:
           assert not missing, f"missing wheel platforms: {missing}"
           print("\n".join(wheel.name for wheel in wheels))
           PY
+
+      - name: Retain checked package descriptions
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-package-descriptions
+          path: target/package-description
+          if-no-files-found: error
 
       - name: Upload complete distribution set
         uses: actions/upload-artifact@v7
