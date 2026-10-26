@@ -26,17 +26,23 @@ Actual Fullbleed output. Open either preview for its PDF, or [explore the design
 | Python | `python -m pip install fullbleed` | [Python quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) |
 | Rust | `cargo add fullbleed` | [Native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/) |
 | Node.js / TypeScript | `npm install fullbleed` | [Node quickstart](https://docs.fullbleed.dev/getting-started/node/) · [Next.js PDF download](https://docs.fullbleed.dev/guides/nextjs-pdf/) |
-| Browser JavaScript | `npm install --save-exact fullbleed@0.8.1` | [PDF components and JSX](https://docs.fullbleed.dev/guides/javascript-components/) · [React starter](https://docs.fullbleed.dev/guides/react-pdf/) · [HTML/CSS starter](https://docs.fullbleed.dev/guides/browser-pdf/) |
-| C# / .NET | `dotnet add package FullBleed.DotNet --version 0.2.1` | [C# components and styles](https://docs.fullbleed.dev/guides/csharp-components/) · [NuGet quickstart](https://docs.fullbleed.dev/getting-started/dotnet/) |
+| Browser JavaScript | `npm install fullbleed` | [PDF components and JSX](https://docs.fullbleed.dev/guides/javascript-components/) · [React starter](https://docs.fullbleed.dev/guides/react-pdf/) · [HTML/CSS starter](https://docs.fullbleed.dev/guides/browser-pdf/) |
+| C# / .NET | `dotnet add package FullBleed.DotNet` | [C# components and styles](https://docs.fullbleed.dev/guides/csharp-components/) · [NuGet quickstart](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
-The JavaScript package and the downloadable Node.js, browser, React, Vue,
-Next.js and component starters use **0.8.1**, wrapping engine **2.5.35**, with
-[styled and unstyled component HTML export](https://docs.fullbleed.dev/guides/javascript-components/#export-html-with-or-without-styles).
-All generate ordinary PDFs and previews. Import
-`fullbleed` in Node or `fullbleed/browser` in a web app. Node applications can use
-a [bounded render queue](https://docs.fullbleed.dev/guides/node-render-queue/)
+The language packages release independently. The [Node quickstart](https://docs.fullbleed.dev/getting-started/node/),
+[browser guide](https://docs.fullbleed.dev/guides/browser-pdf/) and
+[C# quickstart](https://docs.fullbleed.dev/getting-started/dotnet/) record the
+tested package and engine versions; downloadable starters pin their dependencies.
+
+JavaScript applications can [export styled or unstyled component HTML](https://docs.fullbleed.dev/guides/javascript-components/#export-html-with-or-without-styles)
+and generate PDFs and previews. Import `fullbleed` in Node or `fullbleed/browser`
+in a web app. Node applications can use a
+[bounded render queue](https://docs.fullbleed.dev/guides/node-render-queue/)
 and optional process isolation.
-FullBleed.DotNet 0.2.1 uses engine 2.5.35. Its managed library targets .NET 8 and works with .NET 8, 9, and 10 applications, with C# document components, native rendering, compiled bindings, and previews. Its separate CLI adapter requires the Python CLI.
+
+FullBleed.DotNet's managed library targets .NET 8 and works with .NET 8, 9, and 10
+applications. It includes C# components, native rendering, compiled bindings and
+previews. Its separate CLI adapter requires the Python CLI.
 The Python package provides the complete CLI, including compiled variable-data jobs and print profiles; the Rust guide covers the native API.
 
 ## Your first PDF
@@ -111,7 +117,7 @@ Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-start
 
 ### C# and .NET
 
-Install [`FullBleed.DotNet`](https://www.nuget.org/packages/FullBleed.DotNet/0.2.1) in a .NET 8, 9, or 10 project and follow the [C# quickstart](https://docs.fullbleed.dev/getting-started/dotnet/). Compose documents with ordinary methods, LINQ children and immutable style objects. The [component guide](https://docs.fullbleed.dev/guides/csharp-components/) explains `WithClass`, attached stylesheets and inline overrides and includes a complete invoice download with explicit fonts. Existing HTML/CSS templates remain supported. Native rendering runs inside the .NET process on Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS, without a Python or browser runtime.
+Install [`FullBleed.DotNet`](https://www.nuget.org/packages/FullBleed.DotNet) in a .NET 8, 9, or 10 project and follow the [C# quickstart](https://docs.fullbleed.dev/getting-started/dotnet/). Compose documents with ordinary methods, LINQ children and immutable style objects. The [component guide](https://docs.fullbleed.dev/guides/csharp-components/) explains `WithClass`, attached stylesheets and inline overrides and includes a complete invoice download with explicit fonts. Existing HTML/CSS templates remain supported. Native rendering runs inside the .NET process on Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS, without a Python or browser runtime.
 
 <a id="compose-documents-in-python"></a>
 
@@ -139,7 +145,7 @@ settled. `fullbleed.components` is the intended public namespace for the 2.6 API
 Existing `fullbleed.ui` imports remain supported, and earlier alpha imports from
 `fullbleed.ui.experimental` expose the same objects. See the [release-status review and graduation
 criteria](https://docs.fullbleed.dev/guides/component-status/) or
-[use the styling preview pinned to alpha 11](https://docs.fullbleed.dev/guides/component-preview-11/).
+[read the current component guide](https://docs.fullbleed.dev/guides/component-preview-12/).
 The language packages have their own versions and API coverage.
 
 The alpha also adds [native PDF links](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a14/docs/pdf-links.md)
@@ -478,7 +484,7 @@ HTML/CSS and Python components, plus the authored accessible community guide.
 The paired designs share data, fonts, CSS and artwork. The
 installer copies source files; it does not install dependencies or execute the
 project. Each kit pins its tested component prerelease in `requirements.txt`.
-Follow the [current preview guide](https://docs.fullbleed.dev/guides/component-preview-8/)
+Follow the [kit guide pinned to alpha 8](https://docs.fullbleed.dev/guides/component-preview-8/)
 to install it in a separate environment, compare the four pages, and edit with
 a live PDF preview. For a smaller starting point, choose the
 [`python-components` starter](https://docs.fullbleed.dev/guides/bootstrap-components-preview/)
