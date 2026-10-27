@@ -265,6 +265,21 @@ jobs:
       - name: Verify independent font synthesis in PDFs and previews
         run: python -I tools/smoke_font_synthesis.py --out target/font-synthesis
 
+      - name: Verify font subsets in composed and merged PDF previews
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+        run: python -m pytest tests/test_fullbleed_composed_preview_fonts.py -q --basetemp target/composed-preview-fonts --junitxml target/composed-preview-fonts.xml
+
+      - name: Retain composed PDF font regression evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: composed-preview-fonts-${{ runner.os }}
+          path: |
+            target/composed-preview-fonts/
+            target/composed-preview-fonts.xml
+          if-no-files-found: error
+
       - name: Verify saved table tags, content ownership and header relationships
         run: python -I tools/smoke_table_tagging.py --out target/table-tagging
 
