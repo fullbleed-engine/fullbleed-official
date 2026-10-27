@@ -1,3 +1,23 @@
+# Fullbleed Release Notes - 2.5.38
+
+CSS-generated quotation marks now follow document order across inline, block,
+inline-block, and display-contents elements. Layout measurements no longer
+consume quote depth or choose closing marks before a nested quotation is read.
+Silent no-open-quote and no-close-quote tokens update nesting without drawing
+text. Subtrees with `display: none` and elements without generated pseudo
+children do not change the following quotation's depth. `visibility: hidden`
+continues to participate in quotation nesting.
+
+The correction applies to ordinary rendering, compiled templates, repeated
+records, and reflowing records. Reusing an engine for another document starts
+with fresh quote depth. Existing counter expressions retain their rendering
+behavior. This is a focused backport of PR #135; no component-preview API or new
+runtime dependency is included.
+
+See the [2.5.38 runbook](docs/release/2.5.38-runbook.md) for validation gates and
+scope. The prior development-branch timing checks were inconclusive; this change
+does not claim improved throughput or general CSS parity.
+
 # Fullbleed Release Notes - 2.5.37
 
 Package descriptions now lead with the HTML/CSS workflow, keep component

@@ -38,7 +38,7 @@ use crate::style::{
 use crate::types::{Pt, Size};
 use crate::{BreakAfter, BreakBefore, BreakInside, Color, Flowable};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 const FORCED_LINE_BREAK: char = '\u{2028}';
 
@@ -111,6 +111,9 @@ struct CounterState {
     context: Option<NodeRef>,
     pseudo_context: bool,
     quote_depth: usize,
+    // Layout probes clone CounterState and can visit boxes more than once.
+    // Quote strings instead belong to one logical document-order traversal.
+    document_quotes: Arc<OnceLock<DocumentQuoteParts>>,
     target_texts: Arc<HashMap<String, String>>,
     target_pages: Arc<HashMap<String, usize>>,
     table_semantics: Arc<crate::table_semantics::HtmlTableIndex>,
@@ -290,6 +293,207 @@ fn document_target_texts(document: &NodeRef) -> HashMap<String, String> {
 
 fn quote_pair_at_depth(quotes: &[(String, String)], depth: usize) -> Option<&(String, String)> {
     quotes.get(depth).or_else(|| quotes.last())
+}
+
+type DocumentQuoteParts = HashMap<(usize, u8), Vec<GeneratedContentPart>>;
+
+fn has_quote_parts(style: &ComputedStyle) -> bool {
+    style.generated_content.as_ref().is_some_and(|parts| {
+        parts.iter().any(|part| {
+            matches!(
+                part,
+                GeneratedContentPart::OpenQuote
+                    | GeneratedContentPart::CloseQuote
+                    | GeneratedContentPart::NoOpenQuote
+                    | GeneratedContentPart::NoCloseQuote
+            )
+        })
+    })
+}
+
+fn document_quote_parts(document: &NodeRef, resolver: &StyleResolver) -> DocumentQuoteParts {
+    fn remember(
+        node: &NodeRef,
+        pseudo: crate::style::PseudoTarget,
+        style: Option<ComputedStyle>,
+        state: &mut CounterState,
+        output: &mut DocumentQuoteParts,
+    ) {
+        let Some(style) = style else { return };
+        if matches!(style.display, DisplayMode::None) || !has_quote_parts(&style) {
+            return;
+        }
+        let parts = style.generated_content.as_ref().expect("quote parts");
+        let resolved = parts
+            .iter()
+            .filter_map(|part| match part {
+                GeneratedContentPart::OpenQuote => state
+                    .open_quote(&style.quotes, true)
+                    .map(GeneratedContentPart::Text),
+                GeneratedContentPart::CloseQuote => state
+                    .close_quote(&style.quotes, true)
+                    .map(GeneratedContentPart::Text),
+                GeneratedContentPart::NoOpenQuote => {
+                    state.open_quote(&style.quotes, false);
+                    None
+                }
+                GeneratedContentPart::NoCloseQuote => {
+                    state.close_quote(&style.quotes, false);
+                    None
+                }
+                _ => Some(part.clone()),
+            })
+            .collect();
+        output.insert((node.identity_key(), pseudo as u8), resolved);
+    }
+
+    fn walk(
+        node: &NodeRef,
+        resolver: &StyleResolver,
+        parent_style: &ComputedStyle,
+        ancestors: &mut Vec<ElementInfo>,
+        state: &mut CounterState,
+        output: &mut DocumentQuoteParts,
+    ) {
+        let Some(element) = node.as_element() else {
+            return;
+        };
+        let mut info = element_info(node, resolver.has_sibling_selectors());
+        // Replaced elements and line breaks do not generate these pseudo
+        // children. An ignored no-open-quote must not affect following text.
+        if matches!(
+            info.tag.as_str(),
+            "head"
+                | "script"
+                | "style"
+                | "template"
+                | "img"
+                | "svg"
+                | "br"
+                | "input"
+                | "textarea"
+                | "select"
+        ) {
+            return;
+        }
+        let inline = element.attributes.borrow().get("style").map(str::to_string);
+        let style = resolver.compute_style(&info, parent_style, inline.as_deref(), ancestors);
+        if matches!(style.display, DisplayMode::None) {
+            return;
+        }
+        info.apply_computed_container_style(&style);
+        if style_is_css_list_item(&style) {
+            remember(
+                node,
+                crate::style::PseudoTarget::Marker,
+                resolver.compute_marker_style(&info, &style, ancestors),
+                state,
+                output,
+            );
+        }
+        if matches!(style.float_mode, FloatMode::Footnote) {
+            for pseudo in [
+                crate::style::PseudoTarget::FootnoteCall,
+                crate::style::PseudoTarget::FootnoteMarker,
+            ] {
+                remember(
+                    node,
+                    pseudo,
+                    resolver.compute_pseudo_style(&info, &style, ancestors, pseudo),
+                    state,
+                    output,
+                );
+            }
+        }
+        remember(
+            node,
+            crate::style::PseudoTarget::Before,
+            resolver.compute_pseudo_style(
+                &info,
+                &style,
+                ancestors,
+                crate::style::PseudoTarget::Before,
+            ),
+            state,
+            output,
+        );
+        ancestors.push(info.clone());
+        for child in node.children() {
+            walk(&child, resolver, &style, ancestors, state, output);
+        }
+        ancestors.pop();
+        remember(
+            node,
+            crate::style::PseudoTarget::After,
+            resolver.compute_pseudo_style(
+                &info,
+                &style,
+                ancestors,
+                crate::style::PseudoTarget::After,
+            ),
+            state,
+            output,
+        );
+    }
+
+    let mut output = HashMap::new();
+    let mut state = CounterState::default();
+    let base = resolver.default_style();
+    let mut ancestors = Vec::new();
+    let mut root_style = base.clone();
+    if let Ok(html) = document.select_first("html") {
+        let node = html.as_node();
+        let mut info = element_info(node, resolver.has_sibling_selectors());
+        let inline = node
+            .as_element()
+            .and_then(|element| element.attributes.borrow().get("style").map(str::to_string));
+        root_style = resolver.compute_style(&info, &base, inline.as_deref(), &ancestors);
+        info.apply_computed_container_style(&root_style);
+        ancestors.push(info);
+    }
+    if let Ok(body) = document.select_first("body") {
+        walk(
+            body.as_node(),
+            resolver,
+            &root_style,
+            &mut ancestors,
+            &mut state,
+            &mut output,
+        );
+    } else {
+        for child in document.children() {
+            walk(
+                &child,
+                resolver,
+                &root_style,
+                &mut ancestors,
+                &mut state,
+                &mut output,
+            );
+        }
+    }
+    output
+}
+
+fn apply_document_quotes(
+    style: &mut ComputedStyle,
+    counters: &CounterState,
+    resolver: &StyleResolver,
+    pseudo: crate::style::PseudoTarget,
+) {
+    if !has_quote_parts(style) {
+        return;
+    }
+    let Some(node) = counters.context.as_ref() else {
+        return;
+    };
+    let index = counters.document_quotes.get_or_init(|| {
+        let document = node.ancestors().last().unwrap_or_else(|| node.clone());
+        document_quote_parts(&document, resolver)
+    });
+    if let Some(parts) = index.get(&(node.identity_key(), pseudo as u8)) {
+        style.generated_content = Some(parts.clone());
+    }
 }
 
 fn apply_counter_mutations(
@@ -2173,12 +2377,20 @@ fn footnote_node_to_layout_item(
     }
     let number = counters.get("footnote");
 
-    let call_pseudo = resolver.compute_pseudo_style(
+    let mut call_pseudo = resolver.compute_pseudo_style(
         info,
         style,
         ancestors,
         crate::style::PseudoTarget::FootnoteCall,
     );
+    if let Some(pseudo) = call_pseudo.as_mut() {
+        apply_document_quotes(
+            pseudo,
+            counters,
+            resolver,
+            crate::style::PseudoTarget::FootnoteCall,
+        );
+    }
     let call_style = call_pseudo.as_ref().unwrap_or(style);
     let call_text = call_pseudo
         .as_ref()
@@ -2199,12 +2411,20 @@ fn footnote_node_to_layout_item(
         LayoutItem::Block { .. } => unreachable!("footnote calls compile as inline content"),
     };
 
-    let marker_pseudo = resolver.compute_pseudo_style(
+    let mut marker_pseudo = resolver.compute_pseudo_style(
         info,
         style,
         ancestors,
         crate::style::PseudoTarget::FootnoteMarker,
     );
+    if let Some(pseudo) = marker_pseudo.as_mut() {
+        apply_document_quotes(
+            pseudo,
+            counters,
+            resolver,
+            crate::style::PseudoTarget::FootnoteMarker,
+        );
+    }
     let marker_style = marker_pseudo.as_ref().unwrap_or(style);
     let marker_text = marker_pseudo
         .as_ref()
@@ -6073,9 +6293,11 @@ fn pseudo_items_for(
     svg_raster_fallback: bool,
     pseudo: crate::style::PseudoTarget,
 ) -> Vec<LayoutItem> {
-    let Some(pseudo_style) = resolver.compute_pseudo_style(info, style, ancestors, pseudo) else {
+    let Some(mut pseudo_style) = resolver.compute_pseudo_style(info, style, ancestors, pseudo)
+    else {
         return Vec::new();
     };
+    apply_document_quotes(&mut pseudo_style, counters, resolver, pseudo);
     let previous_pseudo = counters.enter_pseudo();
     let items = pseudo_content_items(
         &pseudo_style,
@@ -6116,9 +6338,11 @@ fn pseudo_text_for(
     report: Option<&mut GlyphCoverageReport>,
     pseudo: crate::style::PseudoTarget,
 ) -> String {
-    let Some(pseudo_style) = resolver.compute_pseudo_style(info, style, ancestors, pseudo) else {
+    let Some(mut pseudo_style) = resolver.compute_pseudo_style(info, style, ancestors, pseudo)
+    else {
         return String::new();
     };
+    apply_document_quotes(&mut pseudo_style, counters, resolver, pseudo);
     if !style_can_mutate_counters(&pseudo_style) {
         return String::new();
     }
@@ -6142,9 +6366,15 @@ fn marker_presentation(
     ancestors: &[ElementInfo],
     counters: &mut CounterState,
 ) -> (Option<Option<String>>, Option<ComputedStyle>) {
-    let Some(marker_style) = resolver.compute_marker_style(info, style, ancestors) else {
+    let Some(mut marker_style) = resolver.compute_marker_style(info, style, ancestors) else {
         return (None, None);
     };
+    apply_document_quotes(
+        &mut marker_style,
+        counters,
+        resolver,
+        crate::style::PseudoTarget::Marker,
+    );
     let content_override = marker_style.marker_content_overridden.then(|| {
         generated_content_text(&marker_style, counters)
             .map(|content| apply_text_transform(&content, marker_style.text_transform))
