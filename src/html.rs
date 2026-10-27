@@ -124,6 +124,10 @@ struct CounterState {
     // True only while lowering content whose emitted semantic owner accepts
     // inline text directly, such as a paragraph, heading, label or link.
     inline_text_owner: bool,
+    // A contents element inherits through its DOM parent but creates no box.
+    // Keep the nearest box-generating parent separately for flex/grid item
+    // blockification, including through nested transparent wrappers.
+    contents_layout_parent: Option<Arc<ComputedStyle>>,
     running_layouts: Option<crate::running_layout::RunningLayouts>,
     // A scoped lowering instruction, never a mutation of the authored DOM.
     // Inline descendants keep their own computed styles while the selected
@@ -1969,11 +1973,19 @@ fn collect_children(
     // Direct text still belongs to an anonymous inline run when a block child
     // interrupts it. Keep the surrounding fragments inline here; the mixed
     // child stream below separates the runs around the actual block boundary.
+    let layout_parent_display = if matches!(parent_style.display, DisplayMode::Contents) {
+        counters
+            .contents_layout_parent
+            .as_ref()
+            .map_or(parent_style.display, |style| style.display)
+    } else {
+        parent_style.display
+    };
     let inline_context = (matches!(parent_style.display, DisplayMode::Inline)
         || has_boundary_space_candidate
         || children.iter().any(|child| child.as_element().is_some()))
         && !matches!(
-            parent_style.display,
+            layout_parent_display,
             DisplayMode::Flex
                 | DisplayMode::InlineFlex
                 | DisplayMode::Grid
@@ -2942,24 +2954,28 @@ fn node_to_flowables_in_scope(
             // multiply that value across the native thread stack.
             let mut style =
                 resolver.compute_style(&info, parent_style, inline_style.as_deref(), ancestors);
+            let contents_layout_parent = matches!(parent_style.display, DisplayMode::Contents)
+                .then(|| counters.contents_layout_parent.clone())
+                .flatten();
+            let layout_parent_style = contents_layout_parent.as_deref().unwrap_or(parent_style);
             resolve_html_auto_direction(node, &mut style);
             resolve_inline_svg_mask_sources(node, &mut style);
             resolve_inline_svg_clip_source(node, &mut style);
             resolve_inline_svg_filter_sources(node, &mut style);
-            adopt_parent_subgrid_tracks(&mut style, parent_style);
+            adopt_parent_subgrid_tracks(&mut style, layout_parent_style);
             info.apply_computed_container_style(&style);
             if let Some(perf_logger) = perf {
                 let ms = t_style.elapsed().as_secs_f64() * 1000.0;
                 perf_logger.log_span_ms("story.style.compute", doc_id, ms);
             }
             let parent_is_grid = matches!(
-                parent_style.display,
+                layout_parent_style.display,
                 DisplayMode::Grid | DisplayMode::InlineGrid
             );
             let suppress_unused_multicol_rule =
                 parent_is_grid || style.word_spacing != parent_style.word_spacing;
             let parent_is_flex = matches!(
-                parent_style.display,
+                layout_parent_style.display,
                 DisplayMode::Flex
                     | DisplayMode::InlineFlex
                     | DisplayMode::Grid
@@ -2968,15 +2984,17 @@ fn node_to_flowables_in_scope(
             let mut flex_item_basis_override = None;
             if parent_is_flex {
                 let parent_main_axis_is_vertical = if matches!(
-                    parent_style.display,
+                    layout_parent_style.display,
                     DisplayMode::Flex | DisplayMode::InlineFlex
                 ) {
                     let logical_column = matches!(
-                        parent_style.flex_direction,
+                        layout_parent_style.flex_direction,
                         FlexDirectionMode::Column | FlexDirectionMode::ColumnReverse
                     );
-                    let vertical_writing =
-                        !matches!(parent_style.writing_mode, WritingModeMode::HorizontalTb);
+                    let vertical_writing = !matches!(
+                        layout_parent_style.writing_mode,
+                        WritingModeMode::HorizontalTb
+                    );
                     logical_column != vertical_writing
                 } else {
                     false
@@ -3129,6 +3147,10 @@ fn node_to_flowables_in_scope(
             // context, while paint and box-model properties on the discarded
             // box have no effect.
             if matches!(style.display, DisplayMode::Contents) {
+                let previous_layout_parent = counters.contents_layout_parent.clone();
+                if !matches!(parent_style.display, DisplayMode::Contents) {
+                    counters.contents_layout_parent = Some(Arc::new(parent_style.clone()));
+                }
                 let out = collect_children(
                     node,
                     resolver,
@@ -3143,6 +3165,7 @@ fn node_to_flowables_in_scope(
                     perf,
                     doc_id,
                 );
+                counters.contents_layout_parent = previous_layout_parent;
                 let out = inject_pseudo_items(out, &before_items, &after_items);
                 ancestors.pop();
                 return out;
