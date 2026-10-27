@@ -83,6 +83,7 @@ impl Matrix {
 #[derive(Clone, Default)]
 struct PdfFontResource {
     font_name: String,
+    raster_font_name: Option<String>,
     to_unicode: PdfToUnicodeMap,
     embedded_font: Option<Arc<Vec<u8>>>,
     metrics: PdfFontMetrics,
@@ -238,6 +239,33 @@ struct PdfResources {
 }
 
 impl PdfResources {
+    fn bind_generated_type3_fonts(&mut self) {
+        let mut sources: HashMap<String, Option<(String, Arc<Vec<u8>>)>> = HashMap::new();
+        for font in self.fonts.values().filter(|font| !font.generated_type3) {
+            let (Some(name), Some(data)) = (&font.raster_font_name, &font.embedded_font) else {
+                continue;
+            };
+            let source = sources
+                .entry(font.font_name.clone())
+                .or_insert_with(|| Some((name.clone(), data.clone())));
+            if source
+                .as_ref()
+                .is_some_and(|(existing, _)| existing != name)
+            {
+                // A logical name cannot identify one of multiple different programs.
+                *source = None;
+            }
+        }
+        for font in self.fonts.values_mut() {
+            if font.generated_type3 && font.embedded_font.is_none() {
+                if let Some(Some((name, data))) = sources.get(&font.font_name) {
+                    font.raster_font_name = Some(name.clone());
+                    font.embedded_font = Some(data.clone());
+                }
+            }
+        }
+    }
+
     fn merged(&self, child: &PdfResources) -> PdfResources {
         let mut out = self.clone();
         for (k, v) in &child.fonts {
@@ -255,6 +283,7 @@ impl PdfResources {
         for (k, v) in &child.shadings {
             out.shadings.insert(k.clone(), v.clone());
         }
+        out.bind_generated_type3_fonts();
         out
     }
 }
@@ -732,6 +761,7 @@ fn parse_operations(
                             .cloned()
                             .unwrap_or_else(|| PdfFontResource {
                                 font_name: font_res_name.clone(),
+                                raster_font_name: None,
                                 to_unicode: PdfToUnicodeMap::default(),
                                 embedded_font: None,
                                 metrics: PdfFontMetrics::default(),
@@ -741,7 +771,11 @@ fn parse_operations(
                             });
                     let size = op_f32(op, 1).unwrap_or(12.0).abs();
                     state.font_resource = Some(font_res_name);
-                    state.font_name = font_res.font_name.clone();
+                    state.font_name = font_res
+                        .raster_font_name
+                        .as_ref()
+                        .unwrap_or(&font_res.font_name)
+                        .clone();
                     state.font_size = Pt::from_f32(size.max(0.0));
                     commands.push(Command::SetFontName(state.font_name.clone()));
                     commands.push(Command::SetFontSize(state.font_size));
@@ -1674,25 +1708,31 @@ fn resources_from_object(
         let font_dict = resolve_dict(doc, font_obj)?;
         for (name, font_ref_obj) in font_dict.iter() {
             let resource_name = name_bytes_to_string(name);
-            let font = resolve_font_resource(doc, font_ref_obj)?;
+            let mut font = resolve_font_resource(doc, font_ref_obj)?;
             if let Some(data) = font.embedded_font.as_ref() {
+                // Different PDFs can embed different subsets under the same
+                // BaseFont name. Glyph IDs belong to the font program, not its
+                // family name or a document-local resource label such as F1.
+                let identity = fullbleed_audit_contract::sha256::Sha256::digest(data);
+                let raster_name = format!(
+                    "FullbleedPdfFont{}",
+                    identity
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>()
+                );
                 embedded_fonts
-                    .entry(font.font_name.clone())
+                    .entry(raster_name.clone())
                     .or_insert_with(|| data.clone());
+                font.raster_font_name = Some(raster_name);
             }
             out.fonts.insert(resource_name, font);
         }
         // Fullbleed's reusable synthetic-bold Type 3 fonts contain glyph
         // programs rather than a second embedded font stream. Associate them
-        // with the sibling embedded source face after every resource has been
-        // discovered so dictionary iteration order cannot affect previews.
-        for font in out.fonts.values_mut() {
-            if font.embedded_font.is_none() && font.generated_type3 {
-                if let Some(data) = embedded_fonts.get(&font.font_name) {
-                    font.embedded_font = Some(data.clone());
-                }
-            }
-        }
+        // with a source face in this resource scope, never a same-named font
+        // from a different page or form. Inherited resources are handled by merged().
+        out.bind_generated_type3_fonts();
     }
 
     if let Ok(xobj_obj) = dict.get(b"XObject") {
@@ -1763,6 +1803,7 @@ fn resolve_font_resource(
         _ => {
             return Ok(PdfFontResource {
                 font_name: "Helvetica".to_string(),
+                raster_font_name: None,
                 to_unicode: PdfToUnicodeMap::default(),
                 embedded_font: None,
                 metrics: PdfFontMetrics::default(),
@@ -1790,6 +1831,7 @@ fn resolve_font_resource(
     let code_to_gid = parse_code_to_gid_map(doc, dict, metrics.code_encoding);
     Ok(PdfFontResource {
         font_name,
+        raster_font_name: None,
         to_unicode,
         embedded_font,
         metrics,
@@ -4687,6 +4729,101 @@ endbfrange
             .expect("preview PNG")
             .into_rgba8();
         assert!(has_non_white_pixel(&image));
+    }
+
+    #[test]
+    fn finalized_preview_keeps_template_and_overlay_font_subsets_distinct() {
+        let root = std::env::temp_dir().join(format!(
+            "fullbleed_preview_font_subsets_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("fixture directory");
+        let mut bundle = crate::AssetBundle::default();
+        bundle.add(crate::Asset::new(
+            "PreviewFace".to_string(),
+            crate::AssetKind::Font,
+            include_bytes!("../python/fullbleed_assets/fonts/NotoSans-Regular.ttf").to_vec(),
+            None,
+            true,
+        ));
+        let engine = crate::FullBleed::builder()
+            .register_bundle(bundle)
+            .build()
+            .expect("engine");
+        let css = "@page { size: 300pt 140pt; margin: 0; } body { margin: 0; font: 22pt PreviewFace; } p { position: absolute; left: 12pt; margin: 0; } .top { top: 12pt; } .bottom { top: 76pt; }";
+        for (index, (first, second)) in
+            [("ABCD", "WXYZ 0123456789 -"), ("WXYZ 0123456789 -", "ABCD")]
+                .into_iter()
+                .enumerate()
+        {
+            let template_html = format!("<p class='top'>{first}</p>");
+            let overlay_html = format!("<p class='bottom'>{second}</p>");
+            let template = engine
+                .render_to_buffer(&template_html, css)
+                .expect("template");
+            let overlay = engine
+                .render_to_buffer(&overlay_html, css)
+                .expect("overlay");
+            let (_, template_fonts) =
+                parse_pdf_pages(&LoDocument::load_mem(&template).expect("template PDF"))
+                    .expect("template font programs");
+            let (_, overlay_fonts) =
+                parse_pdf_pages(&LoDocument::load_mem(&overlay).expect("overlay PDF"))
+                    .expect("overlay font programs");
+            assert_eq!(template_fonts.len(), 1);
+            assert_eq!(overlay_fonts.len(), 1);
+            assert!(
+                template_fonts.values().next() != overlay_fonts.values().next(),
+                "the fixture must contain different subsets of the same face"
+            );
+            let control = engine
+                .render_to_buffer(&format!("{template_html}{overlay_html}"), css)
+                .expect("combined control");
+            let template_path = root.join(format!("template-{index}.pdf"));
+            let overlay_path = root.join(format!("overlay-{index}.pdf"));
+            let output_path = root.join(format!("composed-{index}.pdf"));
+            std::fs::write(&template_path, &template).expect("write template");
+            std::fs::write(&overlay_path, &overlay).expect("write overlay");
+            std::fs::write(root.join(format!("control-{index}.pdf")), &control)
+                .expect("write control");
+            let mut catalog = TemplateCatalog::default();
+            catalog
+                .insert(TemplateAsset {
+                    template_id: "background".to_string(),
+                    pdf_path: template_path,
+                    sha256: None,
+                    page_count: Some(1),
+                })
+                .expect("catalog");
+            let plan = [ComposePagePlan {
+                template_id: "background".to_string(),
+                template_page_index: 0,
+                overlay_page_index: 0,
+                dx: 0.0,
+                dy: 0.0,
+            }];
+            compose_overlay_with_template_catalog(&catalog, &overlay_path, &output_path, &plan)
+                .expect("compose");
+            let actual =
+                pdf_path_to_png_pages(&output_path, 96, None, true).expect("composed preview");
+            let expected =
+                pdf_bytes_to_png_pages(&control, 96, None, true).expect("control preview");
+            assert_eq!(actual.len(), 1);
+            assert_eq!(expected.len(), 1);
+            std::fs::write(root.join(format!("actual-{index}.png")), &actual[0])
+                .expect("actual PNG");
+            std::fs::write(root.join(format!("expected-{index}.png")), &expected[0])
+                .expect("expected PNG");
+            assert!(
+                actual[0] == expected[0],
+                "composition must preserve both subsets; retained fixture: {}",
+                root.display()
+            );
+        }
     }
 
     #[test]

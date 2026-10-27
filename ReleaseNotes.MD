@@ -1,3 +1,20 @@
+# Fullbleed Release Notes - 2.5.39
+
+Native previews now distinguish embedded font programs when several PDF pages
+or forms use different subsets of the same font family. Previously, a preview
+could borrow the first subset and omit or substitute glyphs from later subsets.
+This affected template/overlay composition and PDFs assembled from independently
+generated pages; the saved PDF could contain the correct text and still have an
+incorrect PNG preview.
+
+The preview renderer identifies each embedded program by its complete content
+hash. Fullbleed's synthetic-bold Type 3 fonts resolve their source face within
+their own resource scope. No new runtime dependency or public API is introduced.
+
+See the [2.5.39 runbook](docs/release/2.5.39-runbook.md) for the negative control,
+installed-wheel regressions, independent PDF inspection and release gates.
+This correction does not establish general PDF raster parity or conformance.
+
 # Fullbleed Release Notes - 2.5.38
 
 CSS-generated quotation marks now follow document order across inline, block,
