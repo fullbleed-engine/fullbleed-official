@@ -1,3 +1,17 @@
+# Fullbleed Release Notes - 2.5.40
+
+Underlines, overlines and strikethroughs now continue across interior word
+spaces. Collapsed spaces at line edges remain unpainted. Nested inline text
+keeps the ancestor's decoration, color and baseline; a child's
+`text-decoration: none` no longer erases a line drawn by its ancestor. Atomic
+inline boxes isolate inherited lines while preserving their own decorations.
+
+This is a focused backport of the existing development-branch correction.
+No new runtime dependency or public API is introduced. The component alpha
+remains experimental. See the [2.5.40 runbook](docs/release/2.5.40-runbook.md)
+for the stable negative control, installed-wheel checks and release gates.
+These checks do not establish general CSS parity or PDF conformance.
+
 # Fullbleed Release Notes - 2.5.39
 
 Native previews now distinguish embedded font programs when several PDF pages

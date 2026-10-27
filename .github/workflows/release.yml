@@ -217,6 +217,17 @@ jobs:
           path: target/text-decoration-thickness
           if-no-files-found: warn
 
+      - name: Verify continuous decorations across word spaces and inline boundaries
+        run: python -I tools/smoke_text_decoration_spaces.py --out target/text-decoration-spaces
+
+      - name: Retain continuous-decoration PDFs and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-text-decoration-spaces
+          path: target/text-decoration-spaces
+          if-no-files-found: error
+
       - name: Verify hidden HTML text and author display overrides
         run: python -I tools/smoke_hidden_text.py --out target/hidden-text
 
