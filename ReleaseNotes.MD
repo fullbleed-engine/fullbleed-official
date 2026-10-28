@@ -1,3 +1,19 @@
+# Fullbleed Release Notes - 2.5.41
+
+Preformatted blocks now respect the author's CSS whitespace and wrapping
+policy. For example, `pre { white-space: pre-wrap; overflow-wrap: anywhere; }`
+wraps long code lines onto the available page width and continues them across
+pages. Previously, the HTML `pre` handler forced no wrapping even when the
+stylesheet requested it, so code could extend beyond the page edge.
+
+Default `pre` and explicit no-wrap policies retain their existing behavior.
+Direct, compiled and reflow output are covered by native regressions and
+installed-wheel tests that check saved PDF text, visible glyph bounds and
+whitespace. No runtime dependency or public API is added. The component alpha
+remains experimental. See the [2.5.41 runbook](docs/release/2.5.41-runbook.md)
+for the retained negative controls and release gates; these checks do not
+establish general CSS parity or PDF conformance.
+
 # Fullbleed Release Notes - 2.5.40
 
 Underlines, overlines and strikethroughs now continue across interior word

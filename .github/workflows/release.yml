@@ -228,6 +228,21 @@ jobs:
           path: target/text-decoration-spaces
           if-no-files-found: error
 
+      - name: Verify authored preformatted wrapping in saved PDFs
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+        run: python -m pytest tests/test_fullbleed_preformatted_whitespace.py -q --basetemp target/preformatted-whitespace --junitxml target/preformatted-whitespace.xml
+
+      - name: Retain preformatted PDFs, glyph bounds and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-preformatted-whitespace
+          path: |
+            target/preformatted-whitespace/
+            target/preformatted-whitespace.xml
+          if-no-files-found: error
+
       - name: Verify hidden HTML text and author display overrides
         run: python -I tools/smoke_hidden_text.py --out target/hidden-text
 

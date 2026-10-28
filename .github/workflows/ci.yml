@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.40"
+  FULLBLEED_CI_VERSION: "2.5.41"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -314,6 +314,21 @@ jobs:
         with:
           name: text-decoration-spaces-${{ runner.os }}
           path: target/text-decoration-spaces
+          if-no-files-found: error
+
+      - name: Verify authored preformatted wrapping in saved PDFs
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+        run: python -m pytest tests/test_fullbleed_preformatted_whitespace.py -q --basetemp target/preformatted-whitespace --junitxml target/preformatted-whitespace.xml
+
+      - name: Retain preformatted PDFs, glyph bounds and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: preformatted-whitespace-${{ runner.os }}
+          path: |
+            target/preformatted-whitespace/
+            target/preformatted-whitespace.xml
           if-no-files-found: error
 
       - name: Verify hidden HTML text and author display overrides
