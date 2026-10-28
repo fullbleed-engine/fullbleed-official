@@ -8,7 +8,7 @@
 
 Build invoices, reports, statements, and variable-data print jobs with a deterministic Rust engine. Use the native Rust API, the Python package, or the optional JavaScript and .NET integrations. The Python wheel includes the engine, fonts, and CLI with no required third-party Python packages or system PDF stack. The JavaScript package includes the WebAssembly engine and fonts for Node.js and browser workers; the .NET package includes native libraries for in-process rendering.
 
-[Try the PDF playground](https://docs.fullbleed.dev/playground/) · [Documentation](https://docs.fullbleed.dev/) · [Examples](https://docs.fullbleed.dev/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [crates.io](https://crates.io/crates/fullbleed) · [npm](https://www.npmjs.com/package/fullbleed) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a14/LICENSE)
+[Try your own document](https://docs.fullbleed.dev/playground/) · [Documentation](https://docs.fullbleed.dev/) · [Examples](https://docs.fullbleed.dev/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [crates.io](https://crates.io/crates/fullbleed) · [npm](https://www.npmjs.com/package/fullbleed) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](https://github.com/fullbleed-engine/fullbleed-official/blob/v2.6.0a14/LICENSE)
 
 <p>
   <a href="https://docs.fullbleed.dev/assets/showcase/invoice.pdf"><img src="https://docs.fullbleed.dev/assets/showcase/invoice-1.png" width="48%" alt="Northstar Studio invoice rendered by Fullbleed, with serif typography and forest-green tables"></a>
@@ -47,7 +47,11 @@ The Python package provides the complete CLI, including compiled variable-data j
 
 ## Your first PDF
 
-Start in the [HTML/CSS playground](https://docs.fullbleed.dev/playground/) to edit a designed invoice or report and download a real PDF. It runs locally in your browser with no account or document upload. You can also use the [Python notebook in Colab](https://colab.research.google.com/github/fullbleed-engine/fullbleed-official/blob/master/examples/notebooks/first_invoice.ipynb), or start with a local script:
+Start in the [HTML/CSS playground](https://docs.fullbleed.dev/playground/) with a designed invoice or report, or choose **Open local files** to use your own HTML, CSS, images, and fonts. Rendering runs locally in your browser, with no account or document upload.
+
+Download the PDF, or select **Python** or **Node.js** under **Project language** and choose **Download project**. The ZIP includes your source, assets, fonts, licenses, pinned dependencies, and a script to render the document locally.
+
+If the output needs work, [report a rendering problem](https://github.com/fullbleed-engine/fullbleed-official/issues/new?template=bug_report.yml) with a small example using data and assets you can share publicly. For a guided Python walkthrough, use the [notebook in Colab](https://colab.research.google.com/github/fullbleed-engine/fullbleed-official/blob/master/examples/notebooks/first_invoice.ipynb), or start with a local script below.
 
 ### Python
 

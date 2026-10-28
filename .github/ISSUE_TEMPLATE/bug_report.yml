@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible engine, layout, CLI, or installation problem.
+description: Report an engine, layout, playground, language package, CLI, or installation problem.
 title: "[Bug]: "
 body:
   - type: markdown
@@ -10,23 +10,31 @@ body:
     id: version
     attributes:
       label: Fullbleed version
-      description: Run `python -m fullbleed --version`.
-      placeholder: Fullbleed version or source commit
+      description: >-
+        Package version or source commit, plus the engine version if shown.
+        In the playground, use the version beneath the preview. For Python, run
+        `python -m fullbleed --version`.
+      placeholder: Package version or source commit; engine version if shown
     validations:
       required: true
   - type: input
     id: environment
     attributes:
       label: Environment
-      description: Python version, operating system, architecture, and installation method.
-      placeholder: Python 3.12, Windows 11 x64, pip wheel
+      description: >-
+        Language/runtime or browser version, operating system, architecture if known,
+        and installation method or page URL.
+      placeholder: Chrome on Windows 11, playground; or Node.js 22 on Linux x64, npm
     validations:
       required: true
   - type: textarea
     id: reproduction
     attributes:
       label: Minimal reproduction
-      description: Include the command or Python script, HTML/CSS, and required assets. Attach a small input file if useful.
+      description: >-
+        Include the steps, HTML/CSS or component source, and any command or application code needed.
+        For the playground, Download project provides a ZIP you can attach after reducing it
+        to synthetic data and assets you can share publicly.
     validations:
       required: true
   - type: textarea
@@ -40,4 +48,7 @@ body:
     id: diagnostics
     attributes:
       label: Diagnostics
-      description: Include relevant errors or `python -m fullbleed doctor --json` output. For profile issues, include the validator version, profile, and report if available.
+      description: >-
+        Include relevant error messages or browser console output. For Python,
+        `python -m fullbleed doctor --json` can help. For profile issues, include
+        the validator version, profile, and report if available.
