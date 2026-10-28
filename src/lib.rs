@@ -10248,6 +10248,9 @@ pub fn merge_documents(documents: Vec<Document>) -> Result<Document, FullBleedEr
 }
 
 #[cfg(test)]
+mod preformatted_whitespace_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::flowable::{
