@@ -3811,7 +3811,7 @@ fn node_to_flowables_in_scope(
                             resolver,
                             &style,
                             ancestors,
-                            WhiteSpaceMode::Pre,
+                            style.white_space,
                         );
                         if let Some(perf_logger) = perf {
                             let ms = t_extract.elapsed().as_secs_f64() * 1000.0;
@@ -3865,7 +3865,10 @@ fn node_to_flowables_in_scope(
                                 .with_style(text_style)
                                 .with_align(text_align_from_style(&style))
                                 .with_last_align(text_align_last_from_style(&style))
-                                .with_whitespace(true, true)
+                                .with_whitespace(
+                                    preserve_whitespace(style.white_space),
+                                    no_wrap(&style),
+                                )
                                 .with_pagination(style.pagination)
                                 .with_font_registry(font_registry.clone())
                                 .with_tag_role("Code");
