@@ -1672,177 +1672,209 @@ impl CompiledDocument {
         let worker_count = crate::parallel::current_num_threads()
             .max(1)
             .min(record_count);
-        let buffer_cap = worker_count.saturating_mul(4).clamp(1, 256);
-        let (sender, receiver) = mpsc::sync_channel::<(
-            usize,
-            Result<CompiledFlowBoundRecord, FullBleedError>,
-        )>(buffer_cap);
-        let cancelled = AtomicBool::new(false);
-        // Seed only a bounded window of row indexes. The linker releases exactly one new job for
-        // every row it commits, so rendering, the result channel, and ordered reassembly together
-        // can never advance more than `buffer_cap` records beyond linked output. A shared job
-        // receiver retains dynamic load balancing without a scheduler lock on the linker path.
-        let (job_sender, job_receiver) = mpsc::channel::<usize>();
-        let initial_jobs = buffer_cap.min(record_count);
-        for row in 0..initial_jobs {
-            job_sender
-                .send(row)
-                .expect("compiled reflow job receiver exists before workers start");
-        }
-        let job_receiver = Mutex::new(job_receiver);
-        let mut next_row_to_schedule = initial_jobs;
+        let buffer_cap = if worker_count == 1 {
+            1
+        } else {
+            worker_count.saturating_mul(4).clamp(1, 256)
+        };
         let mut render_error = None;
         let mut total_pages = 0usize;
+        let render_record =
+            |row: usize,
+             document: &mut html_dom::BoundHtmlDocument,
+             worker_glyphs: &mut CompiledFlowWorkerGlyphs| {
+                plan.render_compiled_flow_record(row, document, worker_glyphs, columns)
+                    .and_then(|mut document| {
+                        if let Some(encoded) = pdf::encode_compiled_flow_document(
+                            pdf_program_cache.as_ref(),
+                            document.program.document.as_ref(),
+                            &document.page_overrides,
+                            compress_content_streams,
+                            compress_content_stream_min_bytes,
+                            options.compression,
+                        ) {
+                            document.encoded_pages = Some(encoded.map_err(FullBleedError::Io)?);
+                        }
+                        Ok(document)
+                    })
+            };
+        let mut link_record = |row, document: CompiledFlowBoundRecord| {
+            total_pages = total_pages.saturating_add(document.page_count());
+            pdf_stream
+                .add_compiled_flow_document(
+                    row,
+                    document.program.document.as_ref(),
+                    document.page_overrides,
+                    document.font_glyphs,
+                    document.encoded_pages,
+                )
+                .map_err(FullBleedError::Io)
+        };
+        if worker_count == 1 {
+            // Single-threaded hosts cannot spawn even one worker. Keep one DOM
+            // and glyph set on the caller, using the same renderer and linker.
+            let mut document = plan.template.instantiate();
+            let mut worker_glyphs = CompiledFlowWorkerGlyphs::new();
+            for row in 0..record_count {
+                if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+                    render_error = Some(FullBleedError::Cancelled);
+                    break;
+                }
+                let rendered = render_record(row, &mut document, &mut worker_glyphs);
+                if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+                    render_error = Some(FullBleedError::Cancelled);
+                    break;
+                }
+                if let Err(error) = rendered.and_then(|record| link_record(row, record)) {
+                    render_error = Some(error);
+                    break;
+                }
+            }
+        } else {
+            let (sender, receiver) = mpsc::sync_channel::<(
+                usize,
+                Result<CompiledFlowBoundRecord, FullBleedError>,
+            )>(buffer_cap);
+            let cancelled = AtomicBool::new(false);
+            // Seed only a bounded window of row indexes. The linker releases exactly one new job for
+            // every row it commits, so rendering, the result channel, and ordered reassembly together
+            // can never advance more than `buffer_cap` records beyond linked output. A shared job
+            // receiver retains dynamic load balancing without a scheduler lock on the linker path.
+            let (job_sender, job_receiver) = mpsc::channel::<usize>();
+            let initial_jobs = buffer_cap.min(record_count);
+            for row in 0..initial_jobs {
+                job_sender
+                    .send(row)
+                    .expect("compiled reflow job receiver exists before workers start");
+            }
+            let job_receiver = Mutex::new(job_receiver);
+            let mut next_row_to_schedule = initial_jobs;
 
-        std::thread::scope(|scope| {
-            for _worker in 0..worker_count {
-                let sender = sender.clone();
-                let cancelled = &cancelled;
-                let external_cancellation = cancellation;
-                let job_receiver = &job_receiver;
-                let pdf_program_cache = pdf_program_cache.clone();
-                scope.spawn(move || {
-                    let mut document = plan.template.instantiate();
-                    let mut worker_glyphs = CompiledFlowWorkerGlyphs::new();
-                    loop {
-                        if external_cancellation
-                            .is_some_and(AuthoringCancellationToken::is_cancelled)
-                        {
-                            cancelled.store(true, Ordering::Release);
-                            return;
-                        }
-                        let row = match job_receiver
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .recv()
-                        {
-                            Ok(row) => row,
-                            Err(_) => return,
-                        };
-                        if cancelled.load(Ordering::Acquire) {
-                            return;
-                        }
-                        let rendered = plan
-                            .render_compiled_flow_record(
-                                row,
-                                &mut document,
-                                &mut worker_glyphs,
-                                columns,
-                            )
-                            .and_then(|mut document| {
-                                if let Some(encoded) = pdf::encode_compiled_flow_document(
-                                    pdf_program_cache.as_ref(),
-                                    document.program.document.as_ref(),
-                                    &document.page_overrides,
-                                    compress_content_streams,
-                                    compress_content_stream_min_bytes,
-                                    options.compression,
-                                ) {
-                                    document.encoded_pages =
-                                        Some(encoded.map_err(FullBleedError::Io)?);
-                                }
-                                Ok(document)
-                            });
-                        if external_cancellation
-                            .is_some_and(AuthoringCancellationToken::is_cancelled)
-                        {
-                            cancelled.store(true, Ordering::Release);
-                            return;
-                        }
-                        let mut message = (row, rendered);
+            std::thread::scope(|scope| {
+                for _worker in 0..worker_count {
+                    let sender = sender.clone();
+                    let cancelled = &cancelled;
+                    let external_cancellation = cancellation;
+                    let job_receiver = &job_receiver;
+                    let render_record = &render_record;
+                    scope.spawn(move || {
+                        let mut document = plan.template.instantiate();
+                        let mut worker_glyphs = CompiledFlowWorkerGlyphs::new();
                         loop {
-                            match sender.try_send(message) {
-                                Ok(()) => break,
-                                Err(TrySendError::Full(returned)) => {
-                                    if cancelled.load(Ordering::Acquire)
-                                        || external_cancellation
-                                            .is_some_and(AuthoringCancellationToken::is_cancelled)
-                                    {
-                                        cancelled.store(true, Ordering::Release);
-                                        return;
+                            if external_cancellation
+                                .is_some_and(AuthoringCancellationToken::is_cancelled)
+                            {
+                                cancelled.store(true, Ordering::Release);
+                                return;
+                            }
+                            let row = match job_receiver
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .recv()
+                            {
+                                Ok(row) => row,
+                                Err(_) => return,
+                            };
+                            if cancelled.load(Ordering::Acquire) {
+                                return;
+                            }
+                            let rendered = render_record(row, &mut document, &mut worker_glyphs);
+                            if external_cancellation
+                                .is_some_and(AuthoringCancellationToken::is_cancelled)
+                            {
+                                cancelled.store(true, Ordering::Release);
+                                return;
+                            }
+                            let mut message = (row, rendered);
+                            loop {
+                                match sender.try_send(message) {
+                                    Ok(()) => break,
+                                    Err(TrySendError::Full(returned)) => {
+                                        if cancelled.load(Ordering::Acquire)
+                                            || external_cancellation.is_some_and(
+                                                AuthoringCancellationToken::is_cancelled,
+                                            )
+                                        {
+                                            cancelled.store(true, Ordering::Release);
+                                            return;
+                                        }
+                                        message = returned;
+                                        std::thread::yield_now();
                                     }
-                                    message = returned;
-                                    std::thread::yield_now();
+                                    Err(TrySendError::Disconnected(_)) => return,
                                 }
-                                Err(TrySendError::Disconnected(_)) => return,
                             }
                         }
-                    }
-                });
-            }
-            drop(sender);
+                    });
+                }
+                drop(sender);
 
-            let mut pending = BTreeMap::new();
-            let mut next_row = 0usize;
-            while next_row < record_count {
-                if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
-                    render_error = Some(FullBleedError::Cancelled);
-                    break;
-                }
-                let message = match receiver.recv_timeout(std::time::Duration::from_millis(25)) {
-                    Ok(message) => message,
-                    Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => {
-                        if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
-                            render_error = Some(FullBleedError::Cancelled);
-                            break;
-                        }
-                        render_error = Some(FullBleedError::Io(std::io::Error::new(
-                            std::io::ErrorKind::BrokenPipe,
-                            "compiled reflow worker channel closed early",
-                        )));
-                        break;
-                    }
-                };
-                if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
-                    render_error = Some(FullBleedError::Cancelled);
-                    break;
-                }
-                let (row, result) = message;
-                match result {
-                    Ok(document) => {
-                        pending.insert(row, document);
-                    }
-                    Err(error) => {
-                        render_error = Some(error);
-                        break;
-                    }
-                }
-                while let Some(document) = pending.remove(&next_row) {
+                let mut pending = BTreeMap::new();
+                let mut next_row = 0usize;
+                while next_row < record_count {
                     if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
                         render_error = Some(FullBleedError::Cancelled);
                         break;
                     }
-                    total_pages = total_pages.saturating_add(document.page_count());
-                    if let Err(error) = pdf_stream.add_compiled_flow_document(
-                        next_row,
-                        document.program.document.as_ref(),
-                        document.page_overrides,
-                        document.font_glyphs,
-                        document.encoded_pages,
-                    ) {
-                        render_error = Some(FullBleedError::Io(error));
-                        break;
-                    }
-                    next_row = next_row.saturating_add(1);
-                    if next_row_to_schedule < record_count {
-                        if job_sender.send(next_row_to_schedule).is_err() {
+                    let message = match receiver.recv_timeout(std::time::Duration::from_millis(25))
+                    {
+                        Ok(message) => message,
+                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => {
+                            if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+                                render_error = Some(FullBleedError::Cancelled);
+                                break;
+                            }
                             render_error = Some(FullBleedError::Io(std::io::Error::new(
                                 std::io::ErrorKind::BrokenPipe,
-                                "compiled reflow workers stopped accepting scheduled records",
+                                "compiled reflow worker channel closed early",
                             )));
                             break;
                         }
-                        next_row_to_schedule = next_row_to_schedule.saturating_add(1);
+                    };
+                    if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+                        render_error = Some(FullBleedError::Cancelled);
+                        break;
+                    }
+                    let (row, result) = message;
+                    match result {
+                        Ok(document) => {
+                            pending.insert(row, document);
+                        }
+                        Err(error) => {
+                            render_error = Some(error);
+                            break;
+                        }
+                    }
+                    while let Some(document) = pending.remove(&next_row) {
+                        if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+                            render_error = Some(FullBleedError::Cancelled);
+                            break;
+                        }
+                        if let Err(error) = link_record(next_row, document) {
+                            render_error = Some(error);
+                            break;
+                        }
+                        next_row = next_row.saturating_add(1);
+                        if next_row_to_schedule < record_count {
+                            if job_sender.send(next_row_to_schedule).is_err() {
+                                render_error = Some(FullBleedError::Io(std::io::Error::new(
+                                    std::io::ErrorKind::BrokenPipe,
+                                    "compiled reflow workers stopped accepting scheduled records",
+                                )));
+                                break;
+                            }
+                            next_row_to_schedule = next_row_to_schedule.saturating_add(1);
+                        }
+                    }
+                    if render_error.is_some() {
+                        break;
                     }
                 }
-                if render_error.is_some() {
-                    break;
-                }
-            }
-            cancelled.store(true, Ordering::Release);
-            drop(job_sender);
-        });
+                cancelled.store(true, Ordering::Release);
+                drop(job_sender);
+            });
+        }
 
         if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
             return Err(FullBleedError::Cancelled);
@@ -1852,6 +1884,10 @@ impl CompiledDocument {
         }
         let replay_cache = pdf_stream.compiled_flow_replay_cache();
         let bytes_written = pdf_stream.finish()?;
+        // Finalization can flush buffered pages after the last row check.
+        if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+            return Err(FullBleedError::Cancelled);
+        }
         *plan
             .pdf_program_cache
             .lock()
@@ -16690,6 +16726,163 @@ tr { break-inside: avoid; }
     }
 
     #[test]
+    fn compiled_reflow_serial_matches_parallel_with_replay_and_new_glyphs() {
+        let mut fonts = AssetBundle::default();
+        fonts.add(Asset::new(
+            "SerialProbe".to_string(),
+            AssetKind::Font,
+            std::fs::read(repo_font_path("NotoSans-Regular.ttf")).expect("test font"),
+            None,
+            true,
+        ));
+        let engine = FullBleed::builder().register_bundle(fonts).build().unwrap();
+        let html = "<h1>{{account}}</h1><p>{{message}}</p><p>END {{account}}</p>";
+        let css = "@page { size: 220pt 160pt; margin: 16pt; } body { font: 10pt SerialProbe; line-height: 12pt; } h1 { font-size: 14pt; }";
+        let first = HashMap::from([
+            (
+                "account".to_string(),
+                vec![
+                    "REC-A".to_string(),
+                    "REC-B".to_string(),
+                    "REC-C".to_string(),
+                ],
+            ),
+            (
+                "message".to_string(),
+                vec![
+                    "Short notice.".to_string(),
+                    "A longer notice wraps across pages. ".repeat(30),
+                    "Final notice.".to_string(),
+                ],
+            ),
+        ]);
+        let second = HashMap::from([
+            (
+                "account".to_string(),
+                vec![
+                    "REC-X".to_string(),
+                    "REC-Y".to_string(),
+                    "REC-Z".to_string(),
+                ],
+            ),
+            (
+                "message".to_string(),
+                vec![
+                    "Žlutý kůň.".to_string(),
+                    "Ωμέγα résumé. ".repeat(24),
+                    "Łódź café.".to_string(),
+                ],
+            ),
+        ]);
+        for compression in [
+            CompiledFlowCompression::Throughput,
+            CompiledFlowCompression::Compact,
+        ] {
+            let render = |threads| {
+                crate::parallel::with_thread_count(threads, || {
+                    let template = engine.compile_document(html, css).unwrap();
+                    let mut outputs = Vec::new();
+                    for bindings in [&first, &first, &second, &first] {
+                        outputs.push(
+                            template
+                                .render_reflow_bindings_to_buffer_with_options(
+                                    bindings,
+                                    CompiledReflowOptions { compression },
+                                )
+                                .unwrap(),
+                        );
+                    }
+                    assert_eq!(outputs[0], outputs[1], "identical batch replay");
+                    assert_eq!(
+                        outputs[0], outputs[3],
+                        "different glyphs must not change later replay"
+                    );
+                    outputs
+                })
+            };
+            let serial = render(1);
+            let parallel = render(4);
+            assert_eq!(serial, parallel, "thread count must not alter these PDFs");
+            assert!(inspect_pdf_bytes(&serial[0]).unwrap().page_count > 3);
+            let parsed = crate::pdf_native::Document::load_mem(&serial[2]).unwrap();
+            let pages = parsed.get_pages().keys().copied().collect::<Vec<_>>();
+            let text = parsed
+                .extract_text_chunks(&pages)
+                .into_iter()
+                .collect::<crate::pdf_native::Result<Vec<_>>>()
+                .unwrap()
+                .join(" ");
+            for value in ["Žlutý", "kůň", "Ωμέγα", "résumé", "Łódź", "café"] {
+                assert!(text.contains(value), "missing rebound glyph text: {value}");
+            }
+            assert!(text.find("REC-X").unwrap() < text.find("REC-Y").unwrap());
+            assert!(text.find("REC-Y").unwrap() < text.find("REC-Z").unwrap());
+            assert!(!text.contains("{{"));
+        }
+    }
+
+    #[test]
+    fn compiled_reflow_observes_cancellation_during_output() {
+        struct CancellingWriter<'a> {
+            bytes: Vec<u8>,
+            cancellation: &'a AuthoringCancellationToken,
+        }
+        impl std::io::Write for CancellingWriter<'_> {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.bytes.extend_from_slice(bytes);
+                if self.bytes.len() > 512 {
+                    self.cancellation.cancel();
+                }
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        for threads in [1, 4] {
+            crate::parallel::with_thread_count(threads, || {
+                let engine = FullBleed::builder().build().unwrap();
+                let template = engine
+                    .compile_document("<p>{{value}}</p>", "body { font: 12pt Helvetica; }")
+                    .unwrap();
+                let values = (0..20)
+                    .map(|i| format!("RECORD-{i:02}"))
+                    .collect::<Vec<_>>();
+                let cancellation = AuthoringCancellationToken::new();
+                let mut writer = CancellingWriter {
+                    bytes: Vec::new(),
+                    cancellation: &cancellation,
+                };
+                let result = template.render_reflow_bindings_to_writer_ordered(
+                    template.compiled_reflow_plan().unwrap(),
+                    values.len(),
+                    &[&values],
+                    &mut writer,
+                    CompiledReflowOptions::default(),
+                    Some(&cancellation),
+                );
+                assert!(
+                    cancellation.is_cancelled(),
+                    "the output writer must cancel the job"
+                );
+                assert!(
+                    matches!(result, Err(FullBleedError::Cancelled)),
+                    "result after cancellation: {result:?}"
+                );
+                assert!(
+                    writer.bytes.len() > 512,
+                    "cancellation must occur after output begins"
+                );
+                let bindings = HashMap::from([("value".to_string(), values)]);
+                let recovered = template
+                    .render_reflow_bindings_to_buffer(&bindings)
+                    .unwrap();
+                assert_eq!(inspect_pdf_bytes(&recovered).unwrap().page_count, 20);
+            });
+        }
+    }
+
+    #[test]
     fn compiled_reflow_cancels_a_windowed_batch_without_worker_deadlock() {
         let engine = FullBleed::builder().build().expect("engine");
         let compiled = engine
@@ -16713,11 +16906,15 @@ tr { break-inside: avoid; }
             ("body".to_string(), bodies),
         ]);
 
-        assert!(matches!(
-            compiled.render_reflow_bindings_to_buffer(&bindings),
-            Err(FullBleedError::InvalidConfiguration(message))
-                if message.contains("reserved data-fullbleed-compiler-binding-root attribute")
-        ));
+        for threads in [1, 4] {
+            crate::parallel::with_thread_count(threads, || {
+                assert!(matches!(
+                    compiled.render_reflow_bindings_to_buffer(&bindings),
+                    Err(FullBleedError::InvalidConfiguration(message))
+                        if message.contains("reserved data-fullbleed-compiler-binding-root attribute")
+                ));
+            });
+        }
     }
 
     #[test]

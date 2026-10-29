@@ -123,6 +123,34 @@ jobs:
           RUSTUP_TOOLCHAIN: "1.85.0"
         run: python tools/smoke_crates_consumer.py --json
 
+  compiled-reflow-wasi:
+    name: Compiled reflow on WASIp1
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: compiled-reflow-wasi
+      - name: Execute and compare native and WASIp1 compiled reflow
+        run: python tools/verify_compiled_reflow_wasi.py --out "${{ runner.temp }}/compiled-reflow-${{ github.run_id }}-${{ github.run_attempt }}" --target-dir target/compiled-reflow-wasi
+      - name: Retain compiled reflow PDFs, PNGs and execution logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: compiled-reflow-wasi
+          path: ${{ runner.temp }}/compiled-reflow-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+
   python-wheel-smoke:
     name: Python Wheel Smoke (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}

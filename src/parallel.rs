@@ -11,6 +11,15 @@ thread_local! {
 static DEFAULT_THREAD_COUNT: OnceLock<usize> = OnceLock::new();
 
 pub(crate) fn current_num_threads() -> usize {
+    // WASIp1 without atomics has no thread-spawn implementation. Environment
+    // variables and per-call overrides cannot add a missing host capability.
+    if cfg!(all(
+        target_os = "wasi",
+        target_env = "p1",
+        not(target_feature = "atomics")
+    )) {
+        return 1;
+    }
     if INSIDE_WORKER.with(Cell::get) {
         return 1;
     }
