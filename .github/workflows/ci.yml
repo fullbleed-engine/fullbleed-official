@@ -190,7 +190,7 @@ jobs:
       - name: Verify radial gradient endpoint colors
         env:
           FULLBLEED_TEST_INSTALLED_NATIVE: "1"
-        run: python -m pytest tests/test_fullbleed_radial_gradient_endpoint.py -q -ra --basetemp target/radial-gradient-endpoints/pdfs --junitxml target/radial-gradient-endpoints/tests.xml
+        run: python -m pytest tests/test_fullbleed_radial_gradient_endpoint.py -q -ra --basetemp target/radial-gradient-endpoints --junitxml target/radial-gradient-endpoints/tests.xml
 
       - name: Retain radial endpoint PDFs and test results
         if: always()
