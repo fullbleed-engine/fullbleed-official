@@ -938,13 +938,13 @@ jobs:
           - os: macos-26-intel
             architecture: x64
     env:
-      PUBLISHED_VERSION: "2.5.34"
+      PUBLISHED_VERSION: "2.5.43"
     steps:
       - uses: actions/checkout@v7
       - name: Checkout the source matching the published stable wheel
         uses: actions/checkout@v7
         with:
-          ref: 0e64857b103522fcb626a81c38306e175106fc67 # v2.5.34
+          ref: 0ae5ae42a9f2bf29a20659bf3719bc8e06ef19b4 # v2.5.43
           path: target/published-source
       - uses: actions/setup-python@v6
         with:
@@ -956,7 +956,7 @@ jobs:
           python -m pip download --only-binary=:all: --no-deps "fullbleed==${PUBLISHED_VERSION}" --dest target/python315-published/wheel
           python -m pip install --force-reinstall --no-index --find-links target/python315-published/wheel "fullbleed==${PUBLISHED_VERSION}" --report target/python315-published/baseline-install.json
           python -m pip install --only-binary=:all: pypdf==6.19.0 pypdfium2==5.14.0 pillow==12.3.0 fonttools==4.65.0
-          python -I tools/record_python_compatibility_source.py --source target/published-source --version "${PUBLISHED_VERSION}" --commit 0e64857b103522fcb626a81c38306e175106fc67 --wheel-dir target/python315-published/wheel --expected-python 3.10 --out target/python315-published/source.json
+          python -I tools/record_python_compatibility_source.py --source target/published-source --version "${PUBLISHED_VERSION}" --commit 0ae5ae42a9f2bf29a20659bf3719bc8e06ef19b4 --wheel-dir target/python315-published/wheel --expected-python 3.10 --out target/python315-published/source.json
       - name: Render the public wheel on Python 3.10
         working-directory: target/published-source
         shell: bash
