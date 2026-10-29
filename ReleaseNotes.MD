@@ -1,3 +1,20 @@
+# Fullbleed Release Notes - 2.5.44
+
+Compiled reflow now renders on single-threaded WASIp1 hosts. Previously, a
+template could compile successfully and then trap when its first batch tried
+to spawn a worker. One-worker execution now stays on the calling thread, and
+WASIp1 hosts without atomics ignore thread-count overrides they cannot satisfy.
+Native multi-worker execution retains its bounded, ordered scheduling.
+
+Cancellation during the final buffered PDF write is now checked before a
+successful return or replay-cache update. Regression coverage includes replay,
+changed Latin and Greek glyphs, variable-length records, malformed input,
+cancellation and subsequent recovery.
+
+See the [2.5.44 runbook](docs/release/2.5.44-runbook.md) for required evidence.
+The public Node API is unchanged; compiled VDP is not exposed by Node 0.8.7.
+Component authoring remains alpha.
+
 # Fullbleed Release Notes - 2.5.43
 
 Radial gradients now continue the final color outside the ending shape when
