@@ -8732,7 +8732,8 @@ fn build_gradient_function_objects(
 ) -> (Vec<String>, usize, usize) {
     // Build a single function object id that maps t in [0,1] to RGB.
     // For 0/1 stops: emit a constant-ish Type 2 function.
-    // For N stops: emit N-1 Type 2 functions stitched with a Type 3 function.
+    // Stitch nonempty stop intervals with a Type 3 function. Coincident stops
+    // supply the colors on either side of a discontinuity, not another interval.
     let mut stops = stops.to_vec();
     if stops.is_empty() {
         stops.push(ShadingStop {
@@ -8783,16 +8784,33 @@ fn build_gradient_function_objects(
         });
     }
 
+    // PDF 32000-1, 7.10.4 requires increasing interior Bounds. Compare the
+    // serialized offsets: distinct f32 stops can round to the same PDF real.
+    let positions: Vec<String> = stops.iter().map(|stop| fmt(stop.offset)).collect();
+    let mut segments: Vec<(ShadingStop, ShadingStop)> = stops
+        .windows(2)
+        .zip(positions.windows(2))
+        .filter(|(_, positions)| positions[0] != positions[1])
+        .map(|(pair, _)| (pair[0], pair[1]))
+        .collect();
+    let last = *stops.last().expect("gradient has normalized endpoints");
+    if segments.last().map(|(_, end)| end.color) != Some(last.color) {
+        // The specification permits one final bound equal to Domain[1]. This
+        // constant endpoint preserves the last color when stops coincide at 1,
+        // without changing the interpolation approaching that endpoint.
+        segments.push((last, last));
+    }
+
     let mut objects: Vec<String> = Vec::new();
     let mut next_id = start_id;
 
     let mut seg_fun_ids: Vec<usize> = Vec::new();
-    for i in 0..(stops.len() - 1) {
+    for (start, end) in &segments {
         let f_id = next_id;
         next_id += 1;
         seg_fun_ids.push(f_id);
-        let c0 = stops[i].color;
-        let c1 = stops[i + 1].color;
+        let c0 = start.color;
+        let c1 = end.color;
         let c0_vals = color_components(c0, color_space);
         let c1_vals = color_components(c1, color_space);
         let c0_str = c0_vals
@@ -8818,8 +8836,8 @@ fn build_gradient_function_objects(
     let stitch_id = next_id;
     next_id += 1;
     let mut bounds: Vec<String> = Vec::new();
-    for s in stops.iter().skip(1).take(stops.len() - 2) {
-        bounds.push(fmt(s.offset));
+    for (_, end) in segments.iter().take(segments.len() - 1) {
+        bounds.push(fmt(end.offset));
     }
     let mut encode: Vec<String> = Vec::new();
     for _ in 0..seg_fun_ids.len() {
@@ -10484,6 +10502,76 @@ mod tests {
             page_box_entries(PdfProfile::None, geometry),
             " /TrimBox [9 9 129 87] /BleedBox [0 0 138 96] /CropBox [0 0 138 96]"
         );
+    }
+
+    #[test]
+    fn gradient_stitching_preserves_discontinuity_without_empty_subdomains() {
+        let red = Color::rgb(1.0, 0.0, 0.0);
+        let green = Color::rgb(0.0, 1.0, 0.0);
+        let blue = Color::rgb(0.0, 0.0, 1.0);
+        let stops = [
+            (0.0, red),
+            (0.5, red),
+            (0.5, green),
+            (0.5, blue),
+            (1.0, blue),
+        ]
+        .map(|(offset, color)| ShadingStop {
+            offset,
+            color,
+            alpha: 1.0,
+        });
+        let (objects, function, next) =
+            build_gradient_function_objects(&stops, 10, ColorSpace::Rgb);
+        assert_eq!((objects.len(), function, next), (3, 12, 13));
+        assert!(objects[0].contains("/C0 [1 0 0] /C1 [1 0 0]"));
+        assert!(objects[1].contains("/C0 [0 0 1] /C1 [0 0 1]"));
+        assert!(objects[2].contains("/Functions [10 0 R 11 0 R] /Bounds [0.5] /Encode [0 1 0 1]"));
+    }
+
+    #[test]
+    fn gradient_stitching_coalesces_offsets_at_serialized_precision() {
+        let stops = [
+            (0.0, Color::BLACK),
+            (0.49999997, Color::rgb(1.0, 0.0, 0.0)),
+            (0.50000006, Color::rgb(0.0, 1.0, 0.0)),
+            (1.0, Color::rgb(0.0, 0.0, 1.0)),
+        ]
+        .map(|(offset, color)| ShadingStop {
+            offset,
+            color,
+            alpha: 1.0,
+        });
+        let (objects, _, _) = build_gradient_function_objects(&stops, 10, ColorSpace::Rgb);
+        assert_eq!(objects.len(), 3);
+        assert!(objects[0].contains("/C0 [0 0 0] /C1 [1 0 0]"));
+        assert!(objects[1].contains("/C0 [0 1 0] /C1 [0 0 1]"));
+        assert!(objects[2].contains("/Bounds [0.5]"));
+    }
+
+    #[test]
+    fn gradient_stitching_preserves_endpoint_colors() {
+        let red = Color::rgb(1.0, 0.0, 0.0);
+        let blue = Color::rgb(0.0, 0.0, 1.0);
+        let start = [(0.0, red), (0.0, blue), (1.0, blue)].map(|(offset, color)| ShadingStop {
+            offset,
+            color,
+            alpha: 1.0,
+        });
+        let (objects, _, _) = build_gradient_function_objects(&start, 10, ColorSpace::Rgb);
+        assert_eq!(objects.len(), 1);
+        assert!(objects[0].contains("/C0 [0 0 1] /C1 [0 0 1]"));
+        let end =
+            [(0.0, red), (1.0, red), (1.0, blue), (1.0, blue)].map(|(offset, color)| ShadingStop {
+                offset,
+                color,
+                alpha: 1.0,
+            });
+        let (objects, _, _) = build_gradient_function_objects(&end, 10, ColorSpace::Rgb);
+        assert_eq!(objects.len(), 3);
+        assert!(objects[0].contains("/C0 [1 0 0] /C1 [1 0 0]"));
+        assert!(objects[1].contains("/C0 [0 0 1] /C1 [0 0 1]"));
+        assert!(objects[2].contains("/Bounds [1]"));
     }
 
     #[test]

@@ -190,6 +190,19 @@ jobs:
       - name: Verify finalized PDF gradient previews
         run: python -I tools/smoke_gradient_preview.py --out target/gradient-preview
 
+      - name: Verify PDF gradient stitching boundaries
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+        run: python -m pytest tests/test_fullbleed_gradient_function_bounds.py -q --junitxml target/gradient-function-bounds.xml
+
+      - name: Retain gradient function regression results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-gradient-function-bounds
+          path: target/gradient-function-bounds.xml
+          if-no-files-found: error
+
       - name: Verify border-image slices in previews and independent PDF rendering
         run: |
           python -m pip install pypdfium2==5.14.0

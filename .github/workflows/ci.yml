@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.41"
+  FULLBLEED_CI_VERSION: "2.5.42"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -170,6 +170,19 @@ jobs:
 
       - name: Verify finalized PDF gradient previews
         run: python -I tools/smoke_gradient_preview.py --out target/gradient-preview
+
+      - name: Verify PDF gradient stitching boundaries
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+        run: python -m pytest tests/test_fullbleed_gradient_function_bounds.py -q --junitxml target/gradient-function-bounds.xml
+
+      - name: Retain gradient function regression results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gradient-function-bounds-${{ runner.os }}
+          path: target/gradient-function-bounds.xml
+          if-no-files-found: error
 
       - name: Verify single-copy styled PDF text with an independent reader
         run: |

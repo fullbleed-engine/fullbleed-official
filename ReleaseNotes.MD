@@ -1,3 +1,18 @@
+# Fullbleed Release Notes - 2.5.42
+
+Hard-stop gradients now use valid PDF stitching-function boundaries. Empty
+intervals caused by coincident color stops or PDF number rounding are omitted,
+while incoming and outgoing colors remain distinct. A distinct final endpoint
+color uses the endpoint case allowed by ISO 32000-1 section 7.10.4.
+
+The change removes unused function objects without changing the reviewed
+document pixels. It adds native and installed-package regressions for abrupt
+transitions, rounding, endpoints, transparency and repeated borders. No public
+API or runtime dependency is added; component authoring remains alpha.
+See the [2.5.42 runbook](docs/release/2.5.42-runbook.md) for release gates and
+retained limitations. These bounded checks do not establish PDF conformance
+or general CSS parity.
+
 # Fullbleed Release Notes - 2.5.41
 
 Preformatted blocks now respect the author's CSS whitespace and wrapping
