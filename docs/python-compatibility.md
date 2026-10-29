@@ -12,7 +12,7 @@ the detailed compatibility checks. There are two independent paths:
 | Package under test | Source and wheel | Platforms |
 | --- | --- | --- |
 | Development build | The same wheel built and tested on Python 3.10 in that CI run | Windows x64, Linux x64 |
-| Public stable **2.5.34** | Wheel downloaded from PyPI; tests pinned to release commit `0e64857b103522fcb626a81c38306e175106fc67` | Windows x64, Linux x64, macOS Intel and Apple silicon |
+| Public stable **2.5.43** | Wheel downloaded from PyPI; tests pinned to release commit `0ae5ae42a9f2bf29a20659bf3719bc8e06ef19b4` | Windows x64, Linux x64, macOS Intel and Apple silicon |
 
 The public-package jobs verify the downloaded wheel's SHA-256 against PyPI and
 record its exact URL, stable-ABI tags, dependency metadata, source commit, and
@@ -58,12 +58,12 @@ and select the commit you use:
   compared PDF and PNG.
 
 For the public stable artifacts, the final comparison can be repeated using
-Python 3.15.0 with `fullbleed==2.5.34` installed and the downloaded `reference`
+Python 3.15.0 with `fullbleed==2.5.43` installed and the downloaded `reference`
 and `candidate` folders:
 
 ```sh
 python -I tools/check_python_compatibility.py \
-  --expected-python 3.15.0 --expected-version 2.5.34 \
+  --expected-python 3.15.0 --expected-version 2.5.43 \
   --reference reference --out candidate \
   --allow-skipped-test tests.test_fullbleed_python_abi.test_stable_abi_module_can_initialize_in_a_subinterpreter
 ```
