@@ -8590,10 +8590,46 @@ fn shading_to_objects(
             ..
         }
     );
-    let (fun_objects, fun_id, new_next) = if hard_stops {
-        build_hard_gradient_function_object(&stops, next_id, color_space)
+    // Give a discontinuous final color a nonempty interval in a radial PDF
+    // shading. Readers can otherwise extend the incoming side of a zero-width
+    // final interval, despite the function having the correct value at t=1.
+    // Extending geometry and Domain together preserves every original stop.
+    let radial_extension = match shading {
+        Shading::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+            hard_stops: false,
+            ..
+        } => {
+            let end = [
+                x0 + 2.0 * (x1 - x0),
+                y0 + 2.0 * (y1 - y0),
+                r0 + 2.0 * (r1 - r0),
+            ];
+            (*r0 >= 0.0
+                && *r1 >= 0.0
+                && end[2] >= 0.0
+                && end.iter().all(|value| value.is_finite())
+                && end != [*x1, *y1, *r1])
+            .then_some(end)
+        }
+        _ => None,
+    };
+    let (fun_objects, fun_id, new_next, extended) = if hard_stops {
+        let (objects, function, next) =
+            build_hard_gradient_function_object(&stops, next_id, color_space);
+        (objects, function, next, false)
     } else {
-        build_gradient_function_objects(&stops, next_id, color_space)
+        build_gradient_function_objects_with_terminal_extension(
+            &stops,
+            next_id,
+            color_space,
+            radial_extension.is_some(),
+        )
     };
     objects.extend(fun_objects);
     next_id = new_next;
@@ -8638,17 +8674,25 @@ fn shading_to_objects(
             y1,
             r1,
             ..
-        } => format!(
-            "<< /ShadingType 3 /ColorSpace {} /Coords [{} {} {} {} {} {}] /Function {} 0 R /Extend [true true] >>",
-            space,
-            fmt(*x0),
-            fmt(page_height.to_f32() - *y0),
-            fmt(*r0),
-            fmt(*x1),
-            fmt(page_height.to_f32() - *y1),
-            fmt(*r1),
-            fun_id,
-        ),
+        } => {
+            let end = if extended {
+                radial_extension.expect("extended radial function has matching geometry")
+            } else {
+                [*x1, *y1, *r1]
+            };
+            format!(
+                "<< /ShadingType 3 /ColorSpace {} /Coords [{} {} {} {} {} {}]{} /Function {} 0 R /Extend [true true] >>",
+                space,
+                fmt(*x0),
+                fmt(page_height.to_f32() - *y0),
+                fmt(*r0),
+                fmt(end[0]),
+                fmt(page_height.to_f32() - end[1]),
+                fmt(end[2]),
+                if extended { " /Domain [0 2]" } else { "" },
+                fun_id,
+            )
+        }
         // Conic shaders are lowered directly into the content stream by the
         // streaming writer. This fallback keeps the legacy object collector
         // total without making it part of the active conic path.
@@ -8730,7 +8774,23 @@ fn build_gradient_function_objects(
     start_id: usize,
     color_space: ColorSpace,
 ) -> (Vec<String>, usize, usize) {
-    // Build a single function object id that maps t in [0,1] to RGB.
+    let (objects, function, next, _) = build_gradient_function_objects_with_terminal_extension(
+        stops,
+        start_id,
+        color_space,
+        false,
+    );
+    (objects, function, next)
+}
+
+fn build_gradient_function_objects_with_terminal_extension(
+    stops: &[ShadingStop],
+    start_id: usize,
+    color_space: ColorSpace,
+    extend_terminal: bool,
+) -> (Vec<String>, usize, usize, bool) {
+    // Map normalized stops to output components. A radial terminal color may
+    // continue through t=2 when the shading geometry is extended with it.
     // For 0/1 stops: emit a constant-ish Type 2 function.
     // Stitch nonempty stop intervals with a Type 3 function. Coincident stops
     // supply the colors on either side of a discontinuity, not another interval.
@@ -8794,12 +8854,14 @@ fn build_gradient_function_objects(
         .map(|(pair, _)| (pair[0], pair[1]))
         .collect();
     let last = *stops.last().expect("gradient has normalized endpoints");
-    if segments.last().map(|(_, end)| end.color) != Some(last.color) {
-        // The specification permits one final bound equal to Domain[1]. This
-        // constant endpoint preserves the last color when stops coincide at 1,
-        // without changing the interpolation approaching that endpoint.
+    let terminal_discontinuity = segments.last().map(|(_, end)| end.color) != Some(last.color);
+    if terminal_discontinuity {
+        // The specification permits a final bound equal to Domain[1]. Preserve
+        // the last color at t=1; radial emission can give this constant segment
+        // a nonempty domain without changing the interpolation approaching it.
         segments.push((last, last));
     }
+    let extended = extend_terminal && terminal_discontinuity;
 
     let mut objects: Vec<String> = Vec::new();
     let mut next_id = start_id;
@@ -8830,7 +8892,7 @@ fn build_gradient_function_objects(
     }
 
     if seg_fun_ids.len() == 1 {
-        return (objects, seg_fun_ids[0], next_id);
+        return (objects, seg_fun_ids[0], next_id, false);
     }
 
     let stitch_id = next_id;
@@ -8851,13 +8913,14 @@ fn build_gradient_function_objects(
         .join(" ");
 
     objects.push(format!(
-        "<< /FunctionType 3 /Domain [0 1] /Functions [{}] /Bounds [{}] /Encode [{}] >>",
+        "<< /FunctionType 3 /Domain [0 {}] /Functions [{}] /Bounds [{}] /Encode [{}] >>",
+        if extended { 2 } else { 1 },
         fun_refs,
         bounds.join(" "),
         encode.join(" "),
     ));
 
-    (objects, stitch_id, next_id)
+    (objects, stitch_id, next_id, extended)
 }
 
 fn metadata_stream_object(content: &str) -> String {
@@ -10600,6 +10663,162 @@ mod tests {
         let dictionary = objects.last().expect("shading dictionary");
         assert!(dictionary.contains("/Coords [10 80 30 60]"));
         assert!(!dictionary.contains("/Matrix"));
+    }
+
+    #[test]
+    fn radial_terminal_color_has_a_nonempty_pdf_interval() {
+        let shading = Shading::Radial {
+            x0: 10.0,
+            y0: 20.0,
+            r0: 5.0,
+            x1: 12.0,
+            y1: 22.0,
+            r1: 20.0,
+            stops: [
+                (0.0, Color::BLACK),
+                (0.5, Color::rgb(1.0, 0.0, 0.0)),
+                (1.0, Color::rgb(1.0, 0.0, 0.0)),
+                (1.0, Color::rgb(0.0, 0.0, 1.0)),
+            ]
+            .map(|(offset, color)| ShadingStop {
+                offset,
+                color,
+                alpha: 1.0,
+            })
+            .to_vec(),
+            hard_stops: false,
+        };
+        for color_space in [ColorSpace::Rgb, ColorSpace::Cmyk] {
+            let (objects, _, _) =
+                shading_to_objects(&shading, 10, Pt::from_f32(100.0), color_space);
+            let function = &objects[objects.len() - 2];
+            assert!(function.contains("/FunctionType 3 /Domain [0 2]"));
+            assert!(function.contains("/Bounds [0.5 1]"));
+            assert!(
+                objects
+                    .last()
+                    .unwrap()
+                    .contains("/Coords [10 80 5 14 76 35] /Domain [0 2]")
+            );
+        }
+    }
+
+    #[test]
+    fn radial_smooth_gradient_keeps_its_original_domain_and_geometry() {
+        let shading = Shading::Radial {
+            x0: 50.0,
+            y0: 50.0,
+            r0: 0.0,
+            x1: 50.0,
+            y1: 50.0,
+            r1: 30.0,
+            stops: [(0.0, Color::BLACK), (1.0, Color::rgb(0.0, 0.0, 1.0))]
+                .map(|(offset, color)| ShadingStop {
+                    offset,
+                    color,
+                    alpha: 1.0,
+                })
+                .to_vec(),
+            hard_stops: false,
+        };
+        let (objects, _, _) =
+            shading_to_objects(&shading, 10, Pt::from_f32(100.0), ColorSpace::Rgb);
+        assert_eq!(objects.len(), 2);
+        assert!(
+            objects
+                .last()
+                .unwrap()
+                .contains("/Coords [50 50 0 50 50 30] /Function")
+        );
+        assert!(
+            !objects
+                .iter()
+                .any(|object| object.contains("/Domain [0 2]"))
+        );
+    }
+
+    #[test]
+    fn radial_terminal_alpha_gets_its_own_extended_domain() {
+        let shading = Shading::Radial {
+            x0: 50.0,
+            y0: 50.0,
+            r0: 0.0,
+            x1: 50.0,
+            y1: 50.0,
+            r1: 30.0,
+            stops: [(0.0, 1.0), (1.0, 1.0), (1.0, 0.25)]
+                .map(|(offset, alpha)| ShadingStop {
+                    offset,
+                    alpha,
+                    color: Color::rgb(1.0, 0.0, 0.0),
+                })
+                .to_vec(),
+            hard_stops: false,
+        };
+        let (color, _, _) = shading_to_objects(
+            &premultiplied_color_shading(&shading),
+            10,
+            Pt::from_f32(100.0),
+            ColorSpace::Rgb,
+        );
+        let (mask, _, _) = shading_to_objects(
+            &alpha_only_shading(&shading),
+            10,
+            Pt::from_f32(100.0),
+            ColorSpace::Rgb,
+        );
+        assert!(
+            color
+                .last()
+                .unwrap()
+                .contains("/Coords [50 50 0 50 50 30] /Function")
+        );
+        assert!(
+            mask.last()
+                .unwrap()
+                .contains("/Coords [50 50 0 50 50 60] /Domain [0 2]")
+        );
+        assert!(
+            mask.iter()
+                .any(|object| object.contains("/C0 [0.25 0.25 0.25] /C1 [0.25 0.25 0.25]"))
+        );
+    }
+
+    #[test]
+    fn radial_terminal_extension_never_creates_a_negative_radius() {
+        let shading = Shading::Radial {
+            x0: 50.0,
+            y0: 50.0,
+            r0: 10.0,
+            x1: 50.0,
+            y1: 50.0,
+            r1: 3.0,
+            stops: [
+                (0.0, Color::BLACK),
+                (1.0, Color::BLACK),
+                (1.0, Color::rgb(0.0, 0.0, 1.0)),
+            ]
+            .map(|(offset, color)| ShadingStop {
+                offset,
+                color,
+                alpha: 1.0,
+            })
+            .to_vec(),
+            hard_stops: false,
+        };
+        let (objects, _, _) =
+            shading_to_objects(&shading, 10, Pt::from_f32(100.0), ColorSpace::Rgb);
+        assert!(
+            objects
+                .last()
+                .unwrap()
+                .contains("/Coords [50 50 10 50 50 3] /Function")
+        );
+        assert!(
+            !objects
+                .iter()
+                .any(|object| object.contains("/Domain [0 2]"))
+        );
     }
 
     #[test]

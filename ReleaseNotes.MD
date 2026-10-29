@@ -1,3 +1,20 @@
+# Fullbleed Release Notes - 2.5.43
+
+Radial gradients now continue the final color outside the ending shape when
+their last color stops coincide. The final constant color gets a nonempty PDF
+function interval; extending the shading domain and circle geometry together
+preserves the original stop positions and interpolation. This also applies to
+the separately emitted opacity mask.
+
+The correction covers the reviewed circle, ellipse, offset, transparency,
+hard-band and number-rounding specimens. Smooth and repeating controls retain
+their original PDF bytes and previews. No public API or runtime dependency is
+added. Component authoring remains alpha.
+
+See the [2.5.43 runbook](docs/release/2.5.43-runbook.md) for the release evidence
+requirements and retained limitations. These checks are specific regressions,
+not a general PDF-conformance or renderer-parity claim.
+
 # Fullbleed Release Notes - 2.5.42
 
 Hard-stop gradients now use valid PDF stitching-function boundaries. Empty
