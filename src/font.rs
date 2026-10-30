@@ -1065,6 +1065,38 @@ impl FontRegistry {
         registered_font_supports_char(font, ch)
     }
 
+    pub(crate) fn compiled_font_supports_text(
+        &self,
+        name: &str,
+        font_index: Option<usize>,
+        text: &str,
+    ) -> bool {
+        let (_, text) = text_shape::decode_shape_options(text);
+        let Some(font) = font_index
+            .and_then(|index| self.fonts.get(index))
+            .or_else(|| self.resolve(name))
+        else {
+            return text.chars().all(|ch| base14_font_supports_char(name, ch));
+        };
+        if font.metrics.is_within_basic_latin(text) {
+            // The metrics range is not a coverage guarantee: subset fonts can
+            // have holes. Use the glyph IDs already loaded with the metrics.
+            return text.chars().all(|ch| {
+                let index = ch as usize - usize::from(font.metrics.first_char);
+                font.metrics
+                    .glyph_ids
+                    .get(index)
+                    .is_some_and(|gid| *gid != 0)
+            });
+        }
+        let Ok(face) = SfntFace::parse(&font.data, 0) else {
+            return false;
+        };
+        let (_, symbol_subtable) = select_symbol_subtable(&face);
+        text.chars()
+            .all(|ch| glyph_index_for_codepoint(&face, ch as u32, symbol_subtable).is_some())
+    }
+
     pub(crate) fn split_text_by_fallbacks(
         &self,
         primary: &Arc<str>,

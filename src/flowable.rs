@@ -24,6 +24,7 @@ const SOFT_HYPHEN: char = '\u{00AD}';
 
 pub(crate) const META_COMPILED_TEXT_CONSTRAINT_KEY: &str = "fb.compile.text.constraint";
 pub(crate) const META_COMPILED_TABLE_SCOPE_KEY: &str = "fb.compile.table.scope";
+pub(crate) const META_COMPILED_PRIMARY_FONT_KEY: &str = "fb.compile.text.primary_font";
 
 fn huge_pt() -> Pt {
     // Large but safe sentinel for "unbounded" layout measurements.
@@ -6716,6 +6717,18 @@ fn emit_font_resolution_meta(
     resolved_name: &str,
     primary_resolved: &str,
 ) {
+    if compiled_flow_capture_enabled() {
+        // A cached fallback run cannot choose a font for a different value.
+        // Unicode ranges also affect that choice even when the font contains
+        // every replacement glyph. Only an unrestricted primary run can be
+        // rebound after separately checking its glyph coverage.
+        let primary = resolved_name == primary_resolved
+            && style.font_unicode_ranges.iter().all(Option::is_none);
+        canvas.meta(
+            META_COMPILED_PRIMARY_FONT_KEY,
+            if primary { resolved_name } else { "" },
+        );
+    }
     let requested_name = style.font_name.as_ref();
     if requested_name == resolved_name && resolved_name == primary_resolved {
         return;

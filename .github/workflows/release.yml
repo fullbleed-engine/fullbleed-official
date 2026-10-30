@@ -565,6 +565,28 @@ jobs:
             target/reflow-cache-tests.xml
           if-no-files-found: error
 
+      - name: Verify compiled font fallback with one worker
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+          FULLBLEED_THREADS: "1"
+        run: python -m pytest tests/test_fullbleed_compiled_font_fallback.py -q -ra --basetemp target/compiled-font-fallback-serial --junitxml target/compiled-font-fallback-serial/tests.xml
+
+      - name: Verify compiled font fallback with four workers
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+          FULLBLEED_THREADS: "4"
+        run: python -m pytest tests/test_fullbleed_compiled_font_fallback.py -q -ra --basetemp target/compiled-font-fallback-parallel --junitxml target/compiled-font-fallback-parallel/tests.xml
+
+      - name: Retain compiled font fallback PDFs and independent previews
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-compiled-font-fallback
+          path: |
+            target/compiled-font-fallback-serial/
+            target/compiled-font-fallback-parallel/
+          if-no-files-found: error
+
       - name: Verify mixed inline wrapping with independent PDF readers
         run: python -I tools/smoke_inline_wrapping.py --out target/inline-wrapping
 
