@@ -246,6 +246,25 @@ class CompiledDocument(metaclass=_NativeFacadeType):
             deterministic_hash,
         )
 
+    def render_pdf_bindings_with_report(self, /, bindings, deterministic_hash=None):
+        """Return ``(pdf_bytes, report)`` for fixed-geometry text bindings.
+
+        ``report`` has ``page_count`` and ordered ``records``. Each record has
+        zero-based ``record_index`` and ``page_offset``, ``page_count``, and a
+        ``missing_glyphs`` list using the ordinary glyph report's entry format.
+        Coverage checks the registered fonts actually selected for bound,
+        static, and generated text; fixed bindings do not switch fonts.
+        Base-14 fonts and text inside images are not validated. This does not
+        verify shaping, layout, accessibility, or conformance. PDF bytes are
+        unchanged; a nonempty report does not raise an exception.
+        """
+        return _call(
+            self._handle,
+            "CompiledDocument.render_pdf_bindings_with_report",
+            bindings,
+            deterministic_hash,
+        )
+
     def render_pdf_reflow_bindings(
         self,
         /,
@@ -259,6 +278,30 @@ class CompiledDocument(metaclass=_NativeFacadeType):
         return _call(
             self._handle,
             "CompiledDocument.render_pdf_reflow_bindings",
+            bindings,
+            deterministic_hash,
+            compression,
+        )
+
+    def render_pdf_reflow_bindings_with_report(
+        self,
+        /,
+        bindings,
+        deterministic_hash=None,
+        *,
+        compression=CompiledFlowCompression.Throughput,
+    ):
+        """Return ``(pdf_bytes, report)`` after content-driven layout.
+
+        The report has the same format and coverage limits as
+        ``render_pdf_bindings_with_report``. It checks each record's final text
+        and selected fonts, including cached substitutions, without a second
+        layout pass. Records and zero-based page offsets follow input order.
+        """
+        _require_string(compression, "compression")
+        return _call(
+            self._handle,
+            "CompiledDocument.render_pdf_reflow_bindings_with_report",
             bindings,
             deterministic_hash,
             compression,

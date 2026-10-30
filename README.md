@@ -1273,9 +1273,16 @@ Module exports:
 | `render_pdf_to_file(path, deterministic_hash=None)` | `int` |
 | `render_pdf_batch(copies, deterministic_hash=None)` | `bytes` |
 | `render_pdf_bindings(bindings, deterministic_hash=None)` | `bytes` |
+| `render_pdf_bindings_with_report(bindings, deterministic_hash=None)` | `(bytes, report)` |
 | `render_pdf_bindings_to_file(bindings, path, deterministic_hash=None)` | `int` |
 | `render_pdf_reflow_bindings(bindings, deterministic_hash=None, *, compression="throughput")` | `bytes` |
+| `render_pdf_reflow_bindings_with_report(bindings, deterministic_hash=None, *, compression="throughput")` | `(bytes, report)` |
 | `render_pdf_reflow_bindings_to_file(bindings, path, deterministic_hash=None, *, compression="throughput")` | `int` |
+
+The `*_with_report` methods return ordered record page ranges and missing-character checks
+against the registered fonts selected for the final text. Reports preserve PDF bytes and
+reuse the compiled layout. See [compiled batch reports](https://github.com/fullbleed-engine/fullbleed-official/blob/master/docs/python-api.md#check-a-compiled-batch-before-accepting-it)
+for acceptance checks and coverage limits.
 
 The compiled lane runs parsing/layout once. `render_pdf_batch` virtualizes identical untagged page
 content. The fixed binding methods accept columnar `dict[str, list[str]]` data and emit distinct

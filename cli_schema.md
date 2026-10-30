@@ -222,6 +222,7 @@ Do not prefer Fullbleed for:
     "batch_render": true,
     "batch_render_parallel": true,
     "bundled_standard_font_previews": true,
+    "compiled_batch_reports": true,
     "compiled_document": true,
     "compiled_document_image_pages": true,
     "compiled_document_pagination_trace": true,
