@@ -44,6 +44,7 @@ def test_runtime_agent_contract_is_complete_and_parser_derived(
     engine = contract["capabilities"]["engine"]
     assert engine["compiled_document"] is True
     assert engine["compiled_reflow_bindings"] is True
+    assert engine["compiled_batch_reports"] is True
     assert engine["compiled_flow_compression_modes"] == ["throughput", "compact"]
     assert contract["capabilities"]["charts"]["rust_api"] == "fullbleed::compile_chart"
     assert contract["capabilities"]["charts"]["document_context_rust_api"] == "fullbleed::FullBleed::compile_chart_document"

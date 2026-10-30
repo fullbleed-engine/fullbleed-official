@@ -506,6 +506,28 @@ jobs:
             target/compiled-font-fallback-parallel/
           if-no-files-found: error
 
+      - name: Verify compiled batch reports with one worker
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+          FULLBLEED_THREADS: "1"
+        run: python -m pytest tests/test_fullbleed_compiled_reports.py -q -ra --basetemp target/compiled-reports-serial --junitxml target/compiled-reports-serial/tests.xml
+
+      - name: Verify compiled batch reports with four workers
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+          FULLBLEED_THREADS: "4"
+        run: python -m pytest tests/test_fullbleed_compiled_reports.py -q -ra --basetemp target/compiled-reports-parallel --junitxml target/compiled-reports-parallel/tests.xml
+
+      - name: Retain compiled batch reports and independent PDF previews
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-compiled-batch-reports
+          path: |
+            target/compiled-reports-serial/
+            target/compiled-reports-parallel/
+          if-no-files-found: error
+
       - name: Verify mixed inline wrapping with independent PDF readers
         run: python -I tools/smoke_inline_wrapping.py --out target/inline-wrapping
 

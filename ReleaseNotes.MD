@@ -1,3 +1,22 @@
+# Fullbleed Release Notes - 2.5.46
+
+Compiled batches can now return missing-character diagnostics and ordered page
+ranges alongside the PDF. Python adds `render_pdf_bindings_with_report()` and
+`render_pdf_reflow_bindings_with_report()`; Rust adds corresponding report and
+cancellation methods. Existing rendering methods keep their return types.
+
+Each record reports its input index, zero-based page offset, page count, and
+characters missing from the registered fonts selected for its final text. A
+caller can reject a batch with missing characters before saving or sending it.
+Fixed bindings preserve compiled fonts; registering a fallback does not make it
+the selected font. Reflow reports follow the final font selection.
+
+Reports cover character coverage in selected registered fonts, including drawn
+Forms. Base-14 fonts and text already converted to images are not validated.
+The report does not establish shaping, layout, accessibility or conformance.
+The [2.5.46 runbook](docs/release/2.5.46-runbook.md) records release gates and scope.
+Component authoring remains alpha.
+
 # Fullbleed Release Notes - 2.5.45
 
 Compiled reflow now reselects fonts when bound text changes. Previously, an

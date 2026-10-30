@@ -109,6 +109,7 @@ mod builtin_preview_fonts;
 mod canvas;
 mod chart;
 mod chart_document;
+mod compiled_report;
 mod css_native;
 mod css_queries;
 mod debug;
@@ -187,6 +188,7 @@ pub use chart::{
     ChartSpec, ChartTable, ChartTrace, compile_chart,
 };
 pub use chart_document::{ChartDocumentArtifact, ChartDocumentEntry, PreparedChart};
+pub use compiled_report::{CompiledBatchReport, CompiledRecordReport};
 use debug::DebugLogger;
 pub use doc_context::DocContext;
 pub use doc_template::DocTemplate;
@@ -352,6 +354,7 @@ struct CompiledFlowTextPatch {
 
 struct CompiledFlowRecordProgram {
     document: Arc<Document>,
+    coverage_plan: std::sync::OnceLock<compiled_report::CoveragePlan>,
     prototype_values: Arc<[Arc<str>]>,
     patches: Arc<[CompiledFlowTextPatch]>,
     page_patch_counts: Arc<[usize]>,
@@ -691,6 +694,7 @@ impl CompiledFlowRecordProgram {
         }
         Self {
             document: Arc::new(document),
+            coverage_plan: std::sync::OnceLock::new(),
             prototype_values: values.to_vec().into(),
             patches: patches.into(),
             page_patch_counts: page_patch_counts.into(),
@@ -1383,6 +1387,46 @@ impl CompiledDocument {
         Ok(out)
     }
 
+    /// Render fixed bindings and report each row's page range and registered-font coverage.
+    ///
+    /// Coverage uses the final bound text and the fixed template's selected fonts,
+    /// including static and generated text. It does not reflow or switch fonts.
+    /// Diagnostics do not alter PDF bytes or turn missing characters into errors.
+    /// See [`CompiledRecordReport::glyph_report`] for the coverage limits.
+    pub fn render_bindings_to_buffer_with_report(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+    ) -> Result<(Vec<u8>, CompiledBatchReport), FullBleedError> {
+        self.render_bindings_to_buffer_reporting(bindings, None)
+    }
+
+    /// Render fixed bindings with diagnostics and cooperative cancellation.
+    pub fn render_bindings_to_buffer_cancellable_with_report(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+        cancellation: &AuthoringCancellationToken,
+    ) -> Result<(Vec<u8>, CompiledBatchReport), FullBleedError> {
+        self.render_bindings_to_buffer_reporting(bindings, Some(cancellation))
+    }
+
+    fn render_bindings_to_buffer_reporting(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+        cancellation: Option<&AuthoringCancellationToken>,
+    ) -> Result<(Vec<u8>, CompiledBatchReport), FullBleedError> {
+        let (count, columns) = self.ordered_binding_columns(bindings)?;
+        let mut bytes = Vec::with_capacity(count.saturating_mul(512).saturating_add(64 * 1024));
+        let mut report = CompiledBatchReport::default();
+        self.render_bindings_to_writer_ordered_reporting(
+            count,
+            &columns,
+            &mut bytes,
+            cancellation,
+            Some(&mut report),
+        )?;
+        Ok((bytes, report))
+    }
+
     /// Execute fixed-geometry bindings with cooperative row-boundary cancellation.
     pub fn render_bindings_to_buffer_cancellable(
         &self,
@@ -1407,6 +1451,23 @@ impl CompiledDocument {
         columns: &[&[String]],
         writer: &mut W,
         cancellation: Option<&AuthoringCancellationToken>,
+    ) -> Result<usize, FullBleedError> {
+        self.render_bindings_to_writer_ordered_reporting(
+            record_count,
+            columns,
+            writer,
+            cancellation,
+            None,
+        )
+    }
+
+    fn render_bindings_to_writer_ordered_reporting<W: std::io::Write>(
+        &self,
+        record_count: usize,
+        columns: &[&[String]],
+        writer: &mut W,
+        cancellation: Option<&AuthoringCancellationToken>,
+        report: Option<&mut CompiledBatchReport>,
     ) -> Result<usize, FullBleedError> {
         let binding_plan = self
             .binding_plan
@@ -1441,7 +1502,30 @@ impl CompiledDocument {
             return Err(FullBleedError::Cancelled);
         }
         result?;
-        Ok(pdf_stream.finish()?)
+        let written = pdf_stream.finish()?;
+        if let Some(report) = report {
+            let plan = compiled_report::CoveragePlan::new(&self.document);
+            let slots = self
+                .binding_slots
+                .iter()
+                .enumerate()
+                .map(|(index, name)| (name.clone(), index))
+                .collect();
+            let mut coverage = compiled_report::FontCoverage::new(&self.font_registry);
+            for row in 0..record_count {
+                if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+                    return Err(FullBleedError::Cancelled);
+                }
+                report.push(
+                    self.document.pages.len(),
+                    plan.fixed(&mut coverage, &slots, columns, row),
+                );
+            }
+            if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+                return Err(FullBleedError::Cancelled);
+            }
+        }
+        Ok(written)
     }
 
     pub fn render_bindings_to_writer<W: std::io::Write>(
@@ -1554,6 +1638,66 @@ impl CompiledDocument {
         Ok(out)
     }
 
+    /// Render reflow bindings with ordered page ranges and final registered-font coverage.
+    ///
+    /// Diagnostics inspect the selected text and fonts after layout and cached
+    /// substitutions; they do not perform a second layout or change PDF bytes.
+    /// See [`CompiledRecordReport::glyph_report`] for the coverage limits.
+    pub fn render_reflow_bindings_to_buffer_with_report(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+    ) -> Result<(Vec<u8>, CompiledBatchReport), FullBleedError> {
+        self.render_reflow_bindings_to_buffer_with_options_and_report(
+            bindings,
+            CompiledReflowOptions::default(),
+        )
+    }
+
+    /// Render reflow diagnostics using an explicit compression policy.
+    pub fn render_reflow_bindings_to_buffer_with_options_and_report(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+        options: CompiledReflowOptions,
+    ) -> Result<(Vec<u8>, CompiledBatchReport), FullBleedError> {
+        self.render_reflow_bindings_to_buffer_reporting(bindings, options, None)
+    }
+
+    /// Render reflow diagnostics with cooperative cancellation.
+    pub fn render_reflow_bindings_to_buffer_cancellable_with_report(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+        options: CompiledReflowOptions,
+        cancellation: &AuthoringCancellationToken,
+    ) -> Result<(Vec<u8>, CompiledBatchReport), FullBleedError> {
+        self.render_reflow_bindings_to_buffer_reporting(bindings, options, Some(cancellation))
+    }
+
+    fn render_reflow_bindings_to_buffer_reporting(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+        options: CompiledReflowOptions,
+        cancellation: Option<&AuthoringCancellationToken>,
+    ) -> Result<(Vec<u8>, CompiledBatchReport), FullBleedError> {
+        let plan = self.compiled_reflow_plan()?;
+        let (count, columns) = Self::ordered_columns_for_slots(
+            plan.template.slot_names(),
+            bindings,
+            "compiled document has no reflow-capable {{slot}} text bindings",
+        )?;
+        let mut bytes = Vec::with_capacity(count.saturating_mul(4096).saturating_add(64 * 1024));
+        let mut report = CompiledBatchReport::default();
+        self.render_reflow_bindings_to_writer_ordered_reporting(
+            plan,
+            count,
+            &columns,
+            &mut bytes,
+            options,
+            cancellation,
+            Some(&mut report),
+        )?;
+        Ok((bytes, report))
+    }
+
     /// Execute compiled reflow with explicit options and cooperative cancellation.
     pub fn render_reflow_bindings_to_buffer_with_options_cancellable(
         &self,
@@ -1588,6 +1732,27 @@ impl CompiledDocument {
         writer: &mut W,
         options: CompiledReflowOptions,
         cancellation: Option<&AuthoringCancellationToken>,
+    ) -> Result<usize, FullBleedError> {
+        self.render_reflow_bindings_to_writer_ordered_reporting(
+            plan,
+            record_count,
+            columns,
+            writer,
+            options,
+            cancellation,
+            None,
+        )
+    }
+
+    fn render_reflow_bindings_to_writer_ordered_reporting<W: std::io::Write>(
+        &self,
+        plan: &CompiledReflowPlan,
+        record_count: usize,
+        columns: &[&[String]],
+        writer: &mut W,
+        options: CompiledReflowOptions,
+        cancellation: Option<&AuthoringCancellationToken>,
+        mut report: Option<&mut CompiledBatchReport>,
     ) -> Result<usize, FullBleedError> {
         use std::collections::BTreeMap;
         use std::sync::Mutex;
@@ -1672,7 +1837,18 @@ impl CompiledDocument {
                         Ok(document)
                     })
             };
+        let mut coverage = compiled_report::FontCoverage::new(&self.font_registry);
         let mut link_record = |row, document: CompiledFlowBoundRecord| {
+            if let Some(report) = report.as_deref_mut() {
+                let plan = document
+                    .program
+                    .coverage_plan
+                    .get_or_init(|| compiled_report::CoveragePlan::new(&document.program.document));
+                report.push(
+                    document.page_count(),
+                    plan.reflow(&mut coverage, &document.page_overrides),
+                );
+            }
             total_pages = total_pages.saturating_add(document.page_count());
             pdf_stream
                 .add_compiled_flow_document(
@@ -10162,6 +10338,8 @@ mod preformatted_whitespace_tests;
 
 #[cfg(test)]
 mod compiled_font_fallback_tests;
+#[cfg(test)]
+mod compiled_report_tests;
 
 #[cfg(test)]
 mod tests {
