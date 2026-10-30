@@ -955,7 +955,7 @@ fn instantiate_binding_content(
     }
 }
 
-fn instantiate_binding_text(
+pub(crate) fn instantiate_binding_text(
     template: &str,
     slot_lookup: &HashMap<String, usize>,
     columns: &[&[String]],

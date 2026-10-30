@@ -40,7 +40,7 @@ def main() -> None:
     cargo = [args.cargo, *(['+' + args.toolchain] if args.toolchain else [])]
     report = dict(status='starting', startedAt=datetime.now(timezone.utc).isoformat(), steps=[],
                   sourceSha256={name: sha256((repo / name).read_bytes()).hexdigest() for name in (
-                      'src/lib.rs', 'src/parallel.rs', 'Cargo.toml', 'Cargo.lock',
+                      'src/lib.rs', 'src/parallel.rs', 'src/pdf.rs', 'src/compiled_report.rs', 'Cargo.toml', 'Cargo.lock',
                       'tools/compiled_reflow_wasi/probe.rs', 'tools/compiled_reflow_wasi/host.mjs')})
 
     def save() -> None:
@@ -94,6 +94,7 @@ def main() -> None:
             directory = out / mode
             result = json.loads((directory / 'verification.json').read_bytes())
             assert len(result['cases']) == 4 and result['replayChecks'] == 4 and result['recoveryPages'] == 1
+            assert result['diagnosticCalls'] == 10 and result['diagnosticFailuresRecovered'] is True
             assert all(result[key] is True for key in ('preCancelledRejected', 'unequalColumnsRejected', 'invalidFragmentRejected'))
             manifests[mode] = {p.name: dict(bytes=p.stat().st_size, sha256=sha256(p.read_bytes()).hexdigest())
                                for p in sorted(directory.iterdir()) if p.suffix in ('.pdf', '.png', '.json')}
@@ -101,7 +102,7 @@ def main() -> None:
         for name, expected in report['sourceSha256'].items():
             assert sha256((repo / name).read_bytes()).hexdigest() == expected, 'Source changed during verification: ' + name
         report.update(status='passed', outputs=manifests, exactComparedFiles=len(manifests['native-1']),
-                      scope='These four fixture PDFs and finalized previews, plus replay/cancellation/error checks. No general parity, conformance, throughput, or Node API claim.')
+                      scope='Four reflow fixture PDFs and finalized previews, two missing-character diagnostic PDFs, ten byte-preserving report calls, and replay/cancellation/error checks. No general parity, conformance, throughput, or Node API claim.')
     except BaseException as error:
         report.update(status='failed', error=str(error))
         raise

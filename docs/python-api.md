@@ -207,8 +207,10 @@ Methods:
 - `render_pdf_to_file(path, deterministic_hash=None) -> int`
 - `render_pdf_batch(copies, deterministic_hash=None) -> bytes`
 - `render_pdf_bindings(bindings, deterministic_hash=None) -> bytes`
+- `render_pdf_bindings_with_report(bindings, deterministic_hash=None) -> (bytes, dict)`
 - `render_pdf_bindings_to_file(bindings, path, deterministic_hash=None) -> int`
 - `render_pdf_reflow_bindings(bindings, deterministic_hash=None, *, compression="throughput") -> bytes`
+- `render_pdf_reflow_bindings_with_report(bindings, deterministic_hash=None, *, compression="throughput") -> (bytes, dict)`
 - `render_pdf_reflow_bindings_to_file(bindings, path, deterministic_hash=None, *, compression="throughput") -> int`
 
 `CompiledFlowCompression.Throughput` uses a bounded four-step match search for large compiled-flow
@@ -275,6 +277,41 @@ The reflow binding contract is:
   subtree, and it does not virtualize repeated variable rows;
 - each record has the same semantics as rendering the fully substituted HTML through the ordinary
   API. The compiler may therefore produce a different page count for every row.
+
+### Check a compiled batch before accepting it
+
+The `*_with_report` methods return the PDF bytes and a report for the same render.
+They inspect final bound, static, and generated text, including cached substitutions,
+without another layout pass. Requesting a report preserves the PDF bytes. Missing
+characters are reported; they do not automatically raise an exception.
+
+```python
+from pathlib import Path
+
+# Register the document's fonts on engine before compiling the template.
+compiled = engine.compile_pdf(template_html, css)
+pdf, report = compiled.render_pdf_reflow_bindings_with_report(records)
+bad_rows = [row["record_index"] for row in report["records"] if row["missing_glyphs"]]
+if bad_rows:
+    raise ValueError(f"Registered-font coverage failed for rows: {bad_rows}")
+Path("invoices.pdf").write_bytes(pdf)
+```
+
+`report["page_count"]` is the combined PDF's page count. `report["records"]` follows
+input order; each entry contains a zero-based `record_index`, zero-based
+`page_offset`, `page_count`, and `missing_glyphs`. Each missing-character entry has
+`codepoint`, `char`, `count`, and `fonts_tried`. Counts accumulate observations of
+that character; `fonts_tried` identifies the first selected font where it was absent.
+
+Coverage checks the registered fonts **actually selected for the output**. A fixed
+template compiled in a Latin font can therefore report missing Japanese characters
+even when a Japanese fallback is registered: fixed bindings preserve their fonts.
+Reflow bindings resolve fonts again when the bound text requires it.
+
+Base-14 fonts and text already converted into images are outside this check. An empty
+report does not establish correct shaping, layout, accessibility, or PDF conformance.
+The ordinary renderer's glyph report checks the available fallback stack during
+layout; its observation counts need not match this report of final compiled text.
 
 Use `render_pdf_bindings` for validated paint-only fields where hundreds of thousands of pages per
 second matter and geometry is fixed. Use `render_pdf_reflow_bindings` for compiled template reuse

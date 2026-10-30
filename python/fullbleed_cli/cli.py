@@ -437,6 +437,7 @@ SCHEMA_DEFS = {
                     "logical_table_pagination": {"type": "boolean"},
                     "bundled_standard_font_previews": {"type": "boolean"},
                     "compiled_reflow_bindings": {"type": "boolean"},
+                    "compiled_batch_reports": {"type": "boolean"},
                     "compiled_flow_compression_modes": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -3206,6 +3207,11 @@ def _capabilities_payload(cli_surface=None):
                 and hasattr(compiled_document, "render_pdf_reflow_bindings")
             ),
             "compiled_flow_compression_modes": compression_modes,
+            "compiled_batch_reports": bool(
+                compiled_document
+                and hasattr(compiled_document, "render_pdf_bindings_with_report")
+                and hasattr(compiled_document, "render_pdf_reflow_bindings_with_report")
+            ),
             "batch_render": bool(pdf_engine and hasattr(pdf_engine, "render_pdf_batch")),
             "batch_render_parallel": bool(
                 pdf_engine and hasattr(pdf_engine, "render_pdf_batch_parallel")

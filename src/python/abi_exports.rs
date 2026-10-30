@@ -11,6 +11,25 @@ const COMPILED_CAPSULE: &[u8] = b"fullbleed.CompiledDocument\0";
 const ASSET_CAPSULE: &[u8] = b"fullbleed.Asset\0";
 const BUNDLE_CAPSULE: &[u8] = b"fullbleed.AssetBundle\0";
 
+fn compiled_report_to_py(
+    py: Python<'_>,
+    report: &crate::CompiledBatchReport,
+) -> PyResult<PyObject> {
+    let out = PyDict::new(py);
+    out.set_item("page_count", report.page_count)?;
+    let records = PyList::empty(py);
+    for row in &report.records {
+        let record = PyDict::new(py);
+        record.set_item("record_index", row.record_index)?;
+        record.set_item("page_offset", row.page_offset)?;
+        record.set_item("page_count", row.page_count)?;
+        record.set_item("missing_glyphs", glyph_report_to_py(py, &row.glyph_report)?)?;
+        records.append(record)?;
+    }
+    out.set_item("records", records)?;
+    Ok(out.unbind().into_any())
+}
+
 fn expect_arity(payload: &Bound<'_, PyAny>, expected: isize) -> PyResult<()> {
     python_abi::sequence_length(payload, expected)
 }
@@ -1047,6 +1066,21 @@ fn dispatch_compiled(
             }
             Ok(PyBytes::new(py, &bytes).unbind().into_any())
         }
+        "CompiledDocument.render_pdf_bindings_with_report" => {
+            expect_arity(payload, 2)?;
+            let bindings: HashMap<String, Vec<String>> = argument(payload, 0)?;
+            let (bytes, report) = py
+                .allow_threads(|| compiled.render_bindings_to_buffer_with_report(&bindings))
+                .map_err(to_py_err)?;
+            if let Some(path) = optional_argument::<String>(payload, 1)? {
+                write_hash_file(&path, &sha256_hex(&bytes))?;
+            }
+            (
+                PyBytes::new(py, &bytes).unbind(),
+                compiled_report_to_py(py, &report)?,
+            )
+                .into_py_value()
+        }
         "CompiledDocument.render_pdf_bindings_to_file" => {
             expect_arity(payload, 3)?;
             let bindings: HashMap<String, Vec<String>> = argument(payload, 0)?;
@@ -1074,6 +1108,28 @@ fn dispatch_compiled(
                 write_hash_file(&path, &sha256_hex(&bytes))?;
             }
             Ok(PyBytes::new(py, &bytes).unbind().into_any())
+        }
+        "CompiledDocument.render_pdf_reflow_bindings_with_report" => {
+            expect_arity(payload, 3)?;
+            let bindings: HashMap<String, Vec<String>> = argument(payload, 0)?;
+            let options = CompiledReflowOptions {
+                compression: compiled_flow_compression_argument(payload, 2)?,
+            };
+            let (bytes, report) = py
+                .allow_threads(|| {
+                    compiled.render_reflow_bindings_to_buffer_with_options_and_report(
+                        &bindings, options,
+                    )
+                })
+                .map_err(to_py_err)?;
+            if let Some(path) = optional_argument::<String>(payload, 1)? {
+                write_hash_file(&path, &sha256_hex(&bytes))?;
+            }
+            (
+                PyBytes::new(py, &bytes).unbind(),
+                compiled_report_to_py(py, &report)?,
+            )
+                .into_py_value()
         }
         "CompiledDocument.render_pdf_reflow_bindings_to_file" => {
             expect_arity(payload, 4)?;
