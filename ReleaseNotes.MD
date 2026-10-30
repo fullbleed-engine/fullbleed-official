@@ -1,3 +1,22 @@
+# Fullbleed Release Notes - 2.5.45
+
+Compiled reflow now reselects fonts when bound text changes. Previously, an
+ASCII record could prime a cached run that dropped Japanese glyphs in a later
+record, even with a covering fallback font registered. In the reverse order,
+Latin text could keep using the Japanese fallback instead of the authored
+primary font.
+
+Replacement text now passes a glyph-coverage check before a primary-font run
+is reused. Changed fallback and CSS `unicode-range` selections go through
+layout again. Coverage checks account for holes in subset fonts and encoded
+shaping options. Identical records still replay, and supported primary-font
+replacements retain their reusable compiled program.
+
+Regression checks compare saved PDF text, selected fonts and pixels with fresh
+rendering, using one and four workers. See the
+[2.5.45 runbook](docs/release/2.5.45-runbook.md) for retained evidence and scope.
+The public API is unchanged. Component authoring remains alpha.
+
 # Fullbleed Release Notes - 2.5.44
 
 Compiled reflow now renders on single-threaded WASIp1 hosts. Previously, a

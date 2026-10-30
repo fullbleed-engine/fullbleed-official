@@ -514,6 +514,7 @@ impl CompiledFlowRecordProgram {
             let mut table_depth = 0usize;
             let mut state_stack = Vec::<(Arc<str>, Pt, u8)>::new();
             let mut pending_constraint = None;
+            let mut pending_primary_font: Option<&str> = None;
             for (command_index, command) in page.commands.iter().enumerate() {
                 match command {
                     Command::SaveState => {
@@ -543,6 +544,11 @@ impl CompiledFlowRecordProgram {
                     {
                         pending_constraint = CompiledTextConstraint::parse(value);
                     }
+                    Command::Meta { key, value }
+                        if key == flowable::META_COMPILED_PRIMARY_FONT_KEY =>
+                    {
+                        pending_primary_font = Some(value.as_str());
+                    }
                     Command::Meta { key, .. }
                         if key.starts_with(canvas::META_RUNNING_ELEMENT_PREFIX) =>
                     {
@@ -550,16 +556,19 @@ impl CompiledFlowRecordProgram {
                     }
                     Command::DrawString { x, text, .. } => {
                         let constraint = pending_constraint.take();
+                        let primary_font = pending_primary_font.take() == Some(font_name.as_ref());
                         let edits = Self::text_edits(text, &lookup);
                         if edits.is_empty() {
                             continue;
                         }
-                        if text_rendering_mode == 3 || table_depth > 0 {
+                        if text_rendering_mode == 3 || table_depth > 0 || !primary_font {
                             // Invisible text can accompany separately painted
                             // glyph outlines. Patching only its searchable text
                             // would leave the previous recipient visible.
                             // Table text also affects other cells' geometry,
                             // beyond the local text constraint of this patch.
+                            // Fallback/range-dependent font runs must resolve
+                            // the font again when their bound value changes.
                             for edit in &edits {
                                 for slot in edit.value_slots.iter() {
                                     layout_dependent_values[*slot] = true;
@@ -608,11 +617,12 @@ impl CompiledFlowRecordProgram {
                     }
                     Command::DrawStringTransformed { x, text, .. } => {
                         let constraint = pending_constraint.take();
+                        let primary_font = pending_primary_font.take() == Some(font_name.as_ref());
                         let edits = Self::text_edits(text, &lookup);
                         if edits.is_empty() {
                             continue;
                         }
-                        if text_rendering_mode == 3 || table_depth > 0 {
+                        if text_rendering_mode == 3 || table_depth > 0 || !primary_font {
                             for edit in &edits {
                                 for slot in edit.value_slots.iter() {
                                     layout_dependent_values[*slot] = true;
@@ -756,6 +766,17 @@ impl CompiledFlowRecordProgram {
 
             let old_measured = patch.old_measured;
             let changed = new_text.as_ref() != patch.prototype_text.as_ref();
+            if changed
+                && !registry.compiled_font_supports_text(
+                    patch.font_name.as_ref(),
+                    patch.font_index,
+                    new_text.as_ref(),
+                )
+            {
+                // Reflow can split the replacement into newly selected font
+                // runs. Shaping it in the prototype font would lose glyphs.
+                return None;
+            }
             let new_measured = if changed {
                 patch
                     .font_index
@@ -10138,6 +10159,9 @@ pub fn merge_documents(documents: Vec<Document>) -> Result<Document, FullBleedEr
 
 #[cfg(test)]
 mod preformatted_whitespace_tests;
+
+#[cfg(test)]
+mod compiled_font_fallback_tests;
 
 #[cfg(test)]
 mod tests {
