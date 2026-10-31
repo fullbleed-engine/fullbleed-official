@@ -1,3 +1,20 @@
+# Fullbleed Release Notes - 2.5.48
+
+Page headers and footers now resolve `@font-face` families through the same
+font matcher as document text. A family declared in `@page` or a margin box
+selects its registered source instead of falling back to Helvetica. An alias
+inherited from the root can select another source when a page rule changes
+the requested weight.
+
+Page font-family lists retain fallback order, quoted names and CSS escapes.
+Font-face size adjustment and Unicode-range selections also reach the margin
+text. The regression checks compare ordinary PDFs, fixed compiled batches and
+both reflow compression modes with explicit-face controls.
+
+See [registering fonts](docs/font-registration.md#fonts-in-page-headers-and-footers)
+and the [2.5.48 runbook](docs/release/2.5.48-runbook.md). Component authoring
+remains alpha.
+
 # Fullbleed Release Notes - 2.5.47
 
 The CLI can now register bundled Inter directly with `--asset "@inter"`.

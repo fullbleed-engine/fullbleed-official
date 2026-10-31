@@ -38,7 +38,7 @@ DISPLAY = '@font-face {font-family:Brand;src:url("Display.ttf");font-weight:400;
 CASES = [
     {"name": "local-alias", "alias": '@font-face {font-family:Brand;src:local("DMSerifDisplay-Regular");} @page {@bottom-center {font-family:Brand;}}',
      "control": '@page {@bottom-center {font-family:"DM Serif Display";}}'},
-    {"name": "url-alias", "alias": DISPLAY + '@page {@bottom-center {font-family:Brand;}}',
+    {"name": "url-alias", "alias": DISPLAY + r'@page {@bottom-center {font-family:Br\61 nd;}}',
      "control": '@page {@bottom-center {font-family:"DM Serif Display";}}'},
     {"name": "inherited-weight", "alias": '@font-face {font-family:Brand;src:url("Body.ttf");font-weight:400;} @font-face {font-family:Brand;src:url("Display.ttf");font-weight:700;} html {font-family:Brand;} @page {font-weight:700;}',
      "control": '@page {font-family:"DM Serif Display";font-weight:700;}'},

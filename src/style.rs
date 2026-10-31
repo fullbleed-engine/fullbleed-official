@@ -5271,7 +5271,7 @@ impl StyleResolver {
                 margin_box.line_height,
             ),
         ] {
-            if let Some(spec) = family.and_then(font_spec_from_raw_string) {
+            if let Some(spec) = family.and_then(page_font_spec_from_raw_string) {
                 let stack = match spec {
                     FontSpec::Value(stack) => Some(stack),
                     FontSpec::Initial => Some(vec![Arc::<str>::from("Helvetica")]),
@@ -8187,8 +8187,48 @@ fn parse_page_counter_value(raw: &str, counter_name: &str, default_value: i32) -
 fn parse_page_font_name(raw: &str) -> Option<String> {
     // Preserve quoted family names and the fallback stack for the same
     // font-face resolution used by document text.
-    crate::css_native::parse_string_or_ident_list(raw)?;
-    font_spec_from_raw_string(raw).map(|_| raw.trim().to_string())
+    page_font_spec_from_raw_string(raw).map(|_| raw.trim().to_string())
+}
+
+fn page_font_spec_from_raw_string(raw: &str) -> Option<FontSpec> {
+    use crate::css_native::ComponentValue;
+
+    let parts = crate::css_native::split_top_level(raw, ',').ok()?;
+    let mut stack = Vec::new();
+    for part in &parts {
+        let tokens = crate::css_native::tokenize_component_values(part)?;
+        match tokens.as_slice() {
+            [ComponentValue::String(name)] if !name.is_empty() => {
+                // A quoted generic name is an authored family, not a keyword.
+                stack.push(Arc::<str>::from(name.as_str()));
+            }
+            [] => return None,
+            _ => {
+                let mut names = Vec::new();
+                for token in &tokens {
+                    let ComponentValue::Ident(name) = token else {
+                        return None;
+                    };
+                    match name.to_ascii_lowercase().as_str() {
+                        "inherit" | "unset" | "revert" | "revert-layer" | "initial" => {
+                            return (parts.len() == 1 && tokens.len() == 1)
+                                .then(|| font_spec_from_raw_string(name))
+                                .flatten();
+                        }
+                        "default" => return None,
+                        _ => names.push(name.as_str()),
+                    }
+                }
+                let name = names.join(" ");
+                if let Some(generic) = generic_font_family_stack(&name) {
+                    stack.extend(generic.iter().map(|name| Arc::<str>::from(*name)));
+                } else {
+                    stack.push(Arc::<str>::from(name));
+                }
+            }
+        }
+    }
+    finalize_font_stack(stack).map(FontSpec::Value)
 }
 
 fn apply_native_page_margin_box_declarations(
@@ -44273,6 +44313,34 @@ mod tests {
         assert_eq!(style.font_size, Pt::from_f32(15.0));
         assert_eq!(text_style.font_size, Pt::from_f32(22.5));
         assert_eq!(text_style.line_height, Pt::from_f32(36.0));
+    }
+
+    #[test]
+    fn page_font_families_validate_lists_and_decode_css_escapes() {
+        let FontSpec::Value(stack) =
+            page_font_spec_from_raw_string(r#""Display, One", Br\61 nd Family, "serif""#)
+                .expect("valid family list")
+        else {
+            panic!("expected a family stack");
+        };
+        assert_eq!(
+            stack.iter().map(|name| name.as_ref()).collect::<Vec<_>>(),
+            vec!["Display, One", "Brand Family", "serif", "Helvetica"]
+        );
+        for invalid in [
+            "", "A,", ",A", "A,,B", "12", "url(face.ttf)", "\"A\" B",
+            "A,inherit", "initial,A", "default", "\"unclosed",
+        ] {
+            assert!(parse_page_font_name(invalid).is_none(), "{invalid}");
+        }
+        assert!(matches!(
+            page_font_spec_from_raw_string("inherit"),
+            Some(FontSpec::Inherit)
+        ));
+        assert!(matches!(
+            page_font_spec_from_raw_string("initial"),
+            Some(FontSpec::Initial)
+        ));
     }
 
     #[test]
