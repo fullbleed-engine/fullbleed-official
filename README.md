@@ -51,6 +51,8 @@ Start in the [HTML/CSS playground](https://docs.fullbleed.dev/playground/) with 
 
 Download the PDF, or select **Python** or **Node.js** under **Project language** and choose **Download project**. The ZIP includes your source, assets, fonts, licenses, pinned dependencies, and a script to render the document locally.
 
+Keep the ZIP unchanged, then choose **Open saved project** in the playground to continue editing on a later visit.
+
 If the output needs work, [report a rendering problem](https://github.com/fullbleed-engine/fullbleed-official/issues/new?template=bug_report.yml) with a small example using data and assets you can share publicly. For a guided Python walkthrough, use the [notebook in Colab](https://colab.research.google.com/github/fullbleed-engine/fullbleed-official/blob/master/examples/notebooks/first_invoice.ipynb), or start with a local script below.
 
 ### Python
@@ -166,20 +168,20 @@ output. Both styled and unstyled HTML exports remain available.
 
 | You want to build | Start here |
 | --- | --- |
-| Distinctive invoices, reports, notices, and statements | [Designed showcase with fonts and source](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a14/examples/design_showcase) |
+| Distinctive invoices, reports, notices, and statements | [Designed showcase with fonts and source](https://docs.fullbleed.dev/examples/) |
 | A native Rust application | [Rust quickstart and runnable examples](https://docs.fullbleed.dev/getting-started/rust/) |
 | A Node.js or TypeScript application | [Node quickstart and designed invoice project](https://docs.fullbleed.dev/getting-started/node/) |
 | PDFs generated in your web application's browser | [Browser worker SDK, editable demo, and complete project](https://docs.fullbleed.dev/guides/browser-pdf/) |
 | A C# or .NET application | [NuGet quickstart and designed invoice](https://docs.fullbleed.dev/getting-started/dotnet/) |
 | An invoice from JSON | [Complete, checked example](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a14/examples/agent_workflows) |
-| Automatic rebuilds while editing HTML/CSS (2.5.0+) | [Watch-mode invoice example](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a14/examples/render_watch) |
-| Catch PDF changes in pull requests | [Standalone project with a reviewed baseline and CI workflow](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a14/examples/pdf_regression) |
-| A PDF download in FastAPI, Flask, or Django | [Runnable web app examples](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a14/examples/web_frameworks) |
+| Automatic rebuilds while editing HTML/CSS (2.5.0+) | [Watch-mode invoice example](https://docs.fullbleed.dev/guides/render-watch/) |
+| Catch PDF changes in pull requests | [Standalone project with a reviewed baseline and CI workflow](https://docs.fullbleed.dev/guides/pdf-regression-ci/) |
+| A PDF download in FastAPI, Flask, or Django | [Runnable web app examples](https://docs.fullbleed.dev/guides/web-frameworks/) |
 | Queued PDF invoices in Laravel | [Blade templates, retries, and private downloads (PHP and Python)](https://docs.fullbleed.dev/guides/laravel-pdf/) |
 | A PDF response from Rust and Axum | [Invoice endpoint with request limits and editable templates](https://docs.fullbleed.dev/guides/axum-pdf/) |
 | PDF generation in AWS Lambda | [Python container starter with local runtime checks](https://docs.fullbleed.dev/guides/aws-lambda-pdf/) |
 | PDF attachments in an n8n workflow | [Webhook-to-PDF workflow and local Docker kit](https://docs.fullbleed.dev/guides/n8n-pdf/) |
-| A styled PDF report from a pandas DataFrame | [Paginated report with CSV data and verification](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a14/examples/pandas_report) |
+| A styled PDF report from a pandas DataFrame | [Paginated report with CSV data and verification](https://docs.fullbleed.dev/guides/pandas-to-pdf/) |
 | A styled invoice from CSV | [Acme invoice project](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a14/examples/acme_invoice) |
 | Simplified Chinese and English in one PDF | [Bilingual invoice with explicit fonts and glyph checks](https://docs.fullbleed.dev/guides/chinese-pdf/) |
 | A report that flows across pages | [Business report example](https://github.com/fullbleed-engine/fullbleed-official/tree/v2.6.0a14/examples/agent_workflows) |
