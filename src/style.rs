@@ -44328,8 +44328,17 @@ mod tests {
             vec!["Display, One", "Brand Family", "serif", "Helvetica"]
         );
         for invalid in [
-            "", "A,", ",A", "A,,B", "12", "url(face.ttf)", "\"A\" B",
-            "A,inherit", "initial,A", "default", "\"unclosed",
+            "",
+            "A,",
+            ",A",
+            "A,,B",
+            "12",
+            "url(face.ttf)",
+            "\"A\" B",
+            "A,inherit",
+            "initial,A",
+            "default",
+            "\"unclosed",
         ] {
             assert!(parse_page_font_name(invalid).is_none(), "{invalid}");
         }
@@ -44385,10 +44394,12 @@ mod tests {
         );
         assert_eq!(text.font_name.as_ref(), "Unavailable");
         assert_eq!(text.font_fallbacks[0].as_ref(), "AuthoredSerif");
-        assert!(!text
-            .font_fallbacks
-            .iter()
-            .any(|name| name.as_ref() == "Times-Roman"));
+        assert!(
+            !text
+                .font_fallbacks
+                .iter()
+                .any(|name| name.as_ref() == "Times-Roman")
+        );
     }
 
     #[test]
