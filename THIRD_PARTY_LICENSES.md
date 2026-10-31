@@ -11,7 +11,7 @@ Scope: third-party artifacts directly redistributed by this repository and wheel
 | --- | --- | --- | --- | --- |
 | Bootstrap CSS `v5.0.0` | `python/fullbleed_assets/bootstrap.min.css` | `MIT` | `https://getbootstrap.com/` | `https://github.com/twbs/bootstrap/blob/v5.0.0/LICENSE` |
 | Bootstrap Icons SVG Sprite `v1.11.3` | `python/fullbleed_assets/icons/bootstrap-icons.svg` | `MIT` | `https://icons.getbootstrap.com/` | `https://raw.githubusercontent.com/twbs/icons/v1.11.3/LICENSE` |
-| Inter Variable | `python/fullbleed_assets/fonts/Inter-Variable.ttf` | `OFL-1.1` | `https://fonts.google.com/specimen/Inter` | `https://raw.githubusercontent.com/google/fonts/main/ofl/inter/OFL.txt` |
+| Inter Variable | `python/fullbleed_assets/fonts/Inter-Variable.ttf` | `OFL-1.1` | `https://fonts.google.com/specimen/Inter` | `python/fullbleed_assets/licenses/Inter-OFL.txt` (upstream: `https://raw.githubusercontent.com/google/fonts/main/ofl/inter/OFL.txt`) |
 | Noto Sans Regular | `python/fullbleed_assets/fonts/NotoSans-Regular.ttf` | `OFL-1.1` | `https://fonts.google.com/noto` | `https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/OFL.txt` |
 | Noto Sans Math Regular | `python/fullbleed_assets/fonts/NotoSansMath-Regular.ttf` | `OFL-1.1` | `https://fonts.google.com/noto` | `https://raw.githubusercontent.com/google/fonts/main/ofl/notosansmath/OFL.txt` |
 | Noto Sans Symbols Regular | `python/fullbleed_assets/fonts/NotoSansSymbols-Regular.ttf` | `OFL-1.1` | `https://fonts.google.com/noto` | `https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssymbols/OFL.txt` |

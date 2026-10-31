@@ -15,6 +15,7 @@ import zipfile
 from importlib import resources
 from pathlib import Path
 
+from .assets import BUILTIN_ASSETS
 
 # Builtin bootstrap defaults for `fullbleed init`.
 DEFAULT_BOOTSTRAP_REF = "bootstrap"
@@ -24,12 +25,12 @@ DEFAULT_BOOTSTRAP_REL_PATH = "vendor/css/bootstrap.min.css"
 DEFAULT_BOOTSTRAP_LICENSE_FILE = "vendor/css/LICENSE.bootstrap.txt"
 DEFAULT_BOOTSTRAP_LICENSE_URL = "https://raw.githubusercontent.com/twbs/bootstrap/v5.0.0/LICENSE"
 DEFAULT_INIT_FONT_NAME = "inter"
-DEFAULT_INIT_FONT_VERSION = "4.0"
-DEFAULT_INIT_FONT_SOURCE_REL_PATH = "fonts/Inter-Variable.ttf"
+DEFAULT_INIT_FONT_VERSION = BUILTIN_ASSETS[DEFAULT_INIT_FONT_NAME]["default"]
+DEFAULT_INIT_FONT_SOURCE_REL_PATH = BUILTIN_ASSETS[DEFAULT_INIT_FONT_NAME]["path"]
 DEFAULT_INIT_FONT_REL_PATH = "vendor/fonts/Inter-Variable.ttf"
-DEFAULT_INIT_FONT_LICENSE = "OFL-1.1"
+DEFAULT_INIT_FONT_LICENSE = BUILTIN_ASSETS[DEFAULT_INIT_FONT_NAME]["license"]
 DEFAULT_INIT_FONT_LICENSE_FILE = "vendor/fonts/LICENSE.inter.txt"
-DEFAULT_INIT_FONT_LICENSE_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/OFL.txt"
+DEFAULT_INIT_FONT_LICENSE_URL = BUILTIN_ASSETS[DEFAULT_INIT_FONT_NAME]["license_url"]
 DEFAULT_INIT_ICON_NAME = "bootstrap-icons"
 DEFAULT_INIT_ICON_VERSION = "1.11.3"
 DEFAULT_INIT_ICON_SOURCE_REL_PATH = "icons/bootstrap-icons.svg"

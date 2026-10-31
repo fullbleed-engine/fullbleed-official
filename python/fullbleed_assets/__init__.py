@@ -1,6 +1,6 @@
 """Bundled assets for fullbleed.
 
-This package contains built-in assets like Bootstrap CSS and Noto Sans font
+This package contains built-in assets like Bootstrap CSS, Inter and Noto Sans
 that ship with fullbleed for quick start projects.
 
 License notices for bundled third-party assets:

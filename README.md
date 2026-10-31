@@ -935,17 +935,24 @@ Install builtin assets:
 ```bash
 fullbleed assets install bootstrap
 fullbleed assets install bootstrap-icons
-# `@bootstrap` / `@bootstrap-icons` are also supported aliases
+fullbleed assets install inter
+# Plain names and quoted @ references are supported.
 ```
 
 PowerShell note:
 - Quote `@` aliases (for example `"@bootstrap"`) to avoid shell parsing surprises.
 
-Install remote asset package:
+Render with bundled Inter directly; no separate asset installation is needed:
 
 ```bash
-fullbleed assets install inter
+python -m fullbleed render --html invoice.html --css invoice.css --asset "@inter" --out invoice.pdf
 ```
+
+Set `font-family: Inter` in `invoice.css`. The command uses the font bytes in
+the installed package, without a network request or a system-font lookup.
+`assets install inter` copies that same font and its full OFL license into the
+chosen vendor directory or cache. Discover the supported `render_refs` and
+`install_refs` through `assets list --json`.
 
 Install broad Unicode fallback package (larger font payload):
 
@@ -987,7 +994,7 @@ fullbleed cache prune --max-age-days 30 --dry-run --json
 
 Notes:
 
-- Builtin packages accept both plain and `@` references (`bootstrap` == `@bootstrap`, `bootstrap-icons` == `@bootstrap-icons`, `noto-sans` == `@noto-sans`).
+- Builtin packages accept both plain and `@` references (`bootstrap` == `@bootstrap`, `bootstrap-icons` == `@bootstrap-icons`, `noto-sans` == `@noto-sans`, `inter` == `@inter`). Explicit versions must match an included version; unavailable versions are rejected.
 - `noto-sans` is available as a builtin fallback package, but it is intentionally larger than `inter`; use it when your document requires broader glyph coverage.
 - Project installs default to `./vendor/` when project markers are present (`assets.lock.json`, `report.py`, or `fullbleed.toml` in CWD).
 - If no project markers are found, `assets install` defaults to global cache unless `--vendor` is explicitly set.
