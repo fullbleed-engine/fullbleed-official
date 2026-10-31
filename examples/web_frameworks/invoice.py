@@ -20,10 +20,10 @@ PDF_HEADERS = {
 
 def load_invoice(invoice_id: str) -> dict[str, Any] | None:
     """Replace this fictional record with your application's authorized lookup."""
-    if invoice_id != "INV-1042":
+    if invoice_id not in {"INV-1042", "INV-1043"}:
         return None
-    return {
-        "number": "INV-1042",
+    data = {
+        "number": invoice_id,
         "customer": "Maple & Finch",
         "issued": "2026-10-01",
         "due": "2026-10-31",
@@ -33,6 +33,17 @@ def load_invoice(invoice_id: str) -> dict[str, Any] | None:
             {"description": "Review and handoff", "detail": "Final refinements, documentation, and delivery", "quantity": 2, "unit_price": "150.00"},
         ],
     }
+    if invoice_id == "INV-1043":
+        data["items"] = [
+            {
+                "description": f"Service line {number:03d}",
+                "detail": "Implementation, review, and delivery for this project milestone.",
+                "quantity": 1,
+                "unit_price": "25.00",
+            }
+            for number in range(1, 25)
+        ]
+    return data
 
 
 def render_invoice(data: dict[str, Any]) -> bytes:
@@ -62,5 +73,13 @@ def render_invoice(data: dict[str, Any]) -> bytes:
         ])],
         document_title=f"Invoice {data['number']}",
         document_lang="en",
+        # Page templates use engine-resolved counters, with space reserved by
+        # the stylesheet's bottom margin. Keep application data out of tokens.
+        footer_each="NORTHSTAR STUDIO  |  FICTIONAL SAMPLE  |  Page {page} of {pages}",
+        footer_x="16mm",
+        footer_y_from_bottom="12mm",
+        footer_font_name="Inter",
+        footer_font_size=6.6,
+        footer_color="#17382e",
     )
     return engine.render_pdf(html, css)

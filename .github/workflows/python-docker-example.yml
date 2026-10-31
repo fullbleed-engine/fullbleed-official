@@ -66,8 +66,9 @@ jobs:
               report = json.loads(path.read_text())
               assert report['ok']
               assert report['pdf']['sha256'] == hashlib.sha256((path.parent / 'invoice.pdf').read_bytes()).hexdigest()
+              assert report['long_pdf']['sha256'] == hashlib.sha256((path.parent / 'invoice-long.pdf').read_bytes()).hexdigest()
               assert report['preview_sha256'] == hashlib.sha256((path.parent / 'invoice.png').read_bytes()).hexdigest()
-          for filename in ['invoice.pdf', 'invoice.png']:
+          for filename in ['invoice.pdf', 'invoice-long.pdf', 'invoice.png']:
               hashes = {hashlib.sha256((path.parent / filename).read_bytes()).hexdigest() for path in records}
               assert len(hashes) == 1, (filename, hashes)
               print(filename, hashes.pop())

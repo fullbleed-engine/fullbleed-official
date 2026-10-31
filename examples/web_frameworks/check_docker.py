@@ -68,8 +68,10 @@ with tempfile.TemporaryDirectory() as directory:
     assert not report["warnings"] and not report["composition"]["issues"]
     pages = fullbleed.PdfEngine().render_finalized_pdf_image_pages(str(path), 110)
     assert len(pages) == 1
+    long_pdf = render_invoice(load_invoice("INV-1043"))
     print(json.dumps({"pdf_sha256": hashlib.sha256(pdf).hexdigest(), "inspection": report,
-        "preview_base64": base64.b64encode(pages[0]).decode("ascii")}))
+        "preview_base64": base64.b64encode(pages[0]).decode("ascii"),
+        "long": {"pdf_sha256": hashlib.sha256(long_pdf).hexdigest()}}))
 '''
 
 
@@ -81,13 +83,30 @@ def docker(*args: str, input: str | None = None, timeout: int = 60) -> str:
     return result.stdout
 
 
-def pdf_check(data: bytes) -> dict:
+def pdf_check(data: bytes, invoice_id: str = "INV-1042") -> dict:
     reader = PdfReader(io.BytesIO(data))
-    assert len(reader.pages) == 1
-    text = "".join(reader.pages[0].extract_text().split())
-    for marker in ["INV-1042", "Maple & Finch", "Design workshop", "USD 1,870.00"]:
+    expected_pages = 1 if invoice_id == "INV-1042" else 3
+    assert len(reader.pages) == expected_pages
+    pages = ["".join(page.extract_text().split()) for page in reader.pages]
+    text = "".join(pages)
+    markers = [invoice_id, "Maple & Finch"]
+    if invoice_id == "INV-1042":
+        markers += ["Design workshop", "USD 1,870.00"]
+        assert text.count("Designworkshop") == 1
+    else:
+        markers += ["USD 600.00"]
+        positions = []
+        for number in range(1, 25):
+            marker = f"Serviceline{number:03d}"
+            assert text.count(marker) == 1, marker
+            positions.append(text.index(marker))
+        assert positions == sorted(positions)
+        assert "USD600.00" in pages[-1]
+        assert all("DESCRIPTIONHOURSRATEAMOUNT" in page for page in pages)
+    for number, page in enumerate(pages, 1):
+        assert page.count(f"Page{number}of{len(pages)}") == 1
+    for marker in markers:
         assert "".join(marker.split()) in text, marker
-    assert text.count("Designworkshop") == 1
     fonts = reader.pages[0]["/Resources"]["/Font"].get_object()
     embedded = 0
     for reference in fonts.values():
@@ -98,7 +117,7 @@ def pdf_check(data: bytes) -> dict:
         if descriptor and any(key in descriptor.get_object() for key in ["/FontFile", "/FontFile2", "/FontFile3"]):
             embedded += 1
     assert embedded >= 4, embedded
-    return {"page_count": 1, "embedded_fonts": embedded, "expected_text_and_total": True,
+    return {"page_count": len(reader.pages), "embedded_fonts": embedded, "expected_text_and_total": True,
             "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
 
 
@@ -203,6 +222,12 @@ def main() -> None:
             assert pdf == responses[0][2]
         (out / "invoice.pdf").write_bytes(responses[0][2])
         receipt["pdf"] = pdf_check(responses[0][2])
+        status, headers, long_pdf = fetch(origin + "/invoices/INV-1043.pdf")
+        assert status == 200 and headers.get_content_type() == "application/pdf"
+        assert headers["Content-Disposition"] == 'attachment; filename="invoice.pdf"'
+        assert headers["Cache-Control"] == "private, no-store"
+        (out / "invoice-long.pdf").write_bytes(long_pdf)
+        receipt["long_pdf"] = pdf_check(long_pdf, "INV-1043")
         assert fetch(origin + "/invoices/DOES-NOT-EXIST.pdf")[0] == 404
         assert fetch(url, "POST")[0] == 405
         status, headers, preview = fetch(origin + "/preview.png")
@@ -220,6 +245,7 @@ def main() -> None:
                                     *LIMITS, "--network", "none", "--tmpfs", "/tmp:rw,noexec,nosuid,size=32m",
                                     image, "python", "-", input=OFFLINE))
         assert offline["pdf_sha256"] == receipt["pdf"]["sha256"]
+        assert offline["long"]["pdf_sha256"] == receipt["long_pdf"]["sha256"]
         png = base64.b64decode(offline.pop("preview_base64"), validate=True)
         (out / "invoice.png").write_bytes(png)
         (out / "sample-preview.png").write_bytes(preview)

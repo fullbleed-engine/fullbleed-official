@@ -1,11 +1,10 @@
-@page { size: A4; margin: 0; }
+@page { size: A4; margin: 15mm 16mm 20mm; background: #f8f5ec; }
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; background: #f8f5ec; }
 body { font-family: Inter; font-size: 10pt; line-height: 1.45; color: #17382e; }
 h1, h2, h3, p, figure { margin: 0; }
 h1, h2, h3 { font-weight: 400; }
-.page { width: 210mm; height: 296.9mm; padding: 15mm 16mm; position: relative; break-after: page; background: #f8f5ec; }
-.page:last-child { break-after: auto; }
+.page { width: auto; height: auto; }
 .kicker { font-size: 7.2pt; font-weight: 600; letter-spacing: 1.4pt; text-transform: uppercase; }
 .serif { font-family: 'DM Serif Display'; font-weight: 400; }
 .display { font-family: 'Bebas Neue'; font-weight: 400; }
@@ -16,7 +15,6 @@ h1, h2, h3 { font-weight: 400; }
 .grid-2 { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 24pt; }
 .grid-2 > * { min-width: 0; }
 .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16pt; }
-.footer { position: absolute; left: 16mm; right: 16mm; bottom: 12mm; border-top: .6pt solid #9eafa4; padding-top: 8pt; display: flex; justify-content: space-between; gap: 12pt; font-size: 6.6pt; letter-spacing: .45pt; }
 table { width: 100%; border-collapse: collapse; font-size: 9pt; }
 th { font-size: 7.5pt; font-weight: 600; text-align: left; }
 th, td { padding: 10pt 0; border-bottom: .55pt solid #bdc8bf; vertical-align: top; }
@@ -37,12 +35,18 @@ a { color: inherit; }
 .invoice .details { border-top: .6pt solid #9eafa4; border-bottom: .6pt solid #9eafa4; padding: 15pt 0; margin-bottom: 10pt; }
 .invoice .details p { margin-top: 5pt; font-size: 8.2pt; }
 .invoice .details > div + div { border-left: .6pt solid #c7cdc4; padding-left: 14pt; }
+.invoice table { table-layout: fixed; }
 .invoice th { color: #52665a; }
+.invoice th:first-child { width: 56%; }
+.invoice th:not(:first-child) { width: 14.666%; }
+.invoice tr { break-inside: avoid; }
 .invoice td { padding: 12pt 0; }
+.invoice td:first-child { overflow-wrap: anywhere; }
 .invoice .item-note { color: #617069; font-size: 8pt; margin-top: 4pt; }
-.invoice .amounts { display: grid; grid-template-columns: 1fr 1.25fr; gap: 27pt; margin-top: 23pt; }
+.invoice .closing { break-inside: avoid; }
+.invoice .amounts { display: grid; grid-template-columns: 1fr 1.25fr; gap: 27pt; margin-top: 23pt; break-inside: avoid; }
 .invoice .thanks { font: italic 22pt/1.2 'DM Serif Display'; color: #b44123; padding-top: 8pt; }
 .invoice .summary-line { display: flex; justify-content: space-between; padding: 5pt 0; font-size: 8.5pt; }
 .invoice .total { background: #17382e; color: #fff8e8; padding: 16pt; margin-top: 9pt; border-left: 4pt solid #d96238; }
 .invoice .total .value { font: 38pt/1.1 'Bebas Neue'; margin-top: 7pt; }
-.invoice .payment { margin-top: 20pt; padding-top: 12pt; border-top: .6pt solid #9eafa4; display: grid; grid-template-columns: 1fr 1fr; gap: 24pt; font-size: 8pt; }
+.invoice .payment { margin-top: 16pt; padding-top: 12pt; border-top: .6pt solid #9eafa4; display: grid; grid-template-columns: 1fr 1fr; gap: 24pt; font-size: 8pt; break-inside: avoid; }

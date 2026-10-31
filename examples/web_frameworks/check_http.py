@@ -66,7 +66,7 @@ def server(name: str, out: Path):
                 process.wait(timeout=10)
 
 
-def check_servers(out: Path, expected_pdf: bytes) -> list[dict]:
+def check_servers(out: Path, expected_pdf: bytes, expected_long_pdf: bytes) -> list[dict]:
     records = []
     for name in ["fastapi", "flask", "django"]:
         with server(name, out) as origin:
@@ -86,13 +86,20 @@ def check_servers(out: Path, expected_pdf: bytes) -> list[dict]:
                 assert headers.get_content_type() == "application/pdf"
                 assert headers["Content-Disposition"] == 'attachment; filename="invoice.pdf"'
                 assert headers["Cache-Control"] == "private, no-store"
+            code, headers, long_pdf = fetch(origin + "/invoices/INV-1043.pdf")
+            assert code == 200 and long_pdf == expected_long_pdf
+            assert headers.get_content_type() == "application/pdf"
+            assert headers["Content-Disposition"] == 'attachment; filename="invoice.pdf"'
+            assert headers["Cache-Control"] == "private, no-store"
             assert fetch(origin + "/invoices/DOES-NOT-EXIST.pdf")[0] == 404
             assert fetch(url, "POST")[0] == 405
             (out / f"{name}-http.pdf").write_bytes(responses[0][2])
+            (out / f"{name}-long-http.pdf").write_bytes(long_pdf)
             records.append({"framework": name, "ok": True, "pdf_status": 200,
                             "missing_status": 404, "post_status": 405,
                             "parallel_responses_identical": True,
                             "sha256": hashlib.sha256(expected_pdf).hexdigest(),
+                            "long_invoice_sha256": hashlib.sha256(expected_long_pdf).hexdigest(),
                             "home_and_preview_match": True})
         records[-1]["server_stopped"] = True
     return records
