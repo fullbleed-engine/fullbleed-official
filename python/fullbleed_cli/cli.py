@@ -31,6 +31,7 @@ import re
 import fullbleed
 import fullbleed_assets
 
+from .assets import BUILTIN_ASSETS, _resolve_builtin_asset
 from .agent_contract import (
     AGENT_ACCEPTANCE_SCENARIOS,
     AGENT_CONTRACT_SCHEMA,
@@ -683,26 +684,15 @@ def _resolve_assets(args):
 
     def _resolve_asset_path(raw):
         if raw.startswith("@"):
-            key = raw[1:].lower()
-            if key in {"bootstrap", "bootstrap5", "bootstrap5.0.0"}:
+            builtin = _resolve_builtin_asset(raw)
+            if builtin:
                 return (
-                    str(fullbleed_assets.asset_path("bootstrap.min.css")),
-                    "css",
-                    "bootstrap-5.0.0",
+                    fullbleed_assets.asset_path(builtin["path"]),
+                    builtin["render_kind"],
+                    builtin["render_name"],
                 )
-            if key in {"bootstrap-icons", "bootstrapicons", "bootstrap-icons1.11.3"}:
-                return (
-                    str(fullbleed_assets.asset_path("icons/bootstrap-icons.svg")),
-                    "svg",
-                    "bootstrap-icons-1.11.3",
-                )
-            if key in {"noto-sans", "noto-sans-regular"}:
-                return (
-                    str(fullbleed_assets.asset_path("fonts/NotoSans-Regular.ttf")),
-                    "font",
-                    "NotoSans-Regular",
-                )
-            raise ValueError(f"unknown builtin asset: {raw}")
+            choices = ", ".join(f"@{name}" for name in BUILTIN_ASSETS)
+            raise ValueError(f"unknown builtin asset: {raw}; bundled assets: {choices}")
         return raw, None, None
 
     inferred = []
@@ -3791,7 +3781,9 @@ def _add_common_flags(p):
     p.add_argument(
         "--asset",
         action="append",
-        help="Repeatable asset path. .svg and .pdf are inferred as asset kinds.",
+        help=("Repeatable local asset path or bundled reference: "
+              + ", ".join(f"@{name}" for name in BUILTIN_ASSETS)
+              + ". File extensions determine asset kinds."),
     )
     p.add_argument(
         "--asset-kind",
@@ -3947,12 +3939,12 @@ def _build_parser():
     p_assets_list.set_defaults(func=assets_module.cmd_assets_list)
     
     p_assets_info = assets_sub.add_parser("info", help="Show package details")
-    p_assets_info.add_argument("package", help="Package name (e.g., bootstrap, bootstrap-icons, noto-sans)")
+    p_assets_info.add_argument("package", help="Package name; bundled: " + ", ".join(BUILTIN_ASSETS))
     p_assets_info.add_argument("--json", action="store_true")
     p_assets_info.set_defaults(func=assets_module.cmd_assets_info)
     
     p_assets_install = assets_sub.add_parser("install", help="Install a package")
-    p_assets_install.add_argument("package", help="Package reference (e.g., @bootstrap, @bootstrap-icons)")
+    p_assets_install.add_argument("package", help="Package reference; bundled: " + ", ".join(BUILTIN_ASSETS))
     p_assets_install.add_argument("--vendor", help="Install to custom vendor directory")
     p_assets_install.add_argument("--global", "-g", dest="global_", action="store_true", 
                                    help="Install to global cache instead of ./vendor/")

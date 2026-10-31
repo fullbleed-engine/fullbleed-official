@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.46"
+  FULLBLEED_CI_VERSION: "2.5.47"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -232,6 +232,17 @@ jobs:
 
       - name: Verify component authoring from the installed wheel
         run: python -I tools/smoke_component_authoring.py --out target/component-authoring
+
+      - name: Verify bundled assets offline from the installed wheel
+        run: python -I -m pytest --noconftest --import-mode=importlib tests/test_fullbleed_cli_builtin_assets.py -q -ra --basetemp target/cli-builtin-assets --junitxml target/cli-builtin-assets/results.xml
+
+      - name: Retain bundled asset CLI outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-builtin-assets-${{ runner.os }}
+          path: target/cli-builtin-assets/
+          if-no-files-found: error
 
       - name: Retain component documents and previews
         uses: actions/upload-artifact@v7

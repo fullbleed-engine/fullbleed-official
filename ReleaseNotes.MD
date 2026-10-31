@@ -1,3 +1,20 @@
+# Fullbleed Release Notes - 2.5.47
+
+The CLI can now register bundled Inter directly with `--asset "@inter"`.
+The same catalog powers asset discovery, rendering, inspection, installation,
+verification and locking. Inter installs use the font inside the package and
+include its full OFL license; they do not download another copy.
+
+Built-in references retain their existing aliases and accept included versions,
+such as `"@inter@4.0"`. Unavailable versions fail instead of labeling the bundled
+bytes as the requested version. Installing a built-in asset also refuses to
+replace an existing destination file with different contents.
+
+This is a Python CLI and asset-workflow update. Existing PDF rendering defaults
+and native document APIs are unchanged. See the
+[2.5.47 runbook](docs/release/2.5.47-runbook.md) for qualification gates.
+Component authoring remains alpha.
+
 # Fullbleed Release Notes - 2.5.46
 
 Compiled batches can now return missing-character diagnostics and ordered page
