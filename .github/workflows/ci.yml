@@ -317,6 +317,17 @@ jobs:
       - name: Verify independent font synthesis in PDFs and previews
         run: python -I tools/smoke_font_synthesis.py --out target/font-synthesis
 
+      - name: Verify page-margin font aliases across installed rendering paths
+        run: python -I tools/smoke_page_margin_fonts.py --out target/page-margin-fonts
+
+      - name: Retain page-margin font PDFs and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: page-margin-fonts-${{ runner.os }}
+          path: target/page-margin-fonts/
+          if-no-files-found: error
+
       - name: Verify font subsets in composed and merged PDF previews
         env:
           FULLBLEED_TEST_INSTALLED_NATIVE: "1"

@@ -55,6 +55,31 @@ explicit-face controls for file, directory, bundle, fixed-template, and reflow
 rendering. This is a focused regression check, not a claim of complete CSS font
 matching conformance.
 
+## Fonts in page headers and footers
+
+Starting with 2.5.48, page-margin text uses registered `@font-face` aliases too:
+
+```css
+@page {
+  @bottom-center {
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: "Brand", "Noto Sans";
+    font-size: 10pt;
+  }
+}
+```
+
+The `Brand` mapping above selects the supplied display face. Register any
+fallback fonts you want to use as well. A page inherits its typography from
+`html`; `@page` overrides that root style, and each margin box can override
+the page. A family set only on `body` does not set the page's family.
+An inherited alias is matched again when a page or margin box changes
+`font-weight`, so its corresponding registered source can be selected.
+
+The [margin-font check](../tools/smoke_page_margin_fonts.py) compares aliases
+with explicit-face controls in ordinary, fixed-template and reflow PDFs,
+including fallback lists, named pages and font-face `size-adjust`.
+
 ## Controlling synthetic styles
 
 When the selected registered face lacks a requested bold or slanted style,
