@@ -109,6 +109,28 @@ Template auto-compose notes:
 - When `--emit-image` is used with template auto-compose, image artifacts are emitted from the finalized composed PDF (not overlay-only preview) via native Rust rasterization in the engine.
 - `--deterministic-hash` writes PDF SHA-256 by default; when `--emit-image` is set, it writes an artifact-set digest (`fullbleed.artifact_digest.v1`) computed from PDF SHA-256 plus ordered page-image SHA-256 values.
 
+### Use the bundled Inter font
+
+Render an existing HTML/CSS template without locating or downloading a font:
+
+```bash
+python -m fullbleed render --html invoice.html --css invoice.css --asset "@inter" --out invoice.pdf
+```
+
+Use `font-family: Inter` in the stylesheet. `--asset "@inter"` registers the
+font already inside the installed package; it does not consult a system font
+directory or fetch a remote asset. Quote `@` references in PowerShell.
+
+`python -m fullbleed assets list --json` lists built-in `render_refs` and
+`install_refs`. To copy Inter and its OFL license into a project, use
+`python -m fullbleed assets install inter --vendor vendor`. The `info`, `verify`,
+and `lock --add inter` commands use the same bundled font bytes. Explicit
+built-in versions must match an included version, such as `"@inter@4.0"`;
+an unavailable version fails instead of relabeling the bundled file.
+Installing a bundled asset also rejects an existing destination file with
+different contents. Choose another vendor directory to retain a customized
+font or stylesheet; matching files can be installed again.
+
 ### Reproducibility checks
 
 Use `--repro-record baseline.json` to retain the input fingerprint and PDF digest

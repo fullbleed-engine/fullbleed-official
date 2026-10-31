@@ -23,6 +23,10 @@ BUILTIN_ASSETS = {
         "description": "Bootstrap CSS framework",
         "license": "MIT",
         "license_url": "https://raw.githubusercontent.com/twbs/bootstrap/v5.0.0/LICENSE",
+        "path": "bootstrap.min.css",
+        "render_kind": "css",
+        "render_name": "bootstrap-5.0.0",
+        "aliases": ["bootstrap5", "bootstrap5.0.0"],
     },
     "bootstrap-icons": {
         "versions": ["1.11.3"],
@@ -31,6 +35,10 @@ BUILTIN_ASSETS = {
         "description": "Bootstrap Icons SVG sprite",
         "license": "MIT",
         "license_url": "https://raw.githubusercontent.com/twbs/icons/v1.11.3/LICENSE",
+        "path": "icons/bootstrap-icons.svg",
+        "render_kind": "svg",
+        "render_name": "bootstrap-icons-1.11.3",
+        "aliases": ["bootstrap-icons1.11.3", "bootstrapicons"],
     },
     "noto-sans": {
         "versions": ["regular"],
@@ -39,6 +47,23 @@ BUILTIN_ASSETS = {
         "description": "Noto Sans font family (Regular weight)",
         "license": "OFL-1.1",
         "license_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/OFL.txt",
+        "path": "fonts/NotoSans-Regular.ttf",
+        "render_kind": "font",
+        "render_name": "NotoSans-Regular",
+        "aliases": ["noto-sans-regular"],
+    },
+    "inter": {
+        "versions": ["4.0"],
+        "default": "4.0",
+        "kind": "font",
+        "description": "Inter variable font bundled with Fullbleed",
+        "license": "OFL-1.1",
+        "license_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/OFL.txt",
+        "path": "fonts/Inter-Variable.ttf",
+        "license_path": "licenses/Inter-OFL.txt",
+        "render_kind": "font",
+        "render_name": "Inter",
+        "aliases": [],
     },
 }
 
@@ -164,16 +189,6 @@ REMOTE_ASSETS = {
         "description": "Noto Color Emoji",
         "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notocoloremoji/NotoColorEmoji-Regular.ttf",
         "filename": "NotoColorEmoji-Regular.ttf",
-        "sha256": None
-    },
-    "inter": {
-        "kind": "font",
-        "version": "4.0",
-        "license": "OFL-1.1",
-        "license_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/OFL.txt",
-        "description": "Inter - Modern sans-serif for UI",
-        "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf",
-        "filename": "Inter-Variable.ttf",
         "sha256": None
     },
     "open-sans": {
@@ -533,6 +548,12 @@ def _write_license_notice(
     if not license_name:
         return None
     license_path = dest_dir / _license_filename(package_name)
+    builtin = BUILTIN_ASSETS.get(package_name)
+    if builtin and builtin.get("license_path"):
+        import fullbleed_assets
+
+        shutil.copyfile(fullbleed_assets.asset_path(builtin["license_path"]), license_path)
+        return license_path
     lines = [
         f"Asset: {package_name}",
         f"Version: {version}",
@@ -583,19 +604,16 @@ def _resolve_builtin_asset(name: str) -> Optional[Dict]:
         key, version = key.split("@", 1)
     
     # Normalize common aliases
-    aliases = {
-        "bootstrap5": "bootstrap",
-        "bootstrap5.0.0": "bootstrap",
-        "bootstrap-icons1.11.3": "bootstrap-icons",
-        "bootstrapicons": "bootstrap-icons",
-        "noto-sans-regular": "noto-sans",
-    }
+    aliases = {alias: name for name, info in BUILTIN_ASSETS.items() for alias in info["aliases"]}
     key = aliases.get(key, key)
     
     if key not in BUILTIN_ASSETS:
         return None
     
     asset = BUILTIN_ASSETS[key].copy()
+    if version is not None and version not in asset["versions"]:
+        available = ", ".join(asset["versions"])
+        raise ValueError(f"builtin asset {key!r} includes version {available}; requested {version!r}")
     asset["name"] = key
     asset["version"] = version or asset["default"]
     asset["builtin"] = True
@@ -637,6 +655,7 @@ def cmd_assets_list(args):
             "kind": info["kind"],
             "description": info["description"],
             "install_refs": [name, f"@{name}"],
+            "render_refs": [f"@{name}"],
             "source": "builtin",
         })
     
@@ -652,6 +671,8 @@ def cmd_assets_list(args):
     remote_packages = []
     if show_available:
         for name, info in REMOTE_ASSETS.items():
+            if name in BUILTIN_ASSETS:
+                continue
             remote_packages.append({
                 "name": name,
                 "version": info.get("version", "latest"),
@@ -676,7 +697,8 @@ def cmd_assets_list(args):
             sys.stdout.write(f"  {pkg['name']}@{pkg.get('version', '?')} {source_tag} - {pkg.get('description', pkg.get('kind', ''))}\n")
         sys.stdout.write(
             "\nBuiltin install refs: use plain or @ refs "
-            "(bootstrap, bootstrap-icons, noto-sans).\n"
+            f"({', '.join(BUILTIN_ASSETS)}).\n"
+            "Render directly with --asset @name; no installation or network access is needed.\n"
         )
         
         if show_available:
@@ -696,15 +718,7 @@ def cmd_assets_info(args):
     if builtin:
         import fullbleed_assets
         
-        # Get the actual file path
-        if builtin["name"] == "bootstrap":
-            file_path = fullbleed_assets.asset_path("bootstrap.min.css")
-        elif builtin["name"] == "bootstrap-icons":
-            file_path = fullbleed_assets.asset_path("icons/bootstrap-icons.svg")
-        elif builtin["name"] == "noto-sans":
-            file_path = fullbleed_assets.asset_path("fonts/NotoSans-Regular.ttf")
-        else:
-            file_path = None
+        file_path = fullbleed_assets.asset_path(builtin["path"])
         
         info = {
             "name": builtin["name"],
@@ -824,23 +838,20 @@ def cmd_assets_install(args):
     if builtin:
         import fullbleed_assets
         
-        # Determine source and destination
-        if builtin["name"] == "bootstrap":
-            src_path = Path(fullbleed_assets.asset_path("bootstrap.min.css"))
-        elif builtin["name"] == "bootstrap-icons":
-            src_path = Path(fullbleed_assets.asset_path("icons/bootstrap-icons.svg"))
-        elif builtin["name"] == "noto-sans":
-            src_path = Path(fullbleed_assets.asset_path("fonts/NotoSans-Regular.ttf"))
-        else:
-            raise ValueError(f"Unknown builtin: {builtin['name']}")
+        src_path = Path(fullbleed_assets.asset_path(builtin["path"]))
         
         if vendor_dir:
             dest_dir = Path(vendor_dir) / _asset_subdir(builtin["kind"])
         else:
             dest_dir = get_package_cache_path(builtin["name"], builtin["version"])
         
-        dest_dir.mkdir(parents=True, exist_ok=True)
         dest_path = dest_dir / src_path.name
+        if dest_path.exists() and _compute_file_hash(dest_path) != _compute_file_hash(src_path):
+            raise ValueError(
+                f"existing asset has different contents: {dest_path}; "
+                "choose another --vendor directory or explicitly move the existing file before installing"
+            )
+        dest_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src_path, dest_path)
         license_path = _write_license_notice(
             dest_dir=dest_dir,
@@ -1101,14 +1112,7 @@ def cmd_assets_verify(args):
 
     if builtin:
         import fullbleed_assets
-        if builtin["name"] == "bootstrap":
-            file_path = fullbleed_assets.asset_path("bootstrap.min.css")
-        elif builtin["name"] == "bootstrap-icons":
-            file_path = fullbleed_assets.asset_path("icons/bootstrap-icons.svg")
-        elif builtin["name"] == "noto-sans":
-            file_path = fullbleed_assets.asset_path("fonts/NotoSans-Regular.ttf")
-        else:
-            raise ValueError(f"Unknown builtin package in verify: {builtin['name']}")
+        file_path = fullbleed_assets.asset_path(builtin["path"])
 
         path = Path(file_path)
         if not path.exists():
@@ -1148,7 +1152,8 @@ def cmd_assets_verify(args):
         )
 
     if lock_path:
-        violations = _verify_lock_constraints(package_name, result.get("version"), observed_hashes, lock_path)
+        lock_name = builtin["name"] if builtin else package_name
+        violations = _verify_lock_constraints(lock_name, result.get("version"), observed_hashes, lock_path)
         result["lock_file"] = str(Path(lock_path))
         result["lock_ok"] = len(violations) == 0
         if violations:
@@ -1254,14 +1259,7 @@ def cmd_assets_lock(args):
         if builtin:
             import fullbleed_assets
             
-            if builtin["name"] == "bootstrap":
-                file_path = Path(fullbleed_assets.asset_path("bootstrap.min.css"))
-            elif builtin["name"] == "bootstrap-icons":
-                file_path = Path(fullbleed_assets.asset_path("icons/bootstrap-icons.svg"))
-            elif builtin["name"] == "noto-sans":
-                file_path = Path(fullbleed_assets.asset_path("fonts/NotoSans-Regular.ttf"))
-            else:
-                continue
+            file_path = Path(fullbleed_assets.asset_path(builtin["path"]))
             
             file_hash = _compute_file_hash(file_path)
             

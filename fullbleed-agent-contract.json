@@ -1219,7 +1219,7 @@
             "options": [
               {
                 "dest": "package",
-                "help": "Package name (e.g., bootstrap, bootstrap-icons, noto-sans)",
+                "help": "Package name; bundled: bootstrap, bootstrap-icons, noto-sans, inter",
                 "positional": true,
                 "required": true
               },
@@ -1238,7 +1238,7 @@
             "options": [
               {
                 "dest": "package",
-                "help": "Package reference (e.g., @bootstrap, @bootstrap-icons)",
+                "help": "Package reference; bundled: bootstrap, bootstrap-icons, noto-sans, inter",
                 "positional": true,
                 "required": true
               },
@@ -2521,7 +2521,7 @@
             "flags": [
               "--asset"
             ],
-            "help": "Repeatable asset path. .svg and .pdf are inferred as asset kinds.",
+            "help": "Repeatable local asset path or bundled reference: @bootstrap, @bootstrap-icons, @noto-sans, @inter. File extensions determine asset kinds.",
             "required": false
           },
           {
@@ -3120,7 +3120,7 @@
             "flags": [
               "--asset"
             ],
-            "help": "Repeatable asset path. .svg and .pdf are inferred as asset kinds.",
+            "help": "Repeatable local asset path or bundled reference: @bootstrap, @bootstrap-icons, @noto-sans, @inter. File extensions determine asset kinds.",
             "required": false
           },
           {
@@ -3820,7 +3820,7 @@
             "flags": [
               "--asset"
             ],
-            "help": "Repeatable asset path. .svg and .pdf are inferred as asset kinds.",
+            "help": "Repeatable local asset path or bundled reference: @bootstrap, @bootstrap-icons, @noto-sans, @inter. File extensions determine asset kinds.",
             "required": false
           },
           {

@@ -234,6 +234,17 @@ jobs:
       - name: Verify component authoring from the installed wheel
         run: python -I tools/smoke_component_authoring.py --out target/component-authoring
 
+      - name: Verify bundled assets offline from the installed wheel
+        run: python -I -m pytest --noconftest --import-mode=importlib tests/test_fullbleed_cli_builtin_assets.py -q -ra --basetemp target/cli-builtin-assets --junitxml target/cli-builtin-assets/results.xml
+
+      - name: Retain bundled asset CLI outputs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cli-builtin-assets-${{ runner.os }}
+          path: target/cli-builtin-assets/
+          if-no-files-found: error
+
       - name: Verify experimental component contracts and rendered examples
         shell: bash
         env:
