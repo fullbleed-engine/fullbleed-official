@@ -5240,6 +5240,79 @@ impl StyleResolver {
         &self.page_footnote_area
     }
 
+    pub(crate) fn page_margin_text_style(
+        &self,
+        root: &ComputedStyle,
+        page: &CssPageSetup,
+        margin_box: &CssPageMarginBox,
+    ) -> TextStyle {
+        // Keep the computed family provenance until all page/margin overrides
+        // have been applied. An inherited @font-face alias may select another
+        // source when the requested weight changes in a page rule.
+        let mut computed = root.clone();
+        computed.line_height = match root.page_context_line_height() {
+            Some(CssPageLineHeight::Absolute(value)) => LineHeightSpec::AbsolutePt(value),
+            Some(CssPageLineHeight::Number(value)) => LineHeightSpec::Number(value),
+            None => LineHeightSpec::Normal,
+        };
+        for (family, weight, size, color, line_height) in [
+            (
+                page.font_name.as_deref(),
+                page.font_weight,
+                page.font_size,
+                page.color,
+                page.line_height,
+            ),
+            (
+                margin_box.font_name.as_deref(),
+                margin_box.font_weight,
+                margin_box.font_size,
+                margin_box.color,
+                margin_box.line_height,
+            ),
+        ] {
+            if let Some(spec) = family.and_then(font_spec_from_raw_string) {
+                let stack = match spec {
+                    FontSpec::Value(stack) => Some(stack),
+                    FontSpec::Initial => Some(vec![Arc::<str>::from("Helvetica")]),
+                    FontSpec::Inherit => None,
+                };
+                if let Some(stack) = stack {
+                    computed.font_name = stack[0].clone();
+                    computed.font_unicode_ranges = vec![None; stack.len()];
+                    computed.font_stack = stack;
+                    computed.font_face_family = None;
+                    computed.font_face_source_count = 0;
+                    computed.font_face_size_adjust = I32F32::from_num(1.0);
+                    computed.font_face_satisfies_weight = false;
+                    computed.font_face_satisfies_style = false;
+                }
+            }
+            if let Some(weight) = weight {
+                computed.font_weight = weight;
+                computed.font_weight_authored = true;
+            }
+            if let Some(size) = size {
+                computed.font_size = size;
+            }
+            if let Some(color) = color {
+                computed.color = color;
+            }
+            if let Some(line_height) = line_height {
+                computed.line_height = match line_height {
+                    CssPageLineHeight::Absolute(value) => LineHeightSpec::AbsolutePt(value),
+                    CssPageLineHeight::Number(value) => LineHeightSpec::Number(value),
+                };
+            }
+        }
+        self.resolve_font_face_aliases(&mut computed);
+        resolve_font_size_adjust_scale(&mut computed, self.font_registry.as_deref());
+        let mut text_style = computed.to_text_style();
+        text_style.line_height = text_style.line_height.max(Pt::ZERO);
+        text_style.css_pixel_snap_metrics = true;
+        text_style
+    }
+
     fn resolve_font_face_aliases(&self, computed: &mut ComputedStyle) {
         if self.font_face_aliases.is_empty() {
             return;
@@ -8112,9 +8185,10 @@ fn parse_page_counter_value(raw: &str, counter_name: &str, default_value: i32) -
 }
 
 fn parse_page_font_name(raw: &str) -> Option<String> {
-    crate::css_native::parse_string_or_ident_list(raw)?
-        .into_iter()
-        .next()
+    // Preserve quoted family names and the fallback stack for the same
+    // font-face resolution used by document text.
+    crate::css_native::parse_string_or_ident_list(raw)?;
+    font_spec_from_raw_string(raw).map(|_| raw.trim().to_string())
 }
 
 fn apply_native_page_margin_box_declarations(
@@ -44199,6 +44273,81 @@ mod tests {
         assert_eq!(style.font_size, Pt::from_f32(15.0));
         assert_eq!(text_style.font_size, Pt::from_f32(22.5));
         assert_eq!(text_style.line_height, Pt::from_f32(36.0));
+    }
+
+    #[test]
+    fn page_margin_font_reselects_inherited_alias_after_weight_override() {
+        let resolver = StyleResolver::new(
+            r#"@font-face { font-family: Brand; src: url("RegularFace.ttf"); font-weight: 400; }
+               @font-face { font-family: Brand; src: url("HeavyFace.ttf"); font-weight: 700; size-adjust: 125%; }
+               html { font-family: Brand; font-size: 10pt; line-height: 1.5; }"#,
+        );
+        let root = resolver.computed_root_element_style();
+        let page = CssPageSetup {
+            font_size: Some(Pt::from_f32(20.0)),
+            font_weight: Some(700),
+            ..CssPageSetup::default()
+        };
+        let text = resolver.page_margin_text_style(&root, &page, &CssPageMarginBox::default());
+        assert_eq!(text.font_name.as_ref(), "HeavyFace");
+        assert_eq!(text.font_size, Pt::from_f32(25.0));
+        assert_eq!(text.line_height, Pt::from_f32(30.0));
+        assert!(text.font_face_satisfies_weight);
+        assert!(text.font_face_satisfies_style);
+        assert_eq!(root.font_name.as_ref(), "RegularFace");
+    }
+
+    #[test]
+    fn page_margin_inherits_quoted_alias_in_a_fallback_stack() {
+        let resolver = StyleResolver::new(
+            r#"@font-face { font-family: "serif"; src: url("AuthoredSerif.ttf"); }"#,
+        );
+        let page = CssPageSetup {
+            font_name: parse_page_font_name(r#""Unavailable", "serif""#),
+            ..CssPageSetup::default()
+        };
+        let margin_box = CssPageMarginBox {
+            font_name: parse_page_font_name("inherit"),
+            ..CssPageMarginBox::default()
+        };
+        let text = resolver.page_margin_text_style(
+            &resolver.computed_root_element_style(),
+            &page,
+            &margin_box,
+        );
+        assert_eq!(text.font_name.as_ref(), "Unavailable");
+        assert_eq!(text.font_fallbacks[0].as_ref(), "AuthoredSerif");
+        assert!(!text
+            .font_fallbacks
+            .iter()
+            .any(|name| name.as_ref() == "Times-Roman"));
+    }
+
+    #[test]
+    fn page_margin_preserves_composite_alias_unicode_ranges() {
+        let resolver = StyleResolver::new(
+            r#"@font-face { font-family: RangePick; src: url("ForA.ttf"); unicode-range: U+0041; }
+               @font-face { font-family: RangePick; src: url("ForB.ttf"); unicode-range: U+0042; }"#,
+        );
+        let margin_box = CssPageMarginBox {
+            font_name: parse_page_font_name("RangePick"),
+            ..CssPageMarginBox::default()
+        };
+        let text = resolver.page_margin_text_style(
+            &resolver.computed_root_element_style(),
+            &CssPageSetup::default(),
+            &margin_box,
+        );
+        assert_eq!(text.font_name.as_ref(), "ForA");
+        assert_eq!(text.font_fallbacks[0].as_ref(), "ForB");
+        assert_eq!(
+            text.font_unicode_ranges[0].as_deref(),
+            Some(&[(0x41, 0x41)][..])
+        );
+        assert_eq!(
+            text.font_unicode_ranges[1].as_deref(),
+            Some(&[(0x42, 0x42)][..])
+        );
     }
 
     #[test]

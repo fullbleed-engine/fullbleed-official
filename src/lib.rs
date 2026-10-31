@@ -2177,8 +2177,8 @@ struct ResolvedCssPageContext {
 
 #[derive(Clone)]
 struct PageRootTextContext {
-    style: TextStyle,
-    line_height: Option<style::CssPageLineHeight>,
+    style: style::ComputedStyle,
+    resolver: Arc<style::StyleResolver>,
 }
 
 const RENDER_CONTEXT_CACHE_MAX_ENTRIES: usize = 32;
@@ -7285,8 +7285,8 @@ impl FullBleed {
         ));
         let root_style = resolver.computed_root_element_style();
         let root_text = PageRootTextContext {
-            style: root_style.to_text_style(),
-            line_height: root_style.page_context_line_height(),
+            style: root_style,
+            resolver: resolver.clone(),
         };
         let page_templates = build_page_templates(
             resolved.page_size,
@@ -10044,44 +10044,10 @@ fn with_page_margin_boxes(
         if rect.width <= Pt::ZERO || rect.height <= Pt::ZERO {
             continue;
         }
-        let font_size = margin_box
-            .font_size
-            .or(setup.font_size)
-            .unwrap_or(root_text.style.font_size);
-        let line_height_spec = margin_box
-            .line_height
-            .or(setup.line_height)
-            .or(root_text.line_height);
-        let (line_height, line_height_is_auto) = match line_height_spec {
-            Some(style::CssPageLineHeight::Absolute(value)) => (value, false),
-            Some(style::CssPageLineHeight::Number(value)) => (font_size * value, false),
-            None => (font_size.mul_ratio(6, 5), true),
-        };
-        let mut text_style = root_text.style.clone();
-        text_style.font_size = font_size;
-        text_style.line_height = line_height.max(Pt::ZERO);
-        text_style.line_height_is_auto = line_height_is_auto;
-        text_style.color = margin_box
-            .color
-            .or(setup.color)
-            .unwrap_or(root_text.style.color);
-        if let Some(font_name) = margin_box
-            .font_name
-            .as_deref()
-            .or(setup.font_name.as_deref())
-        {
-            text_style.font_name = Arc::<str>::from(font_name);
-            text_style.font_fallbacks.clear();
-            text_style.font_unicode_ranges.clear();
-            text_style.font_unicode_ranges.push(None);
-            text_style.font_face_satisfies_weight = false;
-            text_style.font_face_satisfies_style = false;
-        }
-        if let Some(font_weight) = margin_box.font_weight.or(setup.font_weight) {
-            text_style.font_weight = font_weight;
-            text_style.font_face_satisfies_weight = false;
-        }
-        text_style.css_pixel_snap_metrics = true;
+        let text_style =
+            root_text
+                .resolver
+                .page_margin_text_style(&root_text.style, &setup, margin_box);
 
         let background = margin_box.background;
         let auto_width = margin_box.width.is_none();
