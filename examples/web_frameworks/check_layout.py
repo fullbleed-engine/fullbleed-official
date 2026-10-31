@@ -95,8 +95,15 @@ def check_layouts(out: Path) -> dict:
     ]
     empty = load_invoice("INV-1042")
     empty["items"] = []
+    boundaries = []
+    # A total can fit while the following payment note does not. Exercise the
+    # first-page and continuation-page thresholds, plus the adjacent control.
+    for count in [4, 5, 16, 17]:
+        data = load_invoice("INV-1043")
+        data["items"] = data["items"][:count]
+        boundaries.append((f"boundary-{count}", data))
     results = []
-    for name, data in [("short", short), ("long", long), ("many", many), ("wrapped", wrapped), ("empty", empty)]:
+    for name, data in [("short", short), ("long", long), ("many", many), ("wrapped", wrapped), ("empty", empty), *boundaries]:
         pdf = render_invoice(data)
         path = out / f"{name}.pdf"
         path.write_bytes(pdf)

@@ -43,6 +43,7 @@ a { color: inherit; }
 .invoice td { padding: 12pt 0; }
 .invoice td:first-child { overflow-wrap: anywhere; }
 .invoice .item-note { color: #617069; font-size: 8pt; margin-top: 4pt; }
+.invoice .closing { break-inside: avoid; }
 .invoice .amounts { display: grid; grid-template-columns: 1fr 1.25fr; gap: 27pt; margin-top: 23pt; break-inside: avoid; }
 .invoice .thanks { font: italic 22pt/1.2 'DM Serif Display'; color: #b44123; padding-top: 8pt; }
 .invoice .summary-line { display: flex; justify-content: space-between; padding: 5pt 0; font-size: 8.5pt; }

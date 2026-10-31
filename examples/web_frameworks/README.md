@@ -150,7 +150,8 @@ page. CSS `@page` margins reserve space for the footer, and `invoice.py` supplie
 the engine's `{page}` / `{pages}` counters. Keep the main content at automatic
 height when adapting the template; a fixed page-height container can place later
 rows outside the visible PDF page. Review your longest records and rerun the
-layout checks after changing fonts, widths or spacing.
+layout checks after changing fonts, widths or spacing. The `.closing` wrapper
+keeps the total and payment instructions together when they need another page.
 
 This starter does not implement tax,
 discounts, invoice numbering, payment collection, or application authentication.
@@ -184,7 +185,8 @@ It also verifies FastAPI's OpenAPI media type, literal markup and placeholder-li
 customer text, and the saved preview. CI runs it with a built wheel on Windows
 and Linux and retains the outputs.
 
-The layout cases cover 0, 3, 24 and 80 items plus wrapped descriptions. They check
+The layout cases cover empty, short, long and wrapped records, an 80-item invoice,
+and the page-break boundaries where a total fits but its payment note does not. They check
 each item once and in order, repeated table headings, page counters, final totals
 and payment text. PDFium checks the final PDF's text bounds independently: text
 extraction alone can find text drawn outside a page. PDFium and pypdf are check
