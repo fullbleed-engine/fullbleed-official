@@ -17,7 +17,7 @@ from invoice import load_invoice, render_invoice
 ROOT = Path(__file__).resolve().parent
 REPOSITORY = ROOT.parents[1]
 FILES = ["README.md", "invoice.py", "demo.py", "fastapi_app.py", "flask_app.py", "django_app.py",
-         "check_examples.py", "check_http.py", "check_docker.py", "Dockerfile", ".dockerignore",
+         "check_examples.py", "check_layout.py", "check_http.py", "check_docker.py", "Dockerfile", ".dockerignore",
          "requirements-docker.txt", "requirements-fastapi.txt", "requirements-flask.txt",
          "requirements-django.txt", "requirements-check.txt", "templates/invoice.html",
          "templates/invoice.css", "static/index.html", "static/invoice.png"]
@@ -29,13 +29,15 @@ def main():
     args = parser.parse_args()
     out = args.out.resolve()
     source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPOSITORY, text=True).strip()
-    dirty = subprocess.check_output(["git", "status", "--porcelain", "--", str(ROOT)], cwd=REPOSITORY, text=True).strip()
-    if dirty:
-        raise SystemExit("Commit the example source before packaging its public download.")
     out.mkdir(parents=True, exist_ok=False)
     # Package committed bytes, independent of checkout newline conversion.
     def committed(path: Path) -> bytes:
-        return subprocess.check_output(["git", "show", source_commit+":"+path.relative_to(REPOSITORY).as_posix()], cwd=REPOSITORY)
+        relative = path.relative_to(REPOSITORY).as_posix()
+        local_blob = subprocess.check_output(["git", "hash-object", "--path="+relative, str(path)], cwd=REPOSITORY)
+        source_blob = subprocess.check_output(["git", "rev-parse", source_commit+":"+relative], cwd=REPOSITORY)
+        if local_blob.strip() != source_blob.strip():
+            raise SystemExit(f"Commit {relative} before packaging its public download.")
+        return subprocess.check_output(["git", "show", source_commit+":"+relative], cwd=REPOSITORY)
     content = {name: committed(ROOT/name) for name in FILES}
     # The demo selects the installed runtime's reviewed preview. Carry each
     # committed version-specific sample so a new preview never falls out of the
@@ -64,10 +66,18 @@ def main():
     png = Path(previews[0]).read_bytes()
     assert png == content[preview_path().relative_to(ROOT).as_posix()], "Refresh and review the saved preview before packaging."
     (out/"invoice.png").write_bytes(png)
+    long_pdf = render_invoice(load_invoice("INV-1043"))
+    (out/"invoice-long.pdf").write_bytes(long_pdf)
+    long_previews = fullbleed.PdfEngine().render_finalized_pdf_image_pages_to_dir(
+        str(out/"invoice-long.pdf"), str(out/"preview-long"), 110, "invoice")
+    assert len(long_previews) == 3
+    (out/"invoice-long.png").write_bytes(Path(long_previews[0]).read_bytes())
     digest = lambda data: hashlib.sha256(data).hexdigest()
     manifest = {"schema": "fullbleed.python-web-starter.v1", "engineVersion": metadata.version("fullbleed"),
                 "sourceRepository": "https://github.com/fullbleed-engine/fullbleed-official",
                 "sourceCommit": source_commit,
+                 "samples": [{"invoiceId": "INV-1042", "pages": 1, "file": "invoice.pdf"},
+                             {"invoiceId": "INV-1043", "pages": 3, "file": "invoice-long.pdf"}],
                 "files": [{"path": name, "bytes": len(data), "sha256": digest(data)} for name,data in sorted(content.items())]}
     content["MANIFEST.json"] = (json.dumps(manifest, indent=2)+"\n").encode()
     archive = out/"project.zip"
@@ -79,7 +89,7 @@ def main():
             zipped.writestr(item,data)
     manifest["checkedAt"] = datetime.now(timezone.utc).isoformat()
     manifest["assets"] = [{"file": name, "bytes": (out/name).stat().st_size,
-                            "sha256": digest((out/name).read_bytes())} for name in ["project.zip","invoice.pdf","invoice.png"]]
+                            "sha256": digest((out/name).read_bytes())} for name in ["project.zip","invoice.pdf","invoice.png","invoice-long.pdf","invoice-long.png"]]
     (out/"source.json").write_text(json.dumps(manifest,indent=2)+"\n",encoding="utf-8")
     print(json.dumps({"sourceCommit":source_commit,"assets":manifest["assets"]}))
 

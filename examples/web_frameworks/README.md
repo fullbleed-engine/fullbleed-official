@@ -3,7 +3,9 @@
 Each app opens a small download page at `http://127.0.0.1:8000/` and serves the same fictional invoice at
 `http://127.0.0.1:8000/invoices/INV-1042.pdf`. Fullbleed renders the document into
 bytes; the framework returns those bytes as an `application/pdf` attachment.
-Unknown invoice IDs return HTTP 404.
+The same design continues across three pages at
+`http://127.0.0.1:8000/invoices/INV-1043.pdf`, with 24 line items and a total of
+USD 600.00. Unknown invoice IDs return HTTP 404.
 
 The shared [invoice renderer](invoice.py) uses Python `Decimal` for the total,
 escapes text for HTML, embeds Inter plus the included DM Serif Display and Bebas Neue fonts, and creates an engine per
@@ -35,12 +37,12 @@ Or in Windows PowerShell:
 
 Choose one framework. Only install its dependencies; these packages are separate
 from the dependency-free Fullbleed runtime. The examples are checked with
-Fullbleed 2.5.37 and the framework versions pinned in the requirement files.
+Fullbleed 2.5.47 and the framework versions pinned in the requirement files.
 
 ### FastAPI
 
 ```bash
-python -m pip install fullbleed==2.5.37 -r requirements-fastapi.txt
+python -m pip install fullbleed==2.5.47 -r requirements-fastapi.txt
 python -m uvicorn fastapi_app:app --host 127.0.0.1 --port 8000
 ```
 
@@ -53,14 +55,14 @@ See [FastAPI's concurrency guide](https://fastapi.tiangolo.com/async/#path-opera
 ### Flask
 
 ```bash
-python -m pip install fullbleed==2.5.37 -r requirements-flask.txt
+python -m pip install fullbleed==2.5.47 -r requirements-flask.txt
 python -m flask --app flask_app run --host 127.0.0.1 --port 8000
 ```
 
 ### Django
 
 ```bash
-python -m pip install fullbleed==2.5.37 -r requirements-django.txt
+python -m pip install fullbleed==2.5.47 -r requirements-django.txt
 python django_app.py runserver 127.0.0.1:8000 --noreload
 ```
 
@@ -82,7 +84,7 @@ another terminal with `docker stop fullbleed-invoice`. These single-line command
 also work in PowerShell.
 
 The Dockerfile pins the official Python 3.14.8 Debian Bookworm slim image by
-multi-platform digest and installs Fullbleed 2.5.37 plus the FastAPI/Uvicorn
+multi-platform digest and installs Fullbleed 2.5.47 plus the FastAPI/Uvicorn
 runtime from wheels. `--only-binary=:all:` makes a missing wheel an installation
 error instead of starting a Rust or C build. The image needs no added compiler,
 browser, system fonts, or system PDF renderer. Font files and their licenses
@@ -142,16 +144,22 @@ without restarting the server. The HTML uses Python `string.Template`
 placeholders such as `$customer`, `$number`, `$rows`, and `$total`. A literal
 dollar sign in the template is written as `$$`.
 
-The included design is a fixed one-page A4 sample for three line items.
-When adapting it for longer invoices, change the page geometry and pagination,
-then inspect the resulting pages. This starter does not implement tax,
+The included A4 design flows across pages as line items grow. The three-item
+sample stays on one page; the 24-item sample repeats the table headings on each
+page. CSS `@page` margins reserve space for the footer, and `invoice.py` supplies
+the engine's `{page}` / `{pages}` counters. Keep the main content at automatic
+height when adapting the template; a fixed page-height container can place later
+rows outside the visible PDF page. Review your longest records and rerun the
+layout checks after changing fonts, widths or spacing.
+
+This starter does not implement tax,
 discounts, invoice numbering, payment collection, or application authentication.
 
 Replace `load_invoice()` with your application's authorized record lookup. Keep
 access checks in that lookup or in the route before rendering. The helper expects
 an invoice number, customer, issued/due date strings, and an item list containing
 description, an optional `detail`, integer quantity, and unit-price strings.
-Its record is fictional and requires no database.
+Both sample records are fictional and require no database.
 
 The Flask and Django commands above run local development servers. Use your
 framework's deployment setup for a public application. For large jobs, move rendering to your
@@ -175,6 +183,12 @@ embedded fonts, and matching bytes. Each server stops when its checks finish.
 It also verifies FastAPI's OpenAPI media type, literal markup and placeholder-like
 customer text, and the saved preview. CI runs it with a built wheel on Windows
 and Linux and retains the outputs.
+
+The layout cases cover 0, 3, 24 and 80 items plus wrapped descriptions. They check
+each item once and in order, repeated table headings, page counters, final totals
+and payment text. PDFium checks the final PDF's text bounds independently: text
+extraction alone can find text drawn outside a page. PDFium and pypdf are check
+dependencies only; the invoice renderer does not use them.
 
 After editing the invoice, update the page's saved preview with:
 

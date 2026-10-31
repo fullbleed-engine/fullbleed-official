@@ -4,3 +4,4 @@
 -r requirements-django.txt
 httpx2==2.13.1
 pypdf==6.19.0
+pypdfium2==5.14.0
