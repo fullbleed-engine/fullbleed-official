@@ -1,3 +1,15 @@
+# Fullbleed Release Notes - 2.5.50
+
+CSS counters now continue through `display: contents` wrappers. A counter first
+created in one wrapper no longer restarts in the next, and counters created by
+the wrapper's pseudo-elements reach later content in the surrounding scope.
+Nested wrappers and page breaks preserve the sequence while selectors continue
+to follow the authored document tree.
+
+See [numbering document content](docs/generated-content.md) and the
+[2.5.50 runbook](docs/release/2.5.50-runbook.md) for the verified cases and remaining
+limits. Component authoring remains alpha.
+
 # Fullbleed Release Notes - 2.5.49
 
 Generated CSS counters now resolve in document order. A container's `::after`
