@@ -27,10 +27,21 @@ in their counter's scope. `counter-set` changes an existing counter;
 argument such as `counter(item, upper-roman)` changes the number's formatting.
 These expressions can be combined with literal strings and quotation tokens.
 
+A `display: contents` wrapper lets its children and generated pseudo-elements
+participate in the surrounding counter sequence. In 2.5.50, a counter first
+created inside one such wrapper continues into the next wrapper instead of
+restarting at `1`. A counter created by the wrapper's `::before` or `::after`
+also reaches later content in that surrounding scope. Nested wrappers and
+explicit page breaks preserve the sequence.
+
+The wrapper still participates in selectors and style inheritance. Its own
+`counter-reset`, `counter-set` and `counter-increment` do not change counters,
+because it generates no box. An ordinary containing box keeps its own counter
+scope; changing it to `display: contents` can therefore change the numbering.
+
 The focused checks cover ordinary rendering, fixed compilation, repeated
 documents and data-driven reflow. They do not establish complete CSS counter
-support or browser raster parity. A new counter created by a pseudo-element on
-`display: contents` can still have a different outer scope from Chromium.
-Default HTML list-marker behavior and general mutations of implicit list or
-footnote numbering retain their existing limitations. See the
-[release runbook](release/2.5.49-runbook.md) for the retained checks.
+support or browser raster parity. Default HTML list-marker behavior and general
+mutations of implicit list or footnote numbering retain their existing
+limitations. See the [release runbook](release/2.5.50-runbook.md) for the retained
+checks.

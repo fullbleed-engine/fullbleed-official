@@ -37,7 +37,7 @@ use crate::style::{
 };
 use crate::types::{Pt, Size};
 use crate::{BreakAfter, BreakBefore, BreakInside, Color, Flowable};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
 const FORCED_LINE_BREAK: char = '\u{2028}';
@@ -110,6 +110,9 @@ struct CounterState {
     values: HashMap<String, Vec<CounterValue>>,
     context: Option<NodeRef>,
     pseudo_context: bool,
+    // The document-order pass keeps style ancestry intact, but counters on
+    // generated boxes cross display:contents wrappers without a new scope.
+    boxless_scopes: HashSet<usize>,
     quote_depth: usize,
     // Layout probes clone CounterState and can visit boxes more than once.
     // Generated counters and quotes instead belong to one logical traversal.
@@ -251,13 +254,19 @@ impl CounterState {
     }
 
     fn scope(&self) -> Option<NodeRef> {
-        self.context.as_ref().and_then(|node| {
-            if self.pseudo_context {
-                Some(node.clone())
-            } else {
-                node.parent()
+        let node = self.context.as_ref()?;
+        let mut scope = if self.pseudo_context {
+            Some(node.clone())
+        } else {
+            node.parent()
+        };
+        while let Some(node) = scope {
+            if !self.boxless_scopes.contains(&node.identity_key()) {
+                return Some(node);
             }
-        })
+            scope = node.parent();
+        }
+        None
     }
 
     fn select_node(&mut self, node: &NodeRef, pseudo: bool) {
@@ -472,6 +481,10 @@ fn document_generated_parts(
             return;
         }
         info.apply_computed_container_style(&style);
+        let boxless = matches!(style.display, DisplayMode::Contents);
+        if boxless {
+            state.boxless_scopes.insert(node.identity_key());
+        }
         inherit(state, parent, sibling);
         state.select_node(node, false);
         if style_can_mutate_counters(&style) {
@@ -531,7 +544,15 @@ fn document_generated_parts(
             state.increment("footnote", 1);
         }
         let own = state.values.clone();
-        let mut child_sibling = Values::new();
+        let mut child_values = Values::new();
+        // A contents wrapper contributes its pseudo-elements and children to
+        // the surrounding counter sequence. Its real DOM/style ancestry is
+        // still used below for selectors and inherited properties.
+        let (child_parent, child_sibling) = if boxless {
+            (parent, &mut *sibling)
+        } else {
+            (&own, &mut child_values)
+        };
         if style_is_css_list_item(&style) {
             remember(
                 node,
@@ -539,8 +560,8 @@ fn document_generated_parts(
                 resolver.compute_marker_style(&info, &style, ancestors),
                 state,
                 output,
-                &own,
-                &mut child_sibling,
+                child_parent,
+                child_sibling,
             );
         }
         if matches!(style.float_mode, FloatMode::Footnote) {
@@ -554,8 +575,8 @@ fn document_generated_parts(
                     resolver.compute_pseudo_style(&info, &style, ancestors, pseudo),
                     state,
                     output,
-                    &own,
-                    &mut child_sibling,
+                    child_parent,
+                    child_sibling,
                 );
             }
         }
@@ -570,8 +591,8 @@ fn document_generated_parts(
             ),
             state,
             output,
-            &own,
-            &mut child_sibling,
+            child_parent,
+            child_sibling,
         );
         ancestors.push(info.clone());
         for child in node.children() {
@@ -583,8 +604,8 @@ fn document_generated_parts(
                 state,
                 output,
                 ordered_lists,
-                &own,
-                &mut child_sibling,
+                child_parent,
+                child_sibling,
             );
         }
         ancestors.pop();
@@ -599,10 +620,12 @@ fn document_generated_parts(
             ),
             state,
             output,
-            &own,
-            &mut child_sibling,
+            child_parent,
+            child_sibling,
         );
-        *sibling = own;
+        if !boxless {
+            *sibling = own;
+        }
     }
 
     let mut output = HashMap::new();
