@@ -4,8 +4,8 @@
     margin: 0.75in;
 }
 
-body {
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+html, body {
+    font-family: Inter;
     font-size: 11pt;
     line-height: 1.4;
     color: #333;
@@ -58,13 +58,21 @@ body {
 }
 
 .line-items th:last-child,
-.line-items td:last-child {
+.line-items td:last-child,
+.line-items .number {
     text-align: right;
 }
 
-.total-label {
+.line-items tr, .closing {
+    break-inside: avoid;
+}
+
+.totals {
     text-align: right;
-    font-weight: 600;
+}
+
+.totals p {
+    margin: 0.35rem 0;
 }
 
 .total-amount {

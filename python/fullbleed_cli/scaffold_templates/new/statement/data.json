@@ -1,0 +1,14 @@
+{
+  "institution_name": "Northstar Studio",
+  "account_holder": "Jordan Lee",
+  "account_number": "DEMO-1042",
+  "start_date": "2026-11-01",
+  "end_date": "2026-11-30",
+  "currency": "USD",
+  "opening_balance": "740.00",
+  "transactions": [
+    {"date": "2026-11-10", "description": "Invoice payment", "amount": "500.00"},
+    {"date": "2026-11-14", "description": "Service charge", "amount": "-12.00"},
+    {"date": "2026-11-20", "description": "Adjustment", "amount": "40.00"}
+  ]
+}

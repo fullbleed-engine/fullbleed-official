@@ -819,6 +819,17 @@ jobs:
       - name: Run installed-wheel agent workflow examples
         run: python examples/agent_workflows/run_examples.py --out target/agent-examples --json
 
+      - name: Run and inspect installed starter projects
+        run: python -I tools/smoke_starter_projects.py --out target/starter-projects
+
+      - name: Retain starter PDFs, previews, and inspection evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: starter-projects-${{ runner.os }}
+          path: target/starter-projects
+          if-no-files-found: error
+
       - name: Render and verify the designed document showcase
         run: python examples/design_showcase/render.py --out target/design-showcase
 
