@@ -287,6 +287,7 @@ Template/project bootstrap command group:
   - `fullbleed new remote <template_id> [path] [--version latest|<x.y.z>] [--registry <manifest-url>]`
 
 Practical notes:
+- `new local invoice` and `new local statement` include editable `data.json`, HTML/CSS templates, and a runnable `report.py`. Run `python <path>/report.py` to calculate amounts and write a PDF with embedded Inter, PNG previews, and a run report. Their READMEs explain placeholder syntax and decimal rounding.
 - `new local accessible` seeds a verbose accessibility-first project that renders through `fullbleed.accessibility.AccessibilityEngine` and emits engine verifier, PMR, PDF/UA seed checks, and non-visual trace artifacts by default.
 - `new local reference` seeds the canonical static PDF reference scaffold, including component layers, local SVG/raster assets, page data, PDF/PNG previews, and validation reports.
 - Default registry URL can be overridden with `--registry` or `FULLBLEED_TEMPLATE_REGISTRY`.

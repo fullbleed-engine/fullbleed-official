@@ -70,3 +70,11 @@ matching a Chrome 155 saved PDF using the same bundled font. At the golden's
 1224-by-1584 page. The remaining invoice content and the bank-statement and
 coastal-menu baselines are unchanged. The installed inline-line-height gate
 also retains independent controls for this font size and weight.
+
+
+The 2.5.51 font-family cascade correction makes the coastal menu use its authored
+Inter body font instead of Bootstrap's losing variable declaration. Its serif
+headings, text content, and single-page layout remain intact. The old PDF had no
+embedded fonts; the corrected PDF embeds Inter. Both 144-DPI previews were
+reviewed, and the source-candidate output exactly matches the failed CI job's
+reported PDF and PNG hashes. The Acme invoice and bank statement are unchanged.

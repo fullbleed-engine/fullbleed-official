@@ -1,3 +1,14 @@
+# Fullbleed Release Notes - 2.5.51
+
+Invoice and statement starters now render editable JSON into finished PDFs,
+with calculated decimal amounts, escaped text, embedded Inter, and PNG previews.
+The accessible starter's unresolved-font failure is fixed by honoring the
+winning CSS font family. Unresolved winning font variables inherit correctly.
+
+See the [CLI starter guide](docs/cli.md#new) and
+[verification runbook](docs/release/2.5.51-runbook.md). Component authoring retains
+its existing alpha status.
+
 # Fullbleed Release Notes - 2.5.50
 
 CSS counters now continue through `display: contents` wrappers. A counter first
