@@ -1,0 +1,17 @@
+{
+  "company_name": "Northstar Studio",
+  "company_address": "120 Market Street, Portland, OR 97205",
+  "invoice_number": "FB-1042",
+  "invoice_date": "2026-11-01",
+  "due_date": "2026-11-15",
+  "customer_name": "Jordan Lee",
+  "customer_address": "48 Cedar Lane, Portland, OR 97214",
+  "currency": "USD",
+  "tax_rate": "0",
+  "payment_note": "Payment due within 14 days. Please include FB-1042 as your payment reference.",
+  "items": [
+    {"description": "Design workshop", "quantity": "2", "unit_price": "425.00"},
+    {"description": "Layout and production", "quantity": "3", "unit_price": "125.00"},
+    {"description": "Printed proofs", "quantity": "1", "unit_price": "59.50"}
+  ]
+}
