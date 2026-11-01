@@ -17021,15 +17021,18 @@ fn apply_delta(
                 computed.font_face_satisfies_style = false;
             }
         }
-    }
-    if let Some(var) = &delta.font_name_var {
+    } else if let Some(var) = &delta.font_name_var {
         computed.pending_font_name_var = Some(var.clone());
-        computed.font_unicode_ranges = vec![None; computed.font_stack.len()];
-        computed.font_face_family = None;
-        computed.font_face_source_count = 0;
-        computed.font_face_size_adjust = I32F32::from_num(1.0);
-        computed.font_face_satisfies_weight = false;
-        computed.font_face_satisfies_style = false;
+        // If substitution is invalid, or resolves to inherit/unset, this
+        // inherited property falls back to its parent, not a losing rule.
+        computed.font_stack = parent.font_stack.clone();
+        computed.font_name = parent.font_name.clone();
+        computed.font_unicode_ranges = parent.font_unicode_ranges.clone();
+        computed.font_face_family = parent.font_face_family.clone();
+        computed.font_face_source_count = parent.font_face_source_count;
+        computed.font_face_size_adjust = parent.font_face_size_adjust;
+        computed.font_face_satisfies_weight = parent.font_face_satisfies_weight;
+        computed.font_face_satisfies_style = parent.font_face_satisfies_style;
     }
     if let Some(weight) = delta.font_weight {
         computed.pending_font_weight_var = None;
@@ -44669,6 +44672,33 @@ mod tests {
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
         assert_eq!(style.font_name.as_ref(), "Courier");
+    }
+
+    #[test]
+    fn font_family_variable_winners_do_not_reuse_losing_concrete_rules() {
+        for (value, expected) in [
+            ("var(--ff)", "Arial"),
+            ("var(--missing)", "Times"),
+            ("var(--missing, inherit)", "Times"),
+            ("var(--missing, unset)", "Times"),
+            ("var(--missing, initial)", "Helvetica"),
+        ] {
+            let css = format!(
+                ".parent {{ font-family: Times; --ff: Arial; }} \
+                 .child {{ font-family: Courier; }} .child {{ font-family: {value}; }}"
+            );
+            let resolver = StyleResolver::new(&css);
+            let root = resolver.default_style();
+            let parent_info = element("section", None, &["parent"]);
+            let parent = resolver.compute_style(&parent_info, &root, None, &[]);
+            let child = resolver.compute_style(
+                &element("div", None, &["child"]),
+                &parent,
+                None,
+                &[parent_info],
+            );
+            assert_eq!(child.font_name.as_ref(), expected, "{value}");
+        }
     }
 
     #[test]

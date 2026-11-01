@@ -7,22 +7,22 @@
 <body>
     <header class="invoice-header">
         <div class="company-info">
-            <h1>{{ company_name }}</h1>
-            <p>{{ company_address }}</p>
+            <h1>${company_name}</h1>
+            <p>${company_address}</p>
         </div>
         <div class="invoice-info">
             <h2>INVOICE</h2>
-            <p>Invoice #: {{ invoice_number }}</p>
-            <p>Date: {{ invoice_date }}</p>
-            <p>Due: {{ due_date }}</p>
+            <p>Invoice #: ${invoice_number}</p>
+            <p>Date: ${invoice_date}</p>
+            <p>Due: ${due_date}</p>
         </div>
     </header>
     
     <section class="billing">
         <div class="bill-to">
             <strong>Bill To:</strong>
-            <p>{{ customer_name }}</p>
-            <p>{{ customer_address }}</p>
+            <p>${customer_name}</p>
+            <p>${customer_address}</p>
         </div>
     </section>
     
@@ -30,31 +30,25 @@
         <thead>
             <tr>
                 <th>Description</th>
-                <th>Qty</th>
-                <th>Unit Price</th>
-                <th>Amount</th>
+                <th class="number">Qty</th>
+                <th class="number">Unit Price (${currency})</th>
+                <th class="number">Amount (${currency})</th>
             </tr>
         </thead>
         <tbody>
-            {% for item in items %}
-            <tr>
-                <td>{{ item.description }}</td>
-                <td>{{ item.quantity }}</td>
-                <td>${{ item.unit_price }}</td>
-                <td>${{ item.amount }}</td>
-            </tr>
-            {% endfor %}
+            ${rows}
         </tbody>
-        <tfoot>
-            <tr>
-                <td colspan="3" class="total-label">Total:</td>
-                <td class="total-amount">${{ total }}</td>
-            </tr>
-        </tfoot>
     </table>
-    
-    <footer>
-        <p>Thank you for your business!</p>
-    </footer>
+    <section class="closing">
+        <div class="totals">
+            <p>Subtotal: ${currency} ${subtotal}</p>
+            <p>Tax (${tax_percent}%): ${currency} ${tax}</p>
+            <p class="total-amount">Total: ${currency} ${total}</p>
+        </div>
+        <footer>
+            <p>${payment_note}</p>
+            <p>Thank you for your business!</p>
+        </footer>
+    </section>
 </body>
 </html>
