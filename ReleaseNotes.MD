@@ -1,3 +1,19 @@
+# Fullbleed Release Notes - 2.5.49
+
+Generated CSS counters now resolve in document order. A container's `::after`
+sees increments made by its children, and increments or sets on generated
+content reach later generated counter labels. Layout measurements no longer
+determine the number that appears in the saved PDF.
+
+Counter inheritance keeps a parent's counter identity while taking its value
+from preceding document content. Nested counters, quotation marks and counter
+formatting share the same resolution pass. Existing HTML list start, reversed
+and value handling is retained, including whitespace around numeric attributes.
+
+See [generated content](docs/generated-content.md) for an example and the
+[2.5.49 runbook](docs/release/2.5.49-runbook.md) for qualification and known
+boundaries. Component authoring remains alpha.
+
 # Fullbleed Release Notes - 2.5.48
 
 Page headers and footers now resolve `@font-face` families through the same

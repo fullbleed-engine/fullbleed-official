@@ -454,7 +454,7 @@ fn document_generated_parts(
                 if let Some(value) = info
                     .attrs
                     .get("value")
-                    .and_then(|value| value.parse::<i32>().ok())
+                    .and_then(|value| value.trim().parse::<i32>().ok())
                 {
                     *index = value;
                 }

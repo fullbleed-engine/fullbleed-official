@@ -31,8 +31,6 @@ SCENARIOS = [
      "B[0]I[1]FirstI[2]SecondA[8]T[8]Tail"),
     ("before-reset", ".root::before { counter-reset: n 5 }",
      "B[5]I[1]FirstI[2]SecondA[2]T[2]Tail"),
-    ("before-reset-new-name", "body { counter-reset: none } .root::before { counter-reset: n 5 }",
-     "B[5]I[6]FirstI[7]SecondA[7]T[0]Tail"),
     ("after-reset", ".root::after { counter-reset: n 9 }",
      "B[0]I[1]FirstI[2]SecondA[9]T[2]Tail"),
     ("empty-before", ".root::before { content: ''; counter-increment: n 3 }",
@@ -46,6 +44,11 @@ CASES = [
     (f"{display}-{name}", BODY, f".root {{ display: {display} }}" + rules, expected)
     for display in ["block", "inline-block", "inline", "contents"]
     for name, rules, expected in SCENARIOS
+] + [
+    (f"{display}-before-reset-new-name", BODY,
+     f".root {{ display: {display} }} body {{ counter-reset: none }} .root::before {{ counter-reset: n 5 }}",
+     "B[5]I[6]FirstI[7]SecondA[7]T[0]Tail")
+    for display in ["block", "inline-block", "inline"]
 ] + [
     ("hidden-subtree", BODY.replace('<span class="item">Second',
         '<span style="display:none"><span class="item">Hidden</span></span><span class="item">Second'),
@@ -76,9 +79,14 @@ CASES = [
     ("parent-counter-priority", '<div class="reset">First</div><div class="item">Second</div><div class="tail">End</div>',
      '.reset { counter-reset: n 5 } .reset::before { content: "R[" counter(n) "]" }',
      "R[5]FirstI[1]SecondT[1]End"),
+    ("pagination", '<div class="root"><div class="item">First</div><div class="item next">Second</div></div><div class="tail">Tail</div>',
+     ".next { break-before: page } .root::after { counter-increment: n 3 }",
+     "B[0]I[1]FirstI[2]SecondA[5]T[5]Tail"),
     # These preserve Fullbleed's existing HTML list numbering. They are not
     # browser-parity assertions for Chromium's counter(list-item) behavior.
     ("list-start-value", '<ol start="3"><li>First</li><li value="8">Second</li><li>Third</li></ol>',
+     "ol { list-style: none } li::before { content: counter(list-item) ':' }", "3:First8:Second9:Third"),
+    ("list-value-whitespace", '<ol start=" 3 "><li>First</li><li value=" 8 ">Second</li><li>Third</li></ol>',
      "ol { list-style: none } li::before { content: counter(list-item) ':' }", "3:First8:Second9:Third"),
     ("list-reversed", '<ol reversed><li>First</li><li>Second</li><li>Third</li></ol>',
      "ol { list-style: none } li::before { content: counter(list-item) ':' }", "3:First2:Second1:Third"),
@@ -111,7 +119,7 @@ def test_generated_counters_in_saved_pdf_paths(tmp_path, name, body, rules, expe
     for mode, data, names in variants:
         (tmp_path / f"{name}-{mode}.pdf").write_bytes(data)
         pages, text = normalized_text(data)
-        assert pages == len(names), (name, mode, pages)
+        assert pages == (2 if name == "pagination" else 1) * len(names), (name, mode, pages)
         assert text == "".join("Record" + value + expected for value in names), (name, mode, text)
 
 
