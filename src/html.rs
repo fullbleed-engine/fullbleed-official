@@ -112,8 +112,8 @@ struct CounterState {
     pseudo_context: bool,
     quote_depth: usize,
     // Layout probes clone CounterState and can visit boxes more than once.
-    // Quote strings instead belong to one logical document-order traversal.
-    document_quotes: Arc<OnceLock<DocumentQuoteParts>>,
+    // Generated counters and quotes instead belong to one logical traversal.
+    document_generated_parts: Arc<OnceLock<DocumentGeneratedParts>>,
     target_texts: Arc<HashMap<String, String>>,
     target_pages: Arc<HashMap<String, usize>>,
     table_semantics: Arc<crate::table_semantics::HtmlTableIndex>,
@@ -332,14 +332,16 @@ fn quote_pair_at_depth(quotes: &[(String, String)], depth: usize) -> Option<&(St
     quotes.get(depth).or_else(|| quotes.last())
 }
 
-type DocumentQuoteParts = HashMap<(usize, u8), Vec<GeneratedContentPart>>;
+type DocumentGeneratedParts = HashMap<(usize, u8), Vec<GeneratedContentPart>>;
 
-fn has_quote_parts(style: &ComputedStyle) -> bool {
+fn has_document_order_parts(style: &ComputedStyle) -> bool {
     style.generated_content.as_ref().is_some_and(|parts| {
         parts.iter().any(|part| {
             matches!(
                 part,
-                GeneratedContentPart::OpenQuote
+                GeneratedContentPart::Counter(_)
+                    | GeneratedContentPart::Counters(_)
+                    | GeneratedContentPart::OpenQuote
                     | GeneratedContentPart::CloseQuote
                     | GeneratedContentPart::NoOpenQuote
                     | GeneratedContentPart::NoCloseQuote
@@ -348,22 +350,83 @@ fn has_quote_parts(style: &ComputedStyle) -> bool {
     })
 }
 
-fn document_quote_parts(document: &NodeRef, resolver: &StyleResolver) -> DocumentQuoteParts {
+fn document_generated_parts(
+    document: &NodeRef,
+    resolver: &StyleResolver,
+) -> DocumentGeneratedParts {
+    type Values = HashMap<String, Vec<CounterValue>>;
+
+    fn inherit(state: &mut CounterState, parent: &Values, sibling: &Values) {
+        let mut values = parent.clone();
+        // Counter identities come from the parent first. A preceding sibling
+        // only supplies a name absent from the parent; its nested reset must
+        // not replace a same-named counter inherited from the parent.
+        for (name, entries) in sibling {
+            values
+                .entry(name.clone())
+                .or_insert_with(|| entries.clone());
+        }
+        // Values, unlike identities, come from the preceding tree-order box,
+        // including its descendants. Active instances of a name are identified
+        // by their sibling scope (CounterState::reset replaces that scope).
+        for (name, entries) in &mut values {
+            if let Some(previous) = state.values.get(name) {
+                for entry in entries {
+                    if let Some(source) = previous.iter().find(|source| source.scope == entry.scope)
+                    {
+                        entry.value = source.value;
+                    }
+                }
+            }
+        }
+        state.values = values;
+    }
+
     fn remember(
         node: &NodeRef,
         pseudo: crate::style::PseudoTarget,
         style: Option<ComputedStyle>,
         state: &mut CounterState,
-        output: &mut DocumentQuoteParts,
+        output: &mut DocumentGeneratedParts,
+        parent: &Values,
+        sibling: &mut Values,
     ) {
         let Some(style) = style else { return };
-        if matches!(style.display, DisplayMode::None) || !has_quote_parts(&style) {
+        if matches!(style.display, DisplayMode::None) {
             return;
         }
-        let parts = style.generated_content.as_ref().expect("quote parts");
+        // Even a literal or empty generated box can mutate a counter consumed
+        // by a later pseudo-element. Visit it once, before resolving content.
+        inherit(state, parent, sibling);
+        state.select_node(node, true);
+        if style_can_mutate_counters(&style) {
+            apply_style_counters(&style, state);
+        }
+        if !has_document_order_parts(&style) {
+            *sibling = state.values.clone();
+            return;
+        }
+        let parts = style
+            .generated_content
+            .as_ref()
+            .expect("document-order parts");
         let resolved = parts
             .iter()
             .filter_map(|part| match part {
+                GeneratedContentPart::Counter(counter) => {
+                    state.increment(&counter.name, 0);
+                    Some(GeneratedContentPart::Text(generated_counter_text(
+                        counter,
+                        state.get(&counter.name),
+                    )))
+                }
+                GeneratedContentPart::Counters(counter) => {
+                    state.increment(&counter.name, 0);
+                    Some(GeneratedContentPart::Text(generated_counters_text(
+                        counter,
+                        &state.get_all(&counter.name),
+                    )))
+                }
                 GeneratedContentPart::OpenQuote => state
                     .open_quote(&style.quotes, true)
                     .map(GeneratedContentPart::Text),
@@ -382,6 +445,7 @@ fn document_quote_parts(document: &NodeRef, resolver: &StyleResolver) -> Documen
             })
             .collect();
         output.insert((node.identity_key(), pseudo as u8), resolved);
+        *sibling = state.values.clone();
     }
 
     fn walk(
@@ -390,27 +454,16 @@ fn document_quote_parts(document: &NodeRef, resolver: &StyleResolver) -> Documen
         parent_style: &ComputedStyle,
         ancestors: &mut Vec<ElementInfo>,
         state: &mut CounterState,
-        output: &mut DocumentQuoteParts,
+        output: &mut DocumentGeneratedParts,
+        ordered_lists: &mut HashMap<usize, (i32, i32)>,
+        parent: &Values,
+        sibling: &mut Values,
     ) {
         let Some(element) = node.as_element() else {
             return;
         };
         let mut info = element_info(node, resolver.has_sibling_selectors());
-        // Replaced elements and line breaks do not generate these pseudo
-        // children. An ignored no-open-quote must not affect following text.
-        if matches!(
-            info.tag.as_str(),
-            "head"
-                | "script"
-                | "style"
-                | "template"
-                | "img"
-                | "svg"
-                | "br"
-                | "input"
-                | "textarea"
-                | "select"
-        ) {
+        if matches!(info.tag.as_str(), "head" | "script" | "style" | "template") {
             return;
         }
         let inline = element.attributes.borrow().get("style").map(str::to_string);
@@ -419,6 +472,66 @@ fn document_quote_parts(document: &NodeRef, resolver: &StyleResolver) -> Documen
             return;
         }
         info.apply_computed_container_style(&style);
+        inherit(state, parent, sibling);
+        state.select_node(node, false);
+        if style_can_mutate_counters(&style) {
+            apply_style_counters_for_node(node, resolver, &style, &info, ancestors, state);
+        }
+        if style_is_css_list_item(&style) {
+            apply_implicit_list_item_counter(&style, state);
+        }
+        // Match the HTML start/reversed/value handling used by list_flowables.
+        // CSS counter increments explicitly naming list-item retain priority.
+        if style_can_mutate_counters(&style) && (info.tag == "li" || style_is_css_list_item(&style))
+        {
+            if let Some((index, step)) = node
+                .parent()
+                .and_then(|parent| ordered_lists.get_mut(&parent.identity_key()))
+            {
+                if let Some(value) = info
+                    .attrs
+                    .get("value")
+                    .and_then(|value| value.trim().parse::<i32>().ok())
+                {
+                    *index = value;
+                }
+                if !style
+                    .counter_increment
+                    .iter()
+                    .any(|mutation| mutation.name == "list-item")
+                {
+                    state.set("list-item", *index);
+                }
+                *index = index.saturating_add(*step);
+            }
+        }
+        if info.tag == "ol" {
+            let step = if info.attrs.contains_key("reversed") {
+                -1
+            } else {
+                1
+            };
+            ordered_lists.insert(node.identity_key(), (list_start_index(node, true), step));
+        }
+        // Replaced elements can mutate counters, but do not generate these
+        // pseudo children. Their ignored quote tokens must not change depth.
+        if matches!(
+            info.tag.as_str(),
+            "img" | "svg" | "br" | "input" | "textarea" | "select"
+        ) {
+            *sibling = state.values.clone();
+            return;
+        }
+        if matches!(style.float_mode, FloatMode::Footnote)
+            && !style
+                .counter_increment
+                .iter()
+                .any(|mutation| mutation.name == "footnote")
+        {
+            state.increment("footnote", 1);
+        }
+        let own = state.values.clone();
+        let mut child_sibling = Values::new();
         if style_is_css_list_item(&style) {
             remember(
                 node,
@@ -426,6 +539,8 @@ fn document_quote_parts(document: &NodeRef, resolver: &StyleResolver) -> Documen
                 resolver.compute_marker_style(&info, &style, ancestors),
                 state,
                 output,
+                &own,
+                &mut child_sibling,
             );
         }
         if matches!(style.float_mode, FloatMode::Footnote) {
@@ -439,6 +554,8 @@ fn document_quote_parts(document: &NodeRef, resolver: &StyleResolver) -> Documen
                     resolver.compute_pseudo_style(&info, &style, ancestors, pseudo),
                     state,
                     output,
+                    &own,
+                    &mut child_sibling,
                 );
             }
         }
@@ -453,10 +570,22 @@ fn document_quote_parts(document: &NodeRef, resolver: &StyleResolver) -> Documen
             ),
             state,
             output,
+            &own,
+            &mut child_sibling,
         );
         ancestors.push(info.clone());
         for child in node.children() {
-            walk(&child, resolver, &style, ancestors, state, output);
+            walk(
+                &child,
+                resolver,
+                &style,
+                ancestors,
+                state,
+                output,
+                ordered_lists,
+                &own,
+                &mut child_sibling,
+            );
         }
         ancestors.pop();
         remember(
@@ -470,11 +599,22 @@ fn document_quote_parts(document: &NodeRef, resolver: &StyleResolver) -> Documen
             ),
             state,
             output,
+            &own,
+            &mut child_sibling,
         );
+        *sibling = own;
     }
 
     let mut output = HashMap::new();
     let mut state = CounterState::default();
+    state.values.insert(
+        "footnote".to_string(),
+        vec![CounterValue {
+            value: 0,
+            scope: Some(document.clone()),
+        }],
+    );
+    let mut ordered_lists = HashMap::new();
     let base = resolver.default_style();
     let mut ancestors = Vec::new();
     let mut root_style = base.clone();
@@ -486,8 +626,12 @@ fn document_quote_parts(document: &NodeRef, resolver: &StyleResolver) -> Documen
             .and_then(|element| element.attributes.borrow().get("style").map(str::to_string));
         root_style = resolver.compute_style(&info, &base, inline.as_deref(), &ancestors);
         info.apply_computed_container_style(&root_style);
+        state.select_node(node, false);
+        apply_style_counters_for_node(node, resolver, &root_style, &info, &ancestors, &mut state);
         ancestors.push(info);
     }
+    let root_counters = state.values.clone();
+    let mut sibling = Values::new();
     if let Ok(body) = document.select_first("body") {
         walk(
             body.as_node(),
@@ -496,6 +640,9 @@ fn document_quote_parts(document: &NodeRef, resolver: &StyleResolver) -> Documen
             &mut ancestors,
             &mut state,
             &mut output,
+            &mut ordered_lists,
+            &root_counters,
+            &mut sibling,
         );
     } else {
         for child in document.children() {
@@ -506,27 +653,30 @@ fn document_quote_parts(document: &NodeRef, resolver: &StyleResolver) -> Documen
                 &mut ancestors,
                 &mut state,
                 &mut output,
+                &mut ordered_lists,
+                &root_counters,
+                &mut sibling,
             );
         }
     }
     output
 }
 
-fn apply_document_quotes(
+fn apply_document_generated_parts(
     style: &mut ComputedStyle,
     counters: &CounterState,
     resolver: &StyleResolver,
     pseudo: crate::style::PseudoTarget,
 ) {
-    if !has_quote_parts(style) {
+    if !has_document_order_parts(style) {
         return;
     }
     let Some(node) = counters.context.as_ref() else {
         return;
     };
-    let index = counters.document_quotes.get_or_init(|| {
+    let index = counters.document_generated_parts.get_or_init(|| {
         let document = node.ancestors().last().unwrap_or_else(|| node.clone());
-        document_quote_parts(&document, resolver)
+        document_generated_parts(&document, resolver)
     });
     if let Some(parts) = index.get(&(node.identity_key(), pseudo as u8)) {
         style.generated_content = Some(parts.clone());
@@ -2604,7 +2754,7 @@ fn footnote_node_to_layout_item(
         crate::style::PseudoTarget::FootnoteCall,
     );
     if let Some(pseudo) = call_pseudo.as_mut() {
-        apply_document_quotes(
+        apply_document_generated_parts(
             pseudo,
             counters,
             resolver,
@@ -2638,7 +2788,7 @@ fn footnote_node_to_layout_item(
         crate::style::PseudoTarget::FootnoteMarker,
     );
     if let Some(pseudo) = marker_pseudo.as_mut() {
-        apply_document_quotes(
+        apply_document_generated_parts(
             pseudo,
             counters,
             resolver,
@@ -6847,7 +6997,7 @@ fn pseudo_items_for(
     else {
         return Vec::new();
     };
-    apply_document_quotes(&mut pseudo_style, counters, resolver, pseudo);
+    apply_document_generated_parts(&mut pseudo_style, counters, resolver, pseudo);
     let previous_pseudo = counters.enter_pseudo();
     let items = pseudo_content_items(
         &pseudo_style,
@@ -6892,7 +7042,7 @@ fn pseudo_text_for(
     else {
         return String::new();
     };
-    apply_document_quotes(&mut pseudo_style, counters, resolver, pseudo);
+    apply_document_generated_parts(&mut pseudo_style, counters, resolver, pseudo);
     if !style_can_mutate_counters(&pseudo_style) {
         return String::new();
     }
@@ -6919,7 +7069,7 @@ fn marker_presentation(
     let Some(mut marker_style) = resolver.compute_marker_style(info, style, ancestors) else {
         return (None, None);
     };
-    apply_document_quotes(
+    apply_document_generated_parts(
         &mut marker_style,
         counters,
         resolver,
