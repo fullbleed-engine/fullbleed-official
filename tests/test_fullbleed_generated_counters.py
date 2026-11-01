@@ -47,8 +47,9 @@ CASES = [
 ] + [
     (f"{display}-before-reset-new-name", BODY,
      f".root {{ display: {display} }} body {{ counter-reset: none }} .root::before {{ counter-reset: n 5 }}",
+     "B[5]I[6]FirstI[7]SecondA[7]T[7]Tail" if display == "contents" else
      "B[5]I[6]FirstI[7]SecondA[7]T[0]Tail")
-    for display in ["block", "inline-block", "inline"]
+    for display in ["block", "inline-block", "inline", "contents"]
 ] + [
     ("hidden-subtree", BODY.replace('<span class="item">Second',
         '<span style="display:none"><span class="item">Hidden</span></span><span class="item">Second'),
@@ -93,6 +94,52 @@ CASES = [
     ("literal-control", "<p>B[0]FirstA[2]</p>", "", "B[0]FirstA[2]"),
 ]
 
+# The first case follows the counter-order contract of the upstream WPT:
+# css/css-lists/counter-order-display-contents.html at
+# bdcdab01d8998ee249e4b8b7adbedc1d4e61638e. Physical containers remain scopes;
+# display:contents wrappers retain selector ancestry without restarting counts.
+CONTENTS_RULES = '''body { counter-reset: none }
+.contents { display: contents }
+.count { counter-increment: n }
+.count::before { content: 'C=' counter(n) }
+'''
+CONTENTS_BODY = (
+    '<div class="contents"><p class="count">One</p></div>'
+    '<div class="contents"><p class="count">Two</p></div>'
+    '<div class="contents"><p class="count">Three</p></div>'
+)
+CASES += [
+    ("contents-counter-order", CONTENTS_BODY, CONTENTS_RULES,
+     "C=1OneC=2TwoC=3Three"),
+    ("contents-nested-wrappers",
+     '<div class="contents"><div class="contents"><p class="count">One</p></div>'
+     '<p class="count">Two</p></div><p class="count">Three</p>',
+     CONTENTS_RULES, "C=1OneC=2TwoC=3Three"),
+    ("contents-physical-container-scope",
+     '<div><div class="contents"><p class="count">One</p><p class="count">Two</p></div></div>'
+     '<div class="contents"><p class="count">Three</p></div>',
+     CONTENTS_RULES, "C=1OneC=2TwoC=1Three"),
+    ("contents-physical-sibling-scopes", CONTENTS_BODY,
+     CONTENTS_RULES + '.contents { display: block }', "C=1OneC=1TwoC=1Three"),
+    ("contents-inherited-counter", CONTENTS_BODY,
+     CONTENTS_RULES + 'body { counter-reset: n 7 }', "C=8OneC=9TwoC=10Three"),
+    ("contents-wrapper-mutations-ignored", CONTENTS_BODY,
+     CONTENTS_RULES + 'body { counter-reset: n } .contents { counter-reset: n 99; counter-set: n 88; counter-increment: n 17 }',
+     "C=1OneC=2TwoC=3Three"),
+    ("contents-selector-ancestry", CONTENTS_BODY,
+     CONTENTS_RULES + '.count { counter-increment: none } .contents > .count { counter-increment: n }',
+     "C=1OneC=2TwoC=3Three"),
+    ("contents-after-new-counter", BODY,
+     '.root { display: contents } body { counter-reset: none } .root::before { content: none } .root::after { counter-reset: n 9 }',
+     "I[1]FirstI[2]SecondA[9]T[9]Tail"),
+    ("contents-hidden-wrapper", CONTENTS_BODY.replace(
+        '<p class="count">Two', '<span style="display:none"><b class="count">Hidden</b></span><p class="count">Two'),
+     CONTENTS_RULES, "C=1OneC=2TwoC=3Three"),
+    ("contents-page-boundary", CONTENTS_BODY.replace(
+        '<p class="count">Three', '<p class="count" style="break-before:page">Three'),
+     CONTENTS_RULES, "C=1OneC=2TwoC=3Three"),
+]
+
 
 def normalized_text(data):
     reader = PdfReader(BytesIO(data))
@@ -119,7 +166,7 @@ def test_generated_counters_in_saved_pdf_paths(tmp_path, name, body, rules, expe
     for mode, data, names in variants:
         (tmp_path / f"{name}-{mode}.pdf").write_bytes(data)
         pages, text = normalized_text(data)
-        assert pages == (2 if name == "pagination" else 1) * len(names), (name, mode, pages)
+        assert pages == (2 if name in {"pagination", "contents-page-boundary"} else 1) * len(names), (name, mode, pages)
         assert text == "".join("Record" + value + expected for value in names), (name, mode, text)
 
 
