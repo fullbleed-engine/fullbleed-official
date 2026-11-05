@@ -13468,35 +13468,20 @@ fn flex_container_flowables(
         let effective_order = grid_placement.map_or(order, |placement| placement.slot);
         if let Some(placement) = grid_placement {
             let start = placement.slot.max(0) as usize;
-            let column = start % grid_track_count.max(1);
             let row = start / grid_track_count.max(1);
-            let extra_width = fixed_grid_span_extra(style, column, placement.column_span, true)
-                .unwrap_or(Pt::ZERO);
             let extra_height =
                 fixed_grid_span_extra(style, row, placement.row_span, false).unwrap_or(Pt::ZERO);
-            let equal_auto_width_span = (placement.column_span > 1
-                && effective_grid_column_tracks
-                    .get(column..column.saturating_add(placement.column_span))
-                    .is_some_and(|tracks| {
-                        tracks.iter().all(|track| {
-                            matches!(
-                                (track.min, track.max),
-                                (GridTrackBreadth::Auto, GridTrackBreadth::Auto)
-                            )
-                        })
-                    }))
-            .then_some(placement.column_span);
-            if let Some(width_span) = equal_auto_width_span {
-                boxed = Box::new(ExpandedWidthFlowable::new_equal_grid_span(
+            if placement.column_span > 1 {
+                boxed = Box::new(ExpandedWidthFlowable::new_grid_column_span(
                     boxed,
-                    width_span,
+                    placement.column_span,
                     extra_height,
                     placement.row_span,
                 ));
-            } else if extra_width > Pt::ZERO || extra_height > Pt::ZERO {
+            } else if extra_height > Pt::ZERO {
                 boxed = Box::new(ExpandedWidthFlowable::new_grid_area(
                     boxed,
-                    extra_width,
+                    Pt::ZERO,
                     extra_height,
                     placement.column_span,
                     placement.row_span,
