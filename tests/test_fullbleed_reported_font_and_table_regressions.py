@@ -116,6 +116,7 @@ def test_cff_outline_scale_matches_truetype(tmp_path, monkeypatch, mode, upm, ci
         native_bounds = native.point(lambda x: 255 if x < 160 else 0).getbbox()
         assert native_bounds is not None, "Native finalized-PDF preview lost the embedded glyphs"
         assert 32 <= native_bounds[3] - native_bounds[1] <= 35, native_bounds
+        assert all(abs(a - b) <= 1 for a, b in zip(bounds, native_bounds)), (bounds, native_bounds)
     assert all(abs(a - b) <= 1 for a, b in zip(*images)), images
 
 

@@ -50,6 +50,19 @@ pub(crate) fn standalone_metrics(data: &[u8]) -> Option<(u16, u16)> {
     ))
 }
 
+/// A CID-keyed CFF charset maps glyph indices to CIDs, not Unicode scalars.
+pub(crate) fn cid_to_glyph_map(face: &Face<'_>) -> Option<Vec<(u16, u16)>> {
+    let font = CffFont::parse(face.table(*b"CFF ")?)?;
+    font.fd_by_glyph.as_ref()?;
+    Some(
+        font.charset
+            .iter()
+            .enumerate()
+            .map(|(glyph, &cid)| (cid, glyph as u16))
+            .collect(),
+    )
+}
+
 #[derive(Clone, Debug)]
 struct CffIndex<'a> {
     objects: Vec<&'a [u8]>,
