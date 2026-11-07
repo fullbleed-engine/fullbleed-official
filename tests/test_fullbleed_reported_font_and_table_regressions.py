@@ -90,7 +90,8 @@ def _inspect(data):
 @pytest.mark.parametrize("mode", ["direct", "compiled"])
 @pytest.mark.parametrize("upm", [1000, 2048])
 @pytest.mark.parametrize("cid", [False, True])
-def test_cff_outline_scale_matches_truetype(tmp_path, mode, upm, cid):
+def test_cff_outline_scale_matches_truetype(tmp_path, monkeypatch, mode, upm, cid):
+    monkeypatch.setenv("FULLBLEED_RASTER_DEBUG_TEXT", "1")
     images = []
     for cff in [False, True]:
         path = _font(tmp_path / ("font.otf" if cff else "font.ttf"), cff=cff, cid=cff and cid, upm=upm)
@@ -111,6 +112,7 @@ def test_cff_outline_scale_matches_truetype(tmp_path, mode, upm, cid):
         previews = fullbleed.PdfEngine().render_finalized_pdf_image_pages(str(pdf), 144)
         assert len(previews) == 1
         native = Image.open(BytesIO(bytes(previews[0]))).convert("L")
+        native.save(pdf.with_name(pdf.stem + "-native.png"))
         native_bounds = native.point(lambda x: 255 if x < 160 else 0).getbbox()
         assert native_bounds is not None, "Native finalized-PDF preview lost the embedded glyphs"
         assert 32 <= native_bounds[3] - native_bounds[1] <= 35, native_bounds
