@@ -25886,21 +25886,10 @@ impl FlexFlowable {
             self.line_item_limit,
             self.shared_intrinsic_grid_column_widths(avail_width),
         ) {
-            let gap = self.resolved_column_gap(avail_width);
             for (position, item_index) in indices.iter().copied().enumerate() {
                 let column = item_index % columns.max(1);
                 widths[position] = shared[column];
-                let span = self.items[item_index].child.grid_column_span();
-                child_avails[position] = if span > 1 && column.saturating_add(span) <= shared.len()
-                {
-                    let area = shared[column..column + span]
-                        .iter()
-                        .fold(Pt::ZERO, |sum, width| sum + *width)
-                        + gap * (span.saturating_sub(1) as i32);
-                    area / (span as i32)
-                } else {
-                    shared[column]
-                };
+                child_avails[position] = shared[column];
                 sizes[position] = None;
             }
         }
@@ -25909,21 +25898,27 @@ impl FlexFlowable {
             (self.line_item_limit, self.fragment_column_widths.as_ref())
         {
             if shared.len() == columns {
-                let gap = self.resolved_column_gap(avail_width);
                 for (position, item_index) in indices.iter().copied().enumerate() {
                     let column = item_index % columns.max(1);
                     widths[position] = shared[column];
-                    let span = self.items[item_index].child.grid_column_span();
-                    child_avails[position] =
-                        if span > 1 && column.saturating_add(span) <= shared.len() {
-                            let area = shared[column..column + span]
-                                .iter()
-                                .fold(Pt::ZERO, |sum, width| sum + *width)
-                                + gap * (span.saturating_sub(1) as i32);
-                            area / (span as i32)
-                        } else {
-                            shared[column]
-                        };
+                    child_avails[position] = shared[column];
+                    sizes[position] = None;
+                }
+            }
+        }
+
+        if self.line_item_limit.is_some() {
+            // Keep each slot's width for track placement, but measure and paint
+            // a spanning child with its entire resolved area. Its wrapper
+            // expands this mean width back to the full span, including gaps.
+            for (position, item_index) in indices.iter().copied().enumerate() {
+                let span = self.items[item_index].child.grid_column_span();
+                if span > 1 && position.saturating_add(span) <= widths.len() {
+                    let area = widths[position..position + span]
+                        .iter()
+                        .fold(Pt::ZERO, |sum, width| sum + *width)
+                        + gap * (span.saturating_sub(1) as i32);
+                    child_avails[position] = area / (span as i32);
                     sizes[position] = None;
                 }
             }
@@ -40871,7 +40866,9 @@ impl ExpandedWidthFlowable {
         }
     }
 
-    pub(crate) fn new_equal_grid_span(
+    // Grid layout passes the mean width of the resolved area, including gaps.
+    // Multiplying here gives the child its full area even for unequal tracks.
+    pub(crate) fn new_grid_column_span(
         child: Box<dyn Flowable>,
         width_span: usize,
         extra_height: Pt,
