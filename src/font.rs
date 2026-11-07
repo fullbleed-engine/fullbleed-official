@@ -100,6 +100,7 @@ fn font_subset_cache_value_bytes(value: &FontSubsetCacheValue) -> usize {
         FontSubsetCacheValue::Cff(subset) => subset
             .data
             .len()
+            .saturating_add(subset.pdf_data.len())
             .saturating_add(subset.compressed.as_ref().map_or(0, |data| data.len()))
             .saturating_add(
                 subset
@@ -122,6 +123,10 @@ pub(crate) struct CachedTrueTypeSubset {
 #[derive(Debug)]
 pub(crate) struct CachedCffSubset {
     pub(crate) data: Vec<u8>,
+    // The subsetter canonicalizes both name-keyed and CID-keyed inputs to a
+    // CID-keyed CFF. Embed that program directly: an OpenType envelope can
+    // make PDF consumers apply head.unitsPerEm on top of the CFF FontMatrix.
+    pub(crate) pdf_data: Vec<u8>,
     pub(crate) compressed: Option<Vec<u8>>,
     pub(crate) tag: [u8; 6],
     pub(crate) glyph_count: usize,
@@ -162,6 +167,7 @@ pub(crate) struct FontRegistry {
     fonts: Vec<RegisteredFont>,
     lookup: HashMap<String, usize>,
     family_aliases: BTreeSet<String>,
+    family_faces: HashMap<String, Vec<usize>>,
     use_full_unicode_metrics: bool,
     text_width_cache: Mutex<TextWidthCache>,
     font_subset_cache: Mutex<FontSubsetCache>,
@@ -342,6 +348,7 @@ impl FontRegistry {
             fonts: Vec::new(),
             lookup: HashMap::new(),
             family_aliases: BTreeSet::new(),
+            family_faces: HashMap::new(),
             use_full_unicode_metrics: true,
             text_width_cache: Mutex::new(TextWidthCache::new(20_000)),
             font_subset_cache: Mutex::new(FontSubsetCache::new()),
@@ -517,6 +524,10 @@ impl FontRegistry {
         // not let directory order or an italic-first bundle choose that face.
         // Equal-rank duplicates retain the caller's registration priority.
         for key in families {
+            self.family_faces
+                .entry(key.clone())
+                .or_default()
+                .push(index);
             if let Some(&previous) = self.lookup.get(&key) {
                 if !self.family_aliases.contains(&key)
                     || self.fonts[previous].family_default_rank
@@ -535,6 +546,30 @@ impl FontRegistry {
         self.lookup
             .get(&key)
             .and_then(|index| self.fonts.get(*index))
+    }
+
+    pub(crate) fn resolve_family_variant(
+        &self,
+        name: &str,
+        weight: u16,
+        italic: bool,
+    ) -> Option<&RegisteredFont> {
+        let key = normalize_name(name);
+        // Explicit PostScript names, source aliases and @font-face selections
+        // identify a face and must not be rematched as a family.
+        if !self.family_aliases.contains(&key) {
+            return None;
+        }
+        self.family_faces
+            .get(&key)?
+            .iter()
+            .map(|&index| &self.fonts[index])
+            .min_by_key(|font| {
+                (
+                    font.family_default_rank.0 != italic,
+                    css_font_weight_rank(font.metrics.weight_class, weight),
+                )
+            })
     }
 
     pub(crate) fn compiled_font_index(&self, name: &str) -> Option<usize> {
@@ -641,10 +676,10 @@ impl FontRegistry {
         let mapper = subsetter::GlyphRemapper::new_from_glyphs_sorted(&ordered_glyphs);
         let computed = subsetter::subset(&font.data, 0, &mapper)
             .ok()
-            .filter(|data| data.len() < font.data.len())
-            .map(|data| {
-                let compressed = crate::flate_native::zlib_deflate_parallel(&data);
-                let compressed = (compressed.len() < data.len()).then_some(compressed);
+            .and_then(|data| {
+                let pdf_data = SfntFace::parse(&data, 0).ok()?.table(*b"CFF ")?.to_vec();
+                let compressed = crate::flate_native::zlib_deflate_parallel(&pdf_data);
+                let compressed = (compressed.len() < pdf_data.len()).then_some(compressed);
                 let old_to_new = mapper
                     .remapped_gids()
                     .enumerate()
@@ -654,13 +689,14 @@ impl FontRegistry {
                             .map(|new_gid| (old_gid, new_gid))
                     })
                     .collect();
-                Arc::new(CachedCffSubset {
+                Some(Arc::new(CachedCffSubset {
                     tag: crate::font_subset::deterministic_subset_tag(&font.data, glyphs),
                     glyph_count: usize::from(mapper.num_gids()),
                     data,
+                    pdf_data,
                     compressed,
                     old_to_new,
-                })
+                }))
             });
         let value = computed
             .as_ref()
@@ -1925,8 +1961,29 @@ fn scale_i16(value: i16, scale: f32) -> i16 {
     scaled.clamp(i16::MIN as i32, i16::MAX as i32) as i16
 }
 
-// Default (normal, weight 400) family matching. Explicit CSS @font-face
-// descriptors and styled variant selection remain responsible for other styles.
+// CSS Fonts weight fallback order, including the asymmetric 400–500 interval.
+fn css_font_weight_rank(actual: u16, requested: u16) -> (u8, u16) {
+    if (400..=500).contains(&requested) {
+        if (requested..=500).contains(&actual) {
+            (0, actual - requested)
+        } else if actual < requested {
+            (1, requested - actual)
+        } else {
+            (2, actual - 500)
+        }
+    } else if requested < 400 {
+        if actual <= requested {
+            (0, requested - actual)
+        } else {
+            (1, actual - requested)
+        }
+    } else if actual >= requested {
+        (0, actual - requested)
+    } else {
+        (1, requested - actual)
+    }
+}
+
 fn family_default_rank(face: &SfntFace<'_>) -> (bool, u8, u16) {
     let selection = face
         .table(*b"OS/2")
@@ -1939,13 +1996,7 @@ fn family_default_rank(face: &SfntFace<'_>) -> (bool, u8, u16) {
     let slanted = selection & 0x201 != 0
         || mac_style & 2 != 0
         || face.italic_angle().is_some_and(|angle| angle != 0.0);
-    let weight = face.weight_class();
-    // CSS's 400 fallback order is 400..500, below 400, then above 500.
-    let (group, distance) = match weight {
-        400..=500 => (0, weight - 400),
-        0..=399 => (1, 400 - weight),
-        _ => (2, weight - 500),
-    };
+    let (group, distance) = css_font_weight_rank(face.weight_class(), 400);
     (slanted, group, distance)
 }
 

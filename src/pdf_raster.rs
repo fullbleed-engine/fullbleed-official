@@ -227,6 +227,7 @@ enum PdfCodeToGlyphMap {
     None,
     Identity,
     Table(Vec<u16>),
+    Mapped(HashMap<u16, u16>),
 }
 
 #[derive(Clone, Default)]
@@ -1307,6 +1308,7 @@ fn glyph_id_for_code(font: &PdfFontResource, code: u16) -> Option<u16> {
         PdfCodeToGlyphMap::None => None,
         PdfCodeToGlyphMap::Identity => Some(code),
         PdfCodeToGlyphMap::Table(table) => table.get(code as usize).copied().or(Some(code)),
+        PdfCodeToGlyphMap::Mapped(map) => Some(map.get(&code).copied().unwrap_or(0)),
     }
 }
 
@@ -1899,6 +1901,19 @@ fn parse_type0_font_metrics(
         if let Ok(w_obj) = descendant_dict.get(b"W") {
             widths = parse_cid_font_widths(doc, w_obj);
         }
+        if descendant_dict
+            .get(b"Subtype")
+            .and_then(LoObject::as_name)
+            .ok()
+            == Some(b"CIDFontType0".as_slice())
+        {
+            if let Some(code_to_cid) = parse_cid_encoding_map(doc, font_dict) {
+                widths = code_to_cid
+                    .into_iter()
+                    .map(|(code, cid)| (code, widths.get(&cid).copied().unwrap_or(default_width)))
+                    .collect();
+            }
+        }
     }
 
     PdfFontMetrics {
@@ -1941,6 +1956,32 @@ fn parse_code_to_gid_map(
         return PdfCodeToGlyphMap::None;
     };
 
+    if descendant_dict
+        .get(b"Subtype")
+        .and_then(LoObject::as_name)
+        .ok()
+        == Some(b"CIDFontType0".as_slice())
+    {
+        let mapping = (|| {
+            let data = resolve_embedded_font_bytes(doc, font_dict)?;
+            let face = Face::parse(&data, 0).ok()?;
+            let cid_to_glyph: HashMap<_, _> = crate::sfnt_cff::cid_to_glyph_map(&face)?
+                .into_iter()
+                .collect();
+            let encoding = resolve_object(doc, font_dict.get(b"Encoding").ok()?).ok()?;
+            if matches!(encoding.as_name().ok(), Some(b"Identity-H" | b"Identity-V")) {
+                return Some(cid_to_glyph);
+            }
+            Some(
+                parse_cid_encoding_map(doc, font_dict)?
+                    .into_iter()
+                    .map(|(code, cid)| (code, cid_to_glyph.get(&cid).copied().unwrap_or(0)))
+                    .collect(),
+            )
+        })();
+        return mapping.map(PdfCodeToGlyphMap::Mapped).unwrap_or_default();
+    }
+
     if let Ok(cid_to_gid_obj) = descendant_dict.get(b"CIDToGIDMap") {
         if let Ok(resolved) = resolve_object(doc, cid_to_gid_obj) {
             if let Ok(name) = resolved.as_name() {
@@ -1963,6 +2004,63 @@ fn parse_code_to_gid_map(
 
     let _ = code_encoding;
     PdfCodeToGlyphMap::None
+}
+
+fn parse_cid_encoding_map(doc: &LoDocument, font_dict: &LoDictionary) -> Option<HashMap<u16, u16>> {
+    let stream = resolve_object(doc, font_dict.get(b"Encoding").ok()?)
+        .ok()?
+        .as_stream()
+        .ok()?;
+    let bytes = stream.get_plain_content().ok()?;
+    let tokens = tokenize_to_unicode_cmap(&bytes);
+    let source = |token: &CMapToken| match token {
+        CMapToken::Hex(bytes) if bytes.len() <= 2 => {
+            cmap_source_code(bytes).and_then(|(_, code)| u16::try_from(code).ok())
+        }
+        _ => None,
+    };
+    let cid = |token: &CMapToken| match token {
+        CMapToken::Word(bytes) => std::str::from_utf8(bytes).ok()?.parse::<u16>().ok(),
+        _ => None,
+    };
+    let mut map = HashMap::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        if token_is_word(&tokens[index], b"begincidchar") {
+            index += 1;
+            while index + 1 < tokens.len() && !token_is_word(&tokens[index], b"endcidchar") {
+                if let (Some(code), Some(value)) = (source(&tokens[index]), cid(&tokens[index + 1]))
+                {
+                    map.insert(code, value);
+                    index += 2;
+                } else {
+                    index += 1;
+                }
+            }
+        } else if token_is_word(&tokens[index], b"begincidrange") {
+            index += 1;
+            while index + 2 < tokens.len() && !token_is_word(&tokens[index], b"endcidrange") {
+                if let (Some(start), Some(end), Some(first)) = (
+                    source(&tokens[index]),
+                    source(&tokens[index + 1]),
+                    cid(&tokens[index + 2]),
+                ) {
+                    if let Some(length) = end.checked_sub(start) {
+                        if first.checked_add(length).is_some() {
+                            for offset in 0..=length {
+                                map.insert(start + offset, first + offset);
+                            }
+                        }
+                    }
+                    index += 3;
+                } else {
+                    index += 1;
+                }
+            }
+        }
+        index += 1;
+    }
+    Some(map)
 }
 
 fn parse_type3_code_to_gid_map(doc: &LoDocument, font_dict: &LoDictionary) -> PdfCodeToGlyphMap {
@@ -4472,6 +4570,40 @@ endbfrange
             decode_with_to_unicode(&[1, 2, 3, 4], &parsed).as_deref(),
             Some("😀")
         );
+    }
+
+    #[test]
+    fn cid_cmap_remaps_widths_and_rejects_out_of_range_values() {
+        let mut doc = LoDocument::with_version("1.7");
+        let cmap = br#"2 begincidchar
+<0048> 3
+<0049> 1
+endcidchar
+3 begincidrange
+<0050> <0052> 7
+<0060> <005F> 2
+<0070> <0072> 65535
+endcidrange"#;
+        let encoding = doc.add_object(LoStream::new(dictionary! {}, cmap.to_vec()));
+        let descendant = doc.add_object(dictionary! {
+            "Subtype" => "CIDFontType0",
+            "DW" => 1000,
+            "W" => vec![1.into(), vec![500.into()].into(), 3.into(), vec![800.into()].into()],
+        });
+        let dict = dictionary! {
+            "Subtype" => "Type0",
+            "Encoding" => LoObject::Reference(encoding),
+            "DescendantFonts" => vec![LoObject::Reference(descendant)],
+        };
+        let map = parse_cid_encoding_map(&doc, &dict).expect("valid CID CMap");
+        assert_eq!(map.len(), 5);
+        assert_eq!(map.get(&0x48), Some(&3));
+        assert_eq!(map.get(&0x49), Some(&1));
+        assert_eq!(map.get(&0x52), Some(&9));
+        let metrics = parse_type0_font_metrics(&doc, &dict, &PdfToUnicodeMap::default());
+        assert_eq!(metrics.widths.get(&0x48), Some(&800.0));
+        assert_eq!(metrics.widths.get(&0x49), Some(&500.0));
+        assert_eq!(metrics.widths.get(&0x50), Some(&1000.0));
     }
 
     #[test]

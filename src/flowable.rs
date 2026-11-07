@@ -5306,6 +5306,17 @@ fn resolve_font_variant_name(
         crate::style::FontStyleMode::Italic | crate::style::FontStyleMode::Oblique(_)
     );
     let bold = weight >= 700;
+    if let Some(registry) = registry {
+        if let Some(font) = registry.resolve_family_variant(base, weight, italic) {
+            if registry
+                .resolve(base)
+                .is_some_and(|current| std::ptr::eq(current, font))
+            {
+                return base.clone();
+            }
+            return Arc::<str>::from(font.name.as_str());
+        }
+    }
     if !italic && !bold {
         return base.clone();
     }
@@ -14067,9 +14078,13 @@ impl TableCell {
         }
 
         for word in self.text.split_whitespace() {
-            max = max.max(minimum_unbreakable_text_width(word, &self.style, |text| {
-                self.measure_text_width(text)
-            }));
+            for segment in word.split_inclusive('-') {
+                max = max.max(minimum_unbreakable_text_width(
+                    segment,
+                    &self.style,
+                    |text| self.measure_text_width(text),
+                ));
+            }
         }
         if max == Pt::ZERO {
             max = self.measure_text_width(&self.text);
@@ -14139,7 +14154,20 @@ impl TableCell {
 
         let mut lines = Vec::new();
         let mut word_widths: HashMap<&str, Pt> = HashMap::new();
-        if self.preserve_whitespace {
+        if !self.preserve_whitespace && self.text.contains('-') {
+            // Use the same hard-hyphen opportunities for measurement and
+            // painting. The plain-cell fast path previously measured an entire
+            // invoice identifier as unbreakable, then split it by characters.
+            let paragraph = Paragraph::new(self.text.clone())
+                .with_style(self.style.clone())
+                .with_font_registry(self.font_registry.clone());
+            lines.extend(
+                paragraph
+                    .layout_lines(max_width)
+                    .iter()
+                    .map(|line| line.text.clone()),
+            );
+        } else if self.preserve_whitespace {
             let mut ascii_widths: [Option<Pt>; 128] = std::array::from_fn(|_| None);
             let mut non_ascii_widths: HashMap<char, Pt> = HashMap::new();
             for segment in self.text.split('\n') {
