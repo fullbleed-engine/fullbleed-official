@@ -66,13 +66,18 @@ def main():
     assert images == document.render_image_pages(renderer, dpi=96, a11y_mode="raise")
     reader = PdfReader(BytesIO(pdf))
     assert len(reader.pages) == 1
-    text = reader.pages[0].extract_text()
-    assert all(value in text for value in ("Project summary", "Maple & Finch", "Work", "Hours", "Design", "Review"))
+    # pypdf inserts line separators at some Type 3 synthetic-bold run
+    # boundaries. Check semantic content here and actual line text in PDFium.
+    text = " ".join(reader.pages[0].extract_text().split())
+    expected = ("Project summary", "Maple & Finch", "Work", "Hours", "Design", "Review")
     assert abs(float(reader.pages[0].mediabox.width) - 419.528) < .1
     (args.out / "summary.pdf").write_bytes(pdf)
     (args.out / "summary.png").write_bytes(images[0])
+    assert all(value in text for value in expected)
     with closing(pdfium.PdfDocument(pdf)) as independent:
         with closing(independent[0]) as page:
+            with closing(page.get_textpage()) as textpage:
+                assert all(value in textpage.get_text_range() for value in expected)
             with closing(page.render(scale=96 / 72)) as bitmap:
                 bitmap.to_pil().save(args.out / "summary-pdf.png")
 
