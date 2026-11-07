@@ -59,7 +59,8 @@ matching conformance.
 
 The current source selects registered static faces by the requested numeric
 `font-weight`, including 500 and 600, using CSS fallback ordering when an exact
-weight is unavailable. This fixes [issue #159](https://github.com/fullbleed-engine/fullbleed-official/issues/159);
+weight is unavailable. This addresses the static-weight portion of
+[issue #159](https://github.com/fullbleed-engine/fullbleed-official/issues/159);
 the published 2.5.51 package can still select the regular face for those weights.
 On that release, use explicit `@font-face` mappings to the registered PostScript
 names, as in the example above, with a separate mapping for each weight.
