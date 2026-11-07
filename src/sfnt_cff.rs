@@ -18,8 +18,8 @@ pub(crate) fn standalone_metrics(data: &[u8]) -> Option<(u16, u16)> {
             return Some(default);
         };
         if matrix.len() != 6
+            || matrix.iter().any(|value| !value.is_finite())
             || matrix[0] <= 0.0
-            || !matrix[0].is_finite()
             || (matrix[0] - matrix[3]).abs() > 1e-7
             || [1, 2, 4, 5].iter().any(|&i| matrix[i] != 0.0)
         {

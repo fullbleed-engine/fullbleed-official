@@ -5306,9 +5306,15 @@ fn resolve_font_variant_name(
         crate::style::FontStyleMode::Italic | crate::style::FontStyleMode::Oblique(_)
     );
     let bold = weight >= 700;
-    if let Some(font) =
-        registry.and_then(|registry| registry.resolve_family_variant(base, weight, italic))
+    if let Some(registry) = registry
+        && let Some(font) = registry.resolve_family_variant(base, weight, italic)
     {
+        if registry
+            .resolve(base)
+            .is_some_and(|current| std::ptr::eq(current, font))
+        {
+            return base.clone();
+        }
         return Arc::<str>::from(font.name.as_str());
     }
     if !italic && !bold {

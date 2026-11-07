@@ -209,6 +209,17 @@ jobs:
       - name: Smoke-test installed wheel
         run: python tools/smoke_installed_package.py --expected-version "${{ env.FULLBLEED_CI_VERSION }}" --json
 
+      - name: Verify reported font, alignment, and table regressions
+        run: python -I -m pytest --noconftest --import-mode=importlib tests/test_fullbleed_reported_font_and_table_regressions.py -q -ra --basetemp target/reported-feedback --junitxml target/reported-feedback/results.xml
+
+      - name: Retain reported rendering regressions
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reported-feedback-${{ runner.os }}
+          path: target/reported-feedback
+          if-no-files-found: warn
+
       - name: Verify native Standard 14 preview spacing
         run: python -I tools/smoke_base14_preview.py --out target/base14-preview
 
@@ -593,17 +604,6 @@ jobs:
 
       - name: Verify font family defaults and compiled previews
         run: python -I tools/smoke_font_families.py --out target/font-families
-
-      - name: Verify reported font, alignment, and table regressions
-        run: python -I -m pytest --noconftest --import-mode=importlib tests/test_fullbleed_reported_font_and_table_regressions.py -q -ra --basetemp target/reported-feedback --junitxml target/reported-feedback/results.xml
-
-      - name: Retain reported rendering regressions
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: reported-feedback-${{ runner.os }}
-          path: target/reported-feedback
-          if-no-files-found: warn
 
       - name: Verify border-image slices in native previews and independent PDF output
         run: python -I tools/smoke_border_image_slices.py --pdfium --out target/border-image-slices
