@@ -1,4 +1,4 @@
-# Registering regular and italic fonts
+# Registering font families and weights
 
 Register the font files your document uses with `PdfEngine(font_files=[...])`,
 `font_dirs=[...]`, or an `AssetBundle`. Fullbleed reads these assets directly;
@@ -54,6 +54,45 @@ compares embedded face names, extracted text, and native/PDFium previews against
 explicit-face controls for file, directory, bundle, fixed-template, and reflow
 rendering. This is a focused regression check, not a claim of complete CSS font
 matching conformance.
+
+## Numeric weights and variable fonts
+
+The current source selects registered static faces by the requested numeric
+`font-weight`, including 500 and 600, using CSS fallback ordering when an exact
+weight is unavailable. This fixes [issue #159](https://github.com/fullbleed-engine/fullbleed-official/issues/159);
+the published 2.5.51 package can still select the regular face for those weights.
+On that release, use explicit `@font-face` mappings to the registered PostScript
+names, as in the example above, with a separate mapping for each weight.
+
+Register every static face you need. For example, with Pretendard Regular,
+Medium, SemiBold, and Bold registered, source builds select those faces for
+`font-family: Pretendard` with weights 400, 500, 600, and 700 respectively.
+An explicit PostScript name selects that particular face instead of the family.
+
+A variable font file is different: Fullbleed currently uses its default-axis
+outlines. Setting `font-weight` does **not** instantiate its `wght` axis.
+Use the font publisher's static files, or prepare static instances before
+registering them. FontTools is an optional asset-preparation tool; it is not a
+Fullbleed runtime dependency:
+
+```python
+from fontTools.ttLib import TTFont
+from fontTools.varLib.instancer import instantiateVariableFont
+
+with TTFont("NotoSansKR[wght].ttf") as variable:
+    for weight in (400, 500, 600, 700):
+        instance = instantiateVariableFont(
+            variable, {"wght": weight},
+            inplace=False, static=True, updateFontNames=True,
+        )
+        instance.save(f"NotoSansKR-{weight}.ttf")
+        print(weight, instance["name"].getDebugName(6))
+```
+
+The printed PostScript names identify the generated faces for explicit
+`@font-face` mappings. Do not assume a file's name is also its internal font
+name. Use `font-synthesis: none` when checking that the chosen static outlines,
+rather than a synthesized style, provide the requested weight.
 
 ## Fonts in page headers and footers
 
