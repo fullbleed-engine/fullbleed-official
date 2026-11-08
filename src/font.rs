@@ -2338,6 +2338,44 @@ mod tests {
     }
 
     #[test]
+    fn standard_font_measurement_uses_painted_advances_and_substitutions() {
+        let registry = FontRegistry::new();
+        let size = crate::types::Pt::from_f32(12.0);
+        for (font, widths) in [
+            ("Helvetica", [944, 222, 278, 556]),
+            ("Times-Roman", [944, 278, 250, 500]),
+            ("Courier", [600, 600, 600, 600]),
+        ] {
+            let expected = widths
+                .into_iter()
+                .fold(crate::types::Pt::ZERO, |sum, width| {
+                    sum + size.mul_ratio(width, 1000)
+                });
+            assert_eq!(registry.measure_text_width(font, size, "Wi 1"), expected);
+            assert_eq!(
+                registry.measure_text_width(&font.to_lowercase(), size, "Wi 1"),
+                expected
+            );
+            assert_eq!(
+                registry.measure_text_width(font, size, "\u{2265} \u{2264} \u{6f22}"),
+                registry.measure_text_width(font, size, ">= <= ?")
+            );
+        }
+        let mut aliased = FontRegistry::new();
+        let name = aliased
+            .register_bytes(NOTO.to_vec(), Some("Helvetica.ttf"))
+            .unwrap();
+        assert_eq!(
+            aliased.measure_text_width("Helvetica", size, "Wi 1"),
+            aliased.measure_text_width(&name, size, "Wi 1")
+        );
+        assert_ne!(
+            aliased.measure_text_width("Helvetica", size, "Wi 1"),
+            registry.measure_text_width("Helvetica", size, "Wi 1")
+        );
+    }
+
+    #[test]
     fn basic_latin_measurement_preserves_native_font_units() {
         let mut registry = FontRegistry::new();
         let registered = registry
