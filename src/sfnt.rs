@@ -119,10 +119,22 @@ struct TableRecord<'a> {
 #[derive(Clone, Debug)]
 pub(crate) struct Face<'a> {
     tables: Vec<TableRecord<'a>>,
+    standalone_cff: Option<(u16, u16)>,
 }
 
 impl<'a> Face<'a> {
     pub(crate) fn parse(data: &'a [u8], index: u32) -> Result<Self, ParseError> {
+        if index == 0 && data.first() == Some(&1) {
+            let metrics = crate::sfnt_cff::standalone_metrics(data)
+                .ok_or(ParseError::InvalidRequiredTable)?;
+            return Ok(Self {
+                tables: vec![TableRecord {
+                    tag: *b"CFF ",
+                    data,
+                }],
+                standalone_cff: Some(metrics),
+            });
+        }
         let sfnt_offset = collection_face_offset(data, index)?;
         let signature = read_tag(data, sfnt_offset).ok_or(ParseError::InvalidSignature)?;
         if !matches!(
@@ -166,7 +178,10 @@ impl<'a> Face<'a> {
             });
         }
 
-        let face = Self { tables };
+        let face = Self {
+            tables,
+            standalone_cff: None,
+        };
         face.validate_required_tables()?;
         Ok(face)
     }
@@ -202,12 +217,18 @@ impl<'a> Face<'a> {
     }
 
     pub(crate) fn units_per_em(&self) -> u16 {
+        if let Some((units, _)) = self.standalone_cff {
+            return units;
+        }
         self.table(*b"head")
             .and_then(|table| read_u16(table, 18))
             .unwrap_or(1000)
     }
 
     pub(crate) fn number_of_glyphs(&self) -> u16 {
+        if let Some((_, count)) = self.standalone_cff {
+            return count;
+        }
         self.table(*b"maxp")
             .and_then(|table| read_u16(table, 4))
             .unwrap_or(0)

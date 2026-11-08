@@ -5187,6 +5187,17 @@ fn resolve_font_variant_name(
         crate::style::FontStyleMode::Italic | crate::style::FontStyleMode::Oblique(_)
     );
     let bold = weight >= 700;
+    if let Some(registry) = registry {
+        if let Some(font) = registry.resolve_family_variant(base, weight, italic) {
+            if registry
+                .resolve(base)
+                .is_some_and(|current| std::ptr::eq(current, font))
+            {
+                return base.clone();
+            }
+            return Arc::<str>::from(font.name.as_str());
+        }
+    }
     if !italic && !bold {
         return base.clone();
     }
@@ -6985,7 +6996,12 @@ impl Paragraph {
 
     fn measure_initial_letter_width(&self, style: &TextStyle, text: &str) -> Pt {
         let Some(registry) = self.font_registry.as_deref() else {
-            return style.font_size.mul_ratio(3, 5);
+            let (primary, _) = resolve_font_stack(None, style);
+            return ceil_to_css_pixel(crate::font::measure_unregistered_text_width(
+                &primary,
+                style.font_size,
+                text,
+            ));
         };
         let Some(font_name) = self.text_style_primary_font(style) else {
             return style.font_size.mul_ratio(3, 5);
@@ -7043,34 +7059,6 @@ impl Paragraph {
             }
             return value;
         }
-        if self.measure_inline_word {
-            let (primary, _, _) =
-                resolve_font_stack_with_ranges(self.font_registry.as_deref(), &self.style);
-            let registered = self
-                .font_registry
-                .as_deref()
-                .is_some_and(|registry| registry.resolve(&primary).is_some());
-            if !registered {
-                // A whole built-in-font string paints with the PDF font's real
-                // advances even when legacy paragraph measurement is heuristic.
-                // Separate words must use those same advances, otherwise each
-                // heuristic surplus becomes a visibly oversized inter-word gap.
-                if let Some(font) = crate::base14_metrics::font(&primary) {
-                    let base = text.chars().try_fold(Pt::ZERO, |sum, ch| {
-                        font.glyph_by_unicode(ch).map(|glyph| {
-                            sum + self.style.font_size.mul_ratio(i32::from(glyph.width), 1000)
-                        })
-                    });
-                    if let Some(base) = base {
-                        let value = text_width_with_spacing(base, &self.style, text);
-                        if let Ok(mut cache) = self.width_cache.lock() {
-                            cache.insert(text, value);
-                        }
-                        return value;
-                    }
-                }
-            }
-        }
         if let Some(registry) = &self.font_registry {
             let (primary, fallbacks, unicode_ranges) =
                 resolve_font_stack_with_ranges(Some(registry), &self.style);
@@ -7110,9 +7098,9 @@ impl Paragraph {
             }
             value
         } else {
-            let char_width = (self.style.font_size * 0.6).max(Pt::from_f32(1.0));
-            let count = text.chars().count();
-            let base = char_width * (count as i32);
+            let (primary, _) = resolve_font_stack(None, &self.style);
+            let base =
+                crate::font::measure_unregistered_text_width(&primary, self.style.font_size, text);
             let value = text_width_with_spacing(base, &self.style, text);
             if let Ok(mut cache) = self.width_cache.lock() {
                 cache.insert(text, value);
@@ -13644,9 +13632,9 @@ impl TableCell {
             }
             value
         } else {
-            let char_width = (self.style.font_size * 0.6).max(Pt::from_f32(1.0));
-            let count = text.chars().count();
-            let base = char_width * (count as i32);
+            let (primary, _) = resolve_font_stack(None, &self.style);
+            let base =
+                crate::font::measure_unregistered_text_width(&primary, self.style.font_size, text);
             let value = text_width_with_spacing(base, &self.style, text);
             if let Ok(mut cache) = self.width_cache.lock() {
                 cache.insert(text, value);
@@ -13694,9 +13682,13 @@ impl TableCell {
         }
 
         for word in self.text.split_whitespace() {
-            max = max.max(minimum_unbreakable_text_width(word, &self.style, |text| {
-                self.measure_text_width(text)
-            }));
+            for segment in word.split_inclusive('-') {
+                max = max.max(minimum_unbreakable_text_width(
+                    segment,
+                    &self.style,
+                    |text| self.measure_text_width(text),
+                ));
+            }
         }
         if max == Pt::ZERO {
             max = self.measure_text_width(&self.text);
@@ -13766,7 +13758,20 @@ impl TableCell {
 
         let mut lines = Vec::new();
         let mut word_widths: HashMap<&str, Pt> = HashMap::new();
-        if self.preserve_whitespace {
+        if !self.preserve_whitespace && self.text.contains('-') {
+            // Use the same hard-hyphen opportunities for measurement and
+            // painting. The plain-cell fast path previously measured an entire
+            // invoice identifier as unbreakable, then split it by characters.
+            let paragraph = Paragraph::new(self.text.clone())
+                .with_style(self.style.clone())
+                .with_font_registry(self.font_registry.clone());
+            lines.extend(
+                paragraph
+                    .layout_lines(max_width)
+                    .iter()
+                    .map(|line| line.text.clone()),
+            );
+        } else if self.preserve_whitespace {
             let mut ascii_widths: [Option<Pt>; 128] = std::array::from_fn(|_| None);
             let mut non_ascii_widths: HashMap<char, Pt> = HashMap::new();
             for segment in self.text.split('\n') {
@@ -19672,7 +19677,7 @@ impl InlineBlockLayoutFlowable {
                         .windows(2)
                         .map(|items| items[1].x_off - items[0].x_off - items[0].size.width)
                         .collect();
-                    let mut cursor = text_align_offset(self.bidi_align, avail_width, line_width);
+                    let mut cursor = Pt::ZERO;
                     for (position, index) in order.iter().copied().enumerate() {
                         line_items[index].x_off = cursor;
                         cursor += line_items[index].size.width;
@@ -19681,6 +19686,12 @@ impl InlineBlockLayoutFlowable {
                         }
                     }
                 }
+            }
+            // Apply physical alignment once to both ordinary LTR rows and
+            // visually reordered bidi rows, as on the main branch.
+            let align_offset = text_align_offset(self.bidi_align, avail_width, line_width);
+            for item in line_items.iter_mut() {
+                item.x_off += align_offset;
             }
             let items = std::mem::take(line_items);
             lines.push(InlineLineLayout {

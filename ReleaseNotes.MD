@@ -1,3 +1,23 @@
+# Fullbleed Release Notes - 2.5.52
+
+Grid items spanning multiple columns now receive their full resolved width,
+including unequal tracks and gaps. Registered static font families select
+numeric weights such as Medium and SemiBold, and block `strong`/`b` elements
+receive the expected default bold weight.
+
+Wrapped table cells inherit text alignment correctly. Built-in Standard 14
+fonts use their painted glyph advances for layout, which can change line breaks
+in documents that previously relied on estimated character widths.
+
+CFF OpenType fonts retain the correct outline scale. Finalized-PDF previews
+follow the embedded CFF character mapping and advances. Invoice identifiers
+can wrap at hard hyphens without pushing amount columns outside the page.
+
+This stable patch backports the fixes from #161 and #162. Native variable-font
+axis instancing remains unsupported; the [font guide](docs/font-registration.md)
+documents preparing static instances. Component authoring retains its existing
+alpha status. See the [verification runbook](docs/release/2.5.52-runbook.md).
+
 # Fullbleed Release Notes - 2.5.51
 
 Invoice and statement starters now render editable JSON into finished PDFs,

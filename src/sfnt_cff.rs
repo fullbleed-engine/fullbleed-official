@@ -6,6 +6,63 @@ use crate::sfnt_outline::OutlineBuilder;
 const MAX_ARGUMENT_STACK: usize = 48;
 const MAX_SUBROUTINE_DEPTH: usize = 10;
 
+/// Metrics needed to rasterize a standalone PDF CFF program. Advances come
+/// from the PDF's /W array; the CFF matrix controls outline scale only.
+pub(crate) fn standalone_metrics(data: &[u8]) -> Option<(u16, u16)> {
+    let font = CffFont::parse(data)?;
+    let (_, cursor) = CffIndex::parse(data, usize::from(*data.get(2)?))?;
+    let (dicts, _) = CffIndex::parse(data, cursor)?;
+    let top = Dict::parse(dicts.get(0)?)?;
+    let scale = |dict: &Dict, default: f32| -> Option<f32> {
+        let Some(matrix) = dict.operands(0x0c07) else {
+            return Some(default);
+        };
+        if matrix.len() != 6
+            || matrix.iter().any(|value| !value.is_finite())
+            || matrix[0] <= 0.0
+            || (matrix[0] - matrix[3]).abs() > 1e-7
+            || [1, 2, 4, 5].iter().any(|&i| matrix[i] != 0.0)
+        {
+            return None;
+        }
+        Some(matrix[0])
+    };
+    let mut matrix_scale = scale(&top, 0.001)?;
+    if let Some(offset) = top.offset(0x0c24) {
+        let (dicts, _) = CffIndex::parse(data, offset)?;
+        let mut common = None;
+        for dict in dicts.objects {
+            let value = scale(&Dict::parse(dict)?, 1.0)?;
+            if common.is_some_and(|previous: f32| (previous - value).abs() > 1e-7) {
+                return None;
+            }
+            common = Some(value);
+        }
+        matrix_scale *= common?;
+    }
+    let units_per_em = (1.0 / matrix_scale).round();
+    if !(16.0..=16_384.0).contains(&units_per_em) {
+        return None;
+    }
+    Some((
+        units_per_em as u16,
+        u16::try_from(font.char_strings.len()).ok()?,
+    ))
+}
+
+/// A CID-keyed CFF charset maps glyph indices to CIDs, not Unicode scalars.
+pub(crate) fn cid_to_glyph_map(face: &Face<'_>) -> Option<Vec<(u16, u16)>> {
+    let font = CffFont::parse(face.table(*b"CFF ")?)?;
+    font.fd_by_glyph.as_ref()?;
+    Some(
+        font.charset
+            .iter()
+            .enumerate()
+            .map(|(glyph, &cid)| (cid, glyph as u16))
+            .collect(),
+    )
+}
+
 #[derive(Clone, Debug)]
 struct CffIndex<'a> {
     objects: Vec<&'a [u8]>,

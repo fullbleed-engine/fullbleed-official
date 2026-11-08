@@ -34583,6 +34583,7 @@ fn default_ua_css() -> &'static str {
     h5 { font-size: 0.83em; }
     h6 { font-size: 0.67em; }
     h1, h2, h3, h4, h5, h6 { font-weight: bold; }
+    strong, b { font-weight: bolder; }
     pre { white-space: pre; }
     code, kbd, samp, tt { white-space: pre; }
     span, a, em, strong, i, b, u, small, label, bdi, bdo { display: inline; }

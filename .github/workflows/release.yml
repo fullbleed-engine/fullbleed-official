@@ -130,13 +130,24 @@ jobs:
         run: python tools/check_release_worktree.py --json
 
       - name: Install Python test tools
-        run: python -m pip install pytest jsonschema pypdf==6.19.0 pypdfium2==5.14.0 pillow==12.3.0
+        run: python -m pip install pytest jsonschema pypdf==6.19.0 pypdfium2==5.14.0 pillow==12.3.0 fonttools==4.65.0
 
       - name: Build and install extension from release source
         shell: bash
         run: |
           python build_backend/fullbleed_build_backend.py wheel --out target/validate-wheel
           python -m pip install --force-reinstall target/validate-wheel/*.whl
+
+      - name: Verify reported grid, font, and invoice regressions
+        run: python -I -m pytest --noconftest --import-mode=importlib tests/test_fullbleed_grid_column_spans.py tests/test_fullbleed_reported_font_and_table_regressions.py -q -ra --basetemp target/reported-feedback --junitxml target/reported-feedback/results.xml
+
+      - name: Retain reported regression PDFs and previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reported-feedback-release
+          path: target/reported-feedback/
+          if-no-files-found: warn
 
       - name: Verify agent artifacts match the release wheel
         run: python tools/generate_agent_contract.py --python python --check --json

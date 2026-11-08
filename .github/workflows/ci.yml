@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.51"
+  FULLBLEED_CI_VERSION: "2.5.52"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -189,6 +189,20 @@ jobs:
         shell: bash
         run: |
           python -m pip install --force-reinstall target/wheels/fullbleed-*.whl
+
+      - name: Install independent PDF test tools
+        run: python -m pip install pypdf==6.19.0 pypdfium2==5.14.0 fonttools==4.65.0 pillow==12.3.0
+
+      - name: Verify reported grid, font, and invoice regressions
+        run: python -I -m pytest --noconftest --import-mode=importlib tests/test_fullbleed_grid_column_spans.py tests/test_fullbleed_reported_font_and_table_regressions.py -q -ra --basetemp target/reported-feedback --junitxml target/reported-feedback/results.xml
+
+      - name: Retain reported regression PDFs and previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reported-feedback-${{ runner.os }}
+          path: target/reported-feedback/
+          if-no-files-found: warn
 
       - name: Smoke-test installed wheel
         run: python tools/smoke_installed_package.py --expected-version "${{ env.FULLBLEED_CI_VERSION }}" --json

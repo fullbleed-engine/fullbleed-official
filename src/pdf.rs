@@ -2536,7 +2536,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         let program = truetype_subset
                             .as_ref()
                             .map(|value| value.data.as_slice())
-                            .or_else(|| cff_subset.as_ref().map(|value| value.data.as_slice()))
+                            .or_else(|| cff_subset.as_ref().map(|value| value.pdf_data.as_slice()))
                             .unwrap_or(font.data.as_slice());
                         let compressed = truetype_subset
                             .as_ref()
@@ -5018,7 +5018,11 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
     ) -> io::Result<()> {
         let mut dict = format!("/Length1 {}", data.len());
         if matches!(kind, FontProgramKind::OpenTypeCff) {
-            dict.push_str(" /Subtype /OpenType");
+            dict.push_str(if data.starts_with(b"OTTO") {
+                " /Subtype /OpenType"
+            } else {
+                " /Subtype /CIDFontType0C"
+            });
         }
         self.font_program_source_bytes = self.font_program_source_bytes.saturating_add(source_len);
         self.font_program_subset_bytes = self.font_program_subset_bytes.saturating_add(data.len());

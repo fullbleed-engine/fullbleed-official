@@ -1912,7 +1912,7 @@ fn anonymous_table_cell_run_flowables(
                 font_registry.clone(),
                 false,
             );
-            let mut flowables = layout_table_cell_children(items);
+            let mut flowables = layout_table_cell_children(items, &cell_style);
             if flowables.is_empty() {
                 None
             } else if flowables.len() == 1 {
@@ -12579,18 +12579,21 @@ fn layout_children_to_flowables(
     )
 }
 
-fn layout_table_cell_children(items: Vec<LayoutItem>) -> Vec<Box<dyn Flowable>> {
+fn layout_table_cell_children(
+    items: Vec<LayoutItem>,
+    style: &ComputedStyle,
+) -> Vec<Box<dyn Flowable>> {
     // A wrapped text run in a cell participates by its first line. Treating
     // it as an atomic inline with a last-line baseline lifts earlier lines
     // above the row once the table can shrink to the text's minimum width.
     layout_children_to_flowables_with_options(
         items,
         None,
-        false,
+        no_wrap(style),
         true,
         true,
-        DirectionMode::Ltr,
-        TextAlign::Left,
+        style.direction,
+        text_align_from_style(style),
     )
 }
 
@@ -14985,7 +14988,7 @@ fn table_row_flowable_from_cells(
             perf,
             doc_id,
         );
-        let mut cell_flowables = layout_children_to_flowables(cell_items, None);
+        let mut cell_flowables = layout_table_cell_children(cell_items, &cell_style);
         let cell_flowable: Box<dyn Flowable> = if cell_flowables.is_empty() {
             Box::new(
                 ContainerFlowable::new_pt(
@@ -16781,7 +16784,7 @@ fn table_flowable(
                     cell_items
                 };
 
-                let mut cell_flowables = layout_table_cell_children(cell_items);
+                let mut cell_flowables = layout_table_cell_children(cell_items, &cell_style);
                 cell_content = if cell_flowables.is_empty() {
                     None
                 } else if cell_flowables.len() == 1 {
